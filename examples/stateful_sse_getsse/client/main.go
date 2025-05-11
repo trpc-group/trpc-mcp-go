@@ -9,15 +9,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // handleNotification processes server notifications.
-func handleNotification(notification *schema.Notification) error {
-	paramsMap := notification.Params
+func handleNotification(notification *mcp.JSONRPCNotification) error {
+	// 使用 AdditionalFields 访问参数
+	paramsMap := notification.Params.AdditionalFields
 	level, _ := paramsMap["level"].(string)
 
 	// Check if data is map[string]interface{}
@@ -75,8 +76,9 @@ func handleNotification(notification *schema.Notification) error {
 }
 
 // handleProgressNotification processes progress notifications.
-func handleProgressNotification(notification *schema.Notification) error {
-	paramsMap := notification.Params
+func handleProgressNotification(notification *mcp.JSONRPCNotification) error {
+	// 使用 AdditionalFields 访问参数
+	paramsMap := notification.Params.AdditionalFields
 
 	// Extract progress value and message
 	progress, _ := paramsMap["progress"].(float64)
@@ -127,7 +129,7 @@ func main() {
 	defer cancel()
 
 	// Create client info
-	clientInfo := schema.Implementation{
+	clientInfo := mcp.Implementation{
 		Name:    "Stateful-SSE-GETSSE-Client",
 		Version: "1.0.0",
 	}
@@ -168,13 +170,13 @@ func main() {
 
 	// Get available tools list
 	log.Info("Listing tools...")
-	tools, err := mcpClient.ListTools(ctx)
+	toolsResult, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
 
-	log.Infof("Server provides %d tools", len(tools))
-	for _, tool := range tools {
+	log.Infof("Server provides %d tools", len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
 		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
@@ -189,8 +191,8 @@ func main() {
 
 	// Display call result
 	log.Info("Greeting tool call result:")
-	for _, content := range callResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range callResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		} else {
 			log.Infof("- Other content type: %+v", content)
@@ -208,8 +210,8 @@ func main() {
 
 	// Display counter result
 	log.Info("Counter result (first call):")
-	for _, content := range counterResult1 {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range counterResult1.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}
@@ -226,8 +228,8 @@ func main() {
 
 	// Display chat room join result
 	log.Info("Chat room join result:")
-	for _, content := range chatJoinResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range chatJoinResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}
@@ -243,8 +245,8 @@ func main() {
 
 	// Display chat message send result
 	log.Info("Chat message send result:")
-	for _, content := range chatSendResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range chatSendResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}
@@ -283,8 +285,8 @@ func main() {
 
 	// Display call result
 	log.Info("Notification tool call result:")
-	for _, content := range notifyResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range notifyResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}

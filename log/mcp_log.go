@@ -1,43 +1,43 @@
 package log
 
 import (
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // ToMCPLevel converts internal log level to MCP protocol log level.
-func ToMCPLevel(level Level) schema.LoggingLevel {
+func ToMCPLevel(level Level) mcp.LoggingLevel {
 	switch level {
 	case DebugLevel:
-		return schema.LoggingLevelDebug
+		return mcp.LoggingLevelDebug
 	case InfoLevel:
-		return schema.LoggingLevelInfo
+		return mcp.LoggingLevelInfo
 	case NoticeLevel:
-		return schema.LoggingLevelNotice
+		return mcp.LoggingLevelNotice
 	case WarningLevel:
-		return schema.LoggingLevelWarning
+		return mcp.LoggingLevelWarning
 	case ErrorLevel:
-		return schema.LoggingLevelError
+		return mcp.LoggingLevelError
 	case FatalLevel:
-		return schema.LoggingLevelCritical // Using Critical as Fatal mapping for MCP protocol compatibility
+		return mcp.LoggingLevelCritical // Using Critical as Fatal mapping for MCP protocol compatibility
 	default:
-		return schema.LoggingLevelInfo
+		return mcp.LoggingLevelInfo
 	}
 }
 
 // FromMCPLevel converts MCP protocol log level to internal log level.
-func FromMCPLevel(level schema.LoggingLevel) Level {
+func FromMCPLevel(level mcp.LoggingLevel) Level {
 	switch level {
-	case schema.LoggingLevelDebug:
+	case mcp.LoggingLevelDebug:
 		return DebugLevel
-	case schema.LoggingLevelInfo:
+	case mcp.LoggingLevelInfo:
 		return InfoLevel
-	case schema.LoggingLevelNotice:
+	case mcp.LoggingLevelNotice:
 		return NoticeLevel
-	case schema.LoggingLevelWarning:
+	case mcp.LoggingLevelWarning:
 		return WarningLevel
-	case schema.LoggingLevelError:
+	case mcp.LoggingLevelError:
 		return ErrorLevel
-	case schema.LoggingLevelCritical, schema.LoggingLevelAlert, schema.LoggingLevelEmergency:
+	case mcp.LoggingLevelCritical, mcp.LoggingLevelAlert, mcp.LoggingLevelEmergency:
 		return FatalLevel // All high-level logs map to Fatal
 	default:
 		return InfoLevel
@@ -45,10 +45,10 @@ func FromMCPLevel(level schema.LoggingLevel) Level {
 }
 
 // CreateLogNotification creates an MCP log notification.
-func CreateLogNotification(level Level, data interface{}, logger string) schema.LoggingMessageNotification {
-	return schema.LoggingMessageNotification{
+func CreateLogNotification(level Level, data interface{}, logger string) mcp.LoggingMessageNotification {
+	return mcp.LoggingMessageNotification{
 		Method: "notifications/message",
-		Params: schema.LoggingMessageParams{
+		Params: mcp.LoggingMessageParams{
 			Level:  ToMCPLevel(level),
 			Data:   data,
 			Logger: logger,

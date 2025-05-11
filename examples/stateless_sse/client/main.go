@@ -4,27 +4,27 @@ import (
 	"context"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // handleNotifications is a simple notification handler example.
-func handleNotifications(notification *schema.Notification) error {
+func handleNotifications(notification *mcp.JSONRPCNotification) error {
 	log.Infof("Client received notification: Method=%s", notification.Method)
 
 	// Handle different types of notifications.
 	switch notification.Method {
 	case "notifications/message":
-		level, _ := notification.Params["level"].(string)
-		data, _ := notification.Params["data"].(string)
+		level, _ := notification.Params.AdditionalFields["level"].(string)
+		data, _ := notification.Params.AdditionalFields["data"].(string)
 		log.Infof("Received log message: [%s] %s", level, data)
 	case "notifications/progress":
-		progress, _ := notification.Params["progress"].(float64)
-		message, _ := notification.Params["message"].(string)
+		progress, _ := notification.Params.AdditionalFields["progress"].(float64)
+		message, _ := notification.Params.AdditionalFields["message"].(string)
 		log.Infof("Received progress update: %.0f%% - %s", progress*100, message)
 	default:
-		log.Infof("Received other type of notification: %+v", notification.Params)
+		log.Infof("Received other type of notification: %+v", notification.Params.AdditionalFields)
 	}
 
 	return nil
@@ -40,7 +40,7 @@ func main() {
 	defer cancel()
 
 	// Create client info.
-	clientInfo := schema.Implementation{
+	clientInfo := mcp.Implementation{
 		Name:    "Stateless-SSE-Client",
 		Version: "1.0.0",
 	}
@@ -78,8 +78,8 @@ func main() {
 		return
 	}
 
-	log.Infof("Server provides %d tools", len(tools))
-	for _, tool := range tools {
+	log.Infof("Server provides %d tools", len(tools.Tools))
+	for _, tool := range tools.Tools {
 		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
@@ -95,8 +95,8 @@ func main() {
 
 	// Show call result.
 	log.Info("Call result:")
-	for _, content := range callResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range callResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		} else {
 			log.Infof("- Other type content: %+v", content)
@@ -116,8 +116,8 @@ func main() {
 
 	// Show multi-stage call result.
 	log.Info("Multi-stage greeting result:")
-	for _, content := range multiStageResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range multiStageResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		} else {
 			log.Infof("- Other type content: %+v", content)

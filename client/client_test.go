@@ -5,21 +5,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 // MockTool is a mock tool for testing
 type MockTool struct {
-	*schema.Tool
+	*mcp.Tool
 }
 
 // NewMockTool creates a new mock tool
-func NewMockTool() *schema.Tool {
-	return schema.NewTool("test-tool",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func NewMockTool() *mcp.Tool {
+	return mcp.NewTool("test-tool",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name := "World"
 			if nameArg, ok := req.Params.Arguments["name"]; ok {
 				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
@@ -27,11 +27,11 @@ func NewMockTool() *schema.Tool {
 				}
 			}
 
-			return schema.NewTextResult("Hello, " + name + "!"), nil
+			return mcp.NewTextResult("Hello, " + name + "!"), nil
 		},
-		schema.WithDescription("Test Tool"),
-		schema.WithString("name",
-			schema.Description("Name to greet"),
+		mcp.WithDescription("Test Tool"),
+		mcp.WithString("name",
+			mcp.Description("Name to greet"),
 		),
 	)
 }
@@ -39,7 +39,7 @@ func NewMockTool() *schema.Tool {
 // Create test environment including server and client
 func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 	// Create MCP server
-	mcpServer := server.NewServer("", schema.Implementation{
+	mcpServer := server.NewServer("", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}, server.WithPathPrefix("/mcp"))
@@ -53,7 +53,7 @@ func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 	httpServer := httptest.NewServer(mcpServer.HTTPHandler())
 
 	// Create client
-	client, err := NewClient(httpServer.URL+"/mcp", schema.Implementation{
+	client, err := NewClient(httpServer.URL+"/mcp", mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
 	})
@@ -70,7 +70,7 @@ func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 
 func TestNewClient(t *testing.T) {
 	// Test client creation
-	client, err := NewClient("http://localhost:3000/mcp", schema.Implementation{
+	client, err := NewClient("http://localhost:3000/mcp", mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
 	})
@@ -80,20 +80,20 @@ func TestNewClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.Equal(t, "Test-Client", client.clientInfo.Name)
 	assert.Equal(t, "1.0.0", client.clientInfo.Version)
-	assert.Equal(t, schema.ProtocolVersion_2024_11_05, client.protocolVersion) // Default version
+	assert.Equal(t, mcp.ProtocolVersion_2024_11_05, client.protocolVersion) // Default version
 	assert.False(t, client.initialized)
 }
 
 func TestClient_WithProtocolVersion(t *testing.T) {
 	// Test creating client with custom protocol version
-	client, err := NewClient("http://localhost:3000/mcp", schema.Implementation{
+	client, err := NewClient("http://localhost:3000/mcp", mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
-	}, WithProtocolVersion(schema.ProtocolVersion_2024_11_05))
+	}, WithProtocolVersion(mcp.ProtocolVersion_2024_11_05))
 
 	// Verify protocol version
 	assert.NoError(t, err)
-	assert.Equal(t, schema.ProtocolVersion_2024_11_05, client.protocolVersion)
+	assert.Equal(t, mcp.ProtocolVersion_2024_11_05, client.protocolVersion)
 }
 
 func TestClient_Initialize(t *testing.T) {
@@ -110,7 +110,7 @@ func TestClient_Initialize(t *testing.T) {
 	assert.NotNil(t, resp)
 	assert.Equal(t, "Test-Server", resp.ServerInfo.Name)
 	assert.Equal(t, "1.0.0", resp.ServerInfo.Version)
-	assert.Equal(t, schema.ProtocolVersion_2024_11_05, resp.ProtocolVersion)
+	assert.Equal(t, mcp.ProtocolVersion_2024_11_05, resp.ProtocolVersion)
 	assert.NotNil(t, resp.Capabilities)
 
 	// Verify client state
@@ -129,13 +129,13 @@ func TestClient_ListTools(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test listing tools
-	tools, err := client.ListTools(ctx)
+	toolsResult, err := client.ListTools(ctx)
 
 	// Verify results
 	assert.NoError(t, err)
-	assert.Len(t, tools, 1)
-	assert.Equal(t, "test-tool", tools[0].Name)
-	assert.Equal(t, "Test Tool", tools[0].Description)
+	assert.Len(t, toolsResult.Tools, 1)
+	assert.Equal(t, "test-tool", toolsResult.Tools[0].Name)
+	assert.Equal(t, "Test Tool", toolsResult.Tools[0].Description)
 }
 
 func TestClient_CallTool(t *testing.T) {
@@ -149,16 +149,16 @@ func TestClient_CallTool(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test calling tool
-	content, err := client.CallTool(ctx, "test-tool", map[string]interface{}{
+	toolResult, err := client.CallTool(ctx, "test-tool", map[string]interface{}{
 		"name": "Test User",
 	})
 
 	// Verify results
 	assert.NoError(t, err)
-	assert.Len(t, content, 1)
+	assert.Len(t, toolResult.Content, 1)
 
 	// Use type assertion to convert ToolContent interface to TextContent type
-	textContent, ok := content[0].(schema.TextContent)
+	textContent, ok := toolResult.Content[0].(mcp.TextContent)
 	assert.True(t, ok, "Content should be of TextContent type")
 	assert.Equal(t, "text", textContent.Type)
 	assert.Equal(t, "Hello, Test User!", textContent.Text)

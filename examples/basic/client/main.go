@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 func main() {
@@ -17,10 +17,10 @@ func main() {
 	ctx := context.Background()
 
 	// Create client.
-	mcpClient, err := client.NewClient("http://localhost:3000/mcp", schema.Implementation{
+	mcpClient, err := client.NewClient("http://localhost:3000/mcp", mcp.Implementation{
 		Name:    "MCP-Go-Client",
 		Version: "1.0.0",
-	}, client.WithProtocolVersion(schema.ProtocolVersion_2024_11_05)) // Specify protocol version explicitly.
+	}, client.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05)) // Specify protocol version explicitly.
 	if err != nil {
 		log.Errorf("Failed to create client: %v", err)
 		os.Exit(1)
@@ -49,7 +49,8 @@ func main() {
 
 	// List tools.
 	log.Info("===== List available tools =====")
-	tools, err := mcpClient.ListTools(ctx)
+	listToolsResp, err := mcpClient.ListTools(ctx)
+	tools := listToolsResp.Tools
 	if err != nil {
 		log.Error("Failed to list tools: %v", err)
 	} else {
@@ -65,19 +66,18 @@ func main() {
 		// Call tool (if any).
 		if len(tools) > 0 {
 			log.Info("===== Call tool: %s =====", tools[0].Name)
-			content, err := mcpClient.CallTool(ctx, tools[0].Name, map[string]interface{}{
+			callToolResp, err := mcpClient.CallTool(ctx, tools[0].Name, map[string]interface{}{
 				"name": "MCP User",
 			})
 			if err != nil {
 				log.Errorf("Failed to call tool: %v", err)
 			} else {
+				content := callToolResp.Content
 				log.Infof("Tool result:")
 				for _, item := range content {
 					// Type assertion for different content types.
-					if textContent, ok := item.(schema.TextContent); ok {
+					if textContent, ok := item.(mcp.TextContent); ok {
 						log.Infof("  %s", textContent.Text)
-					} else {
-						log.Infof("  [%s type content]", item.GetType())
 					}
 				}
 			}
@@ -86,12 +86,12 @@ func main() {
 
 	// List prompts.
 	log.Info("===== List prompts =====")
-	prompts, err := mcpClient.ListPrompts(ctx)
+	promptsResult, err := mcpClient.ListPrompts(ctx)
 	if err != nil {
 		log.Errorf("Failed to list prompts: %v", err)
 	} else {
-		log.Infof("Found %d prompts:", len(prompts))
-		for _, prompt := range prompts {
+		log.Infof("Found %d prompts:", len(promptsResult.Prompts))
+		for _, prompt := range promptsResult.Prompts {
 			log.Info("- %s: %s", prompt.Name, prompt.Description)
 			if len(prompt.Arguments) > 0 {
 				log.Infof("  Arguments:")
@@ -106,18 +106,18 @@ func main() {
 		}
 
 		// Get the first prompt (if any).
-		if len(prompts) > 0 {
+		if len(promptsResult.Prompts) > 0 {
 			// Create a parameter map.
 			arguments := make(map[string]string)
-			for _, arg := range prompts[0].Arguments {
+			for _, arg := range promptsResult.Prompts[0].Arguments {
 				if arg.Required {
 					// Provide an example value for required parameters.
 					arguments[arg.Name] = "example value"
 				}
 			}
 
-			log.Infof("===== Get prompt: %s =====", prompts[0].Name)
-			promptContent, err := mcpClient.GetPrompt(ctx, prompts[0].Name, arguments)
+			log.Infof("===== Get prompt: %s =====", promptsResult.Prompts[0].Name)
+			promptContent, err := mcpClient.GetPrompt(ctx, promptsResult.Prompts[0].Name, arguments)
 			if err != nil {
 				log.Errorf("Failed to get prompt: %v", err)
 			} else {
@@ -128,16 +128,14 @@ func main() {
 
 				for i, msg := range promptContent.Messages {
 					switch content := msg.Content.(type) {
-					case map[string]interface{}:
-						// Handle complex content (e.g., images, audio, etc.).
-						if typeStr, ok := content["type"].(string); ok {
-							log.Infof("[%d] %s message (type: %s)", i, msg.Role, typeStr)
-						} else {
-							log.Infof("[%d] %s message (complex content)", i, msg.Role)
-						}
-					case string:
-						// Handle text content.
-						log.Infof("[%d] %s message: %s", i, msg.Role, truncateString(content, 50))
+					case mcp.TextContent:
+						log.Infof("[%d] %s message: %s", i, msg.Role, truncateString(content.Text, 50))
+					case mcp.ImageContent:
+						log.Infof("[%d] %s message (image)", i, msg.Role)
+					case mcp.AudioContent:
+						log.Infof("[%d] %s message (audio)", i, msg.Role)
+					case mcp.EmbeddedResource:
+						log.Infof("[%d] %s message (embedded resource)", i, msg.Role)
 					default:
 						log.Infof("[%d] %s message (unknown content type)", i, msg.Role)
 					}
@@ -148,29 +146,29 @@ func main() {
 
 	// List resources.
 	log.Infof("===== List resources =====")
-	resources, err := mcpClient.ListResources(ctx)
+	resourcesResult, err := mcpClient.ListResources(ctx)
 	if err != nil {
 		log.Errorf("Failed to list resources: %v", err)
 	} else {
-		log.Infof("Found %d resources:", len(resources))
-		for _, resource := range resources {
+		log.Infof("Found %d resources:", len(resourcesResult.Resources))
+		for _, resource := range resourcesResult.Resources {
 			log.Infof("- %s: %s (%s)", resource.Name, resource.Description, resource.URI)
 		}
 
 		// Read the first resource (if any).
-		if len(resources) > 0 {
-			log.Infof("===== Read resource: %s =====", resources[0].Name)
-			resourceContent, err := mcpClient.ReadResource(ctx, resources[0].URI)
+		if len(resourcesResult.Resources) > 0 {
+			log.Infof("===== Read resource: %s =====", resourcesResult.Resources[0].Name)
+			resourceContent, err := mcpClient.ReadResource(ctx, resourcesResult.Resources[0].URI)
 			if err != nil {
 				log.Errorf("Failed to read resource: %v", err)
 			} else {
 				log.Infof("Successfully read resource, content item count: %d", len(resourceContent.Contents))
 				for i, content := range resourceContent.Contents {
 					switch c := content.(type) {
-					case schema.TextResourceContents:
+					case mcp.TextResourceContents:
 						log.Infof("[%d] Text resource: %s (first 50 chars: %s...)",
 							i, c.URI, truncateString(c.Text, 50))
-					case schema.BlobResourceContents:
+					case mcp.BlobResourceContents:
 						log.Infof("[%d] Binary resource: %s (size: %d bytes)",
 							i, c.URI, len(c.Blob))
 					default:

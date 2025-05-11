@@ -8,14 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // Simple greeting tool handler function.
-func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context (if any).
 	session, ok := transport.GetSessionFromContext(ctx)
 
@@ -26,27 +26,27 @@ func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.Call
 	}
 
 	// Create response content, customize message if session exists.
-	var content []schema.ToolContent
+	var content []mcp.Content
 
 	if ok && session != nil {
-		content = append(content, schema.NewTextContent(fmt.Sprintf(
+		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server. Your session ID is: %s",
 			name, session.ID[:8]+"...")))
 	} else {
-		content = append(content, schema.NewTextContent(fmt.Sprintf(
+		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server, but session info could not be obtained.",
 			name)))
 	}
 
-	return &schema.CallToolResult{Content: content}, nil
+	return &mcp.CallToolResult{Content: content}, nil
 }
 
 // Counter tool, used to demonstrate session state management.
-func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return schema.NewErrorResult("Error: Could not get session info. This tool requires a stateful session."),
+		return mcp.NewErrorResult("Error: Could not get session info. This tool requires a stateful session."),
 			fmt.Errorf("Failed to get session from context")
 	}
 
@@ -68,7 +68,7 @@ func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.Ca
 	session.SetData("counter", count)
 
 	// Return result.
-	return schema.NewTextResult(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
+	return mcp.NewTextResult(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
 		count, session.ID[:8]+"...")), nil
 }
 
@@ -78,7 +78,7 @@ func main() {
 	log.Info("Starting Stateful JSON No GET SSE mode MCP server...")
 
 	// Create server info.
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateful-JSON-Server",
 		Version: "1.0.0",
 	}
@@ -101,9 +101,9 @@ func main() {
 	)
 
 	// Register a greeting tool.
-	greetTool := schema.NewTool("greet", handleGreet,
-		schema.WithDescription("A simple greeting tool"),
-		schema.WithString("name", schema.Description("Name to greet")))
+	greetTool := mcp.NewTool("greet", handleGreet,
+		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithString("name", mcp.Description("Name to greet")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
@@ -111,11 +111,11 @@ func main() {
 	log.Info("Registered greeting tool: greet")
 
 	// Register counter tool.
-	counterTool := schema.NewTool("counter", handleCounter,
-		schema.WithDescription("A session counter tool to demonstrate stateful sessions"),
-		schema.WithNumber("increment",
-			schema.Description("Counter increment"),
-			schema.Default(1)))
+	counterTool := mcp.NewTool("counter", handleCounter,
+		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
+		mcp.WithNumber("increment",
+			mcp.Description("Counter increment"),
+			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("Failed to register counter tool: %v", err)

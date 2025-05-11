@@ -1,7 +1,6 @@
-package schema
+package mcp
 
 import (
-	"encoding/base64"
 	"fmt"
 )
 
@@ -23,10 +22,79 @@ type Resource struct {
 	Size int64 `json:"size,omitempty"`
 
 	// Annotations (optional)
-	Annotations *Annotations `json:"annotations,omitempty"`
+	Annotated
 }
 
-// ResourceTemplate represents a resource template description
+// ResourceContents represents resource contents
+type ResourceContents interface {
+	isResourceContents()
+}
+
+// TextResourceContents represents text resource contents
+type TextResourceContents struct {
+	URI      string `json:"uri"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Text     string `json:"text"`
+}
+
+func (t TextResourceContents) isResourceContents() {}
+
+// BlobResourceContents represents binary resource contents
+type BlobResourceContents struct {
+	URI      string `json:"uri"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Blob     string `json:"blob"`
+}
+
+func (b BlobResourceContents) isResourceContents() {}
+
+// ListResourcesRequest describes a request to list resources.
+type ListResourcesRequest struct {
+	PaginatedRequest
+}
+
+// ListResourcesResult describes a result of listing resources.
+type ListResourcesResult struct {
+	PaginatedResult
+	Resources []Resource `json:"resources"`
+}
+
+// ReadResourceRequest describes a request to read a resource.
+type ReadResourceRequest struct {
+	Request
+	Params struct {
+		URI       string                 `json:"uri"`
+		Arguments map[string]interface{} `json:"arguments,omitempty"`
+	} `json:"params"`
+}
+
+type ReadResourceResult struct {
+	Result
+	Contents []ResourceContents `json:"contents"`
+}
+
+type ResourceUpdatedNotification struct {
+	Notification
+	Params struct {
+		URI string `json:"uri"`
+	} `json:"params"`
+}
+
+type SubscribeRequest struct {
+	Request
+	Params struct {
+		URI string `json:"uri"`
+	} `json:"params"`
+}
+
+type UnsubscribeRequest struct {
+	Request
+	Params struct {
+		URI string `json:"uri"`
+	} `json:"params"`
+}
+
+// ResourceTemplate describes a resource template
 type ResourceTemplate struct {
 	// Template name
 	Name string `json:"name"`
@@ -40,31 +108,8 @@ type ResourceTemplate struct {
 	// MIME type (optional)
 	MimeType string `json:"mimeType,omitempty"`
 
-	// Annotations (optional)
-	Annotations *Annotations `json:"annotations,omitempty"`
-}
-
-// ResourceContents represents resource contents
-type ResourceContents struct {
-	// Resource URI
-	URI string `json:"uri"`
-
-	// MIME type (optional)
-	MimeType string `json:"mimeType,omitempty"`
-}
-
-// TextResourceContents represents text resource contents
-type TextResourceContents struct {
-	ResourceContents
-	// Text content
-	Text string `json:"text"`
-}
-
-// BlobResourceContents represents binary resource contents
-type BlobResourceContents struct {
-	ResourceContents
-	// Binary data (base64 encoded)
-	Blob []byte `json:"blob"`
+	// 使用 Annotated 嵌入结构
+	Annotated
 }
 
 // ListResourcesResponse represents the response for listing resources
@@ -80,6 +125,11 @@ type ListResourcesResponse struct {
 type ReadResourceResponse struct {
 	// Resource content list
 	Contents []interface{} `json:"contents"`
+}
+
+// ResourceListChangedNotification describes a resource list changed notification.
+type ResourceListChangedNotification struct {
+	Notification
 }
 
 // ParseListResourcesResult parses a list resources response
@@ -155,7 +205,11 @@ func parseResourceItem(item interface{}) (Resource, error) {
 
 	// Extract annotations (if present)
 	if annotationsMap, ok := resourceMap["annotations"].(map[string]interface{}); ok {
-		annotations := &Annotations{}
+		// 创建一个新的 annotations 结构
+		annotations := &struct {
+			Audience []Role  `json:"audience,omitempty"`
+			Priority float64 `json:"priority,omitempty"`
+		}{}
 
 		// Extract priority
 		if priority, ok := annotationsMap["priority"].(float64); ok {
@@ -173,6 +227,7 @@ func parseResourceItem(item interface{}) (Resource, error) {
 			annotations.Audience = audience
 		}
 
+		// 设置到 resource 的 Annotations 字段
 		resource.Annotations = annotations
 	}
 
@@ -215,9 +270,9 @@ func ParseReadResourceResult(result interface{}) (*ReadResourceResponse, error) 
 				continue // URI is required
 			}
 
-			// Set MimeType (optional)
+			// Set MIMEType (optional)
 			if mimeType, ok := contentMap["mimeType"].(string); ok {
-				textContent.MimeType = mimeType
+				textContent.MIMEType = mimeType
 			}
 
 			textContent.Text = text
@@ -234,18 +289,14 @@ func ParseReadResourceResult(result interface{}) (*ReadResourceResponse, error) 
 				continue // URI is required
 			}
 
-			// Set MimeType (optional)
+			// Set MIMEType (optional)
 			if mimeType, ok := contentMap["mimeType"].(string); ok {
-				blobContent.MimeType = mimeType
+				blobContent.MIMEType = mimeType
 			}
 
-			// Decode base64 data
-			blobData, err := base64.StdEncoding.DecodeString(blobStr)
-			if err != nil {
-				continue // Cannot decode, skip this item
-			}
-
-			blobContent.Blob = blobData
+			// 由于 BlobResourceContents.Blob 是 string 类型的
+			// 我们直接存储 base64 编码的字符串
+			blobContent.Blob = blobStr
 			contents = append(contents, blobContent)
 		}
 	}

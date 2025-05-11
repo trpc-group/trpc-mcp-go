@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 // handleMultiStageGreeting handles the multi-stage greeting tool and sends multiple notifications via SSE.
-func handleMultiStageGreeting(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract name from parameters.
 	name := "Guest"
 	if nameArg, ok := req.Params.Arguments["name"]; ok {
@@ -32,11 +32,11 @@ func handleMultiStageGreeting(ctx context.Context, req *schema.CallToolRequest) 
 	}
 
 	// Get notification sender from context.
-	notificationSender, hasNotificationSender := schema.GetNotificationSender(ctx)
+	notificationSender, hasNotificationSender := mcp.GetNotificationSender(ctx)
 	if !hasNotificationSender {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: unable to get notification sender."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: unable to get notification sender."),
 			},
 		}, fmt.Errorf("unable to get notification sender from context")
 	}
@@ -67,9 +67,9 @@ func handleMultiStageGreeting(ctx context.Context, req *schema.CallToolRequest) 
 		// Check if context is canceled.
 		select {
 		case <-ctx.Done():
-			return &schema.CallToolResult{
-				Content: []schema.ToolContent{
-					schema.NewTextContent(fmt.Sprintf("Greeting canceled at stage %d", i)),
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(fmt.Sprintf("Greeting canceled at stage %d", i)),
 				},
 			}, ctx.Err()
 		default:
@@ -86,9 +86,9 @@ func handleMultiStageGreeting(ctx context.Context, req *schema.CallToolRequest) 
 	sendLogMessage("info", fmt.Sprintf("Completed multi-stage greeting to %s", name))
 
 	// Return final result.
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Completed %d-stage greeting to %s!", stages, name)),
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Completed %d-stage greeting to %s!", stages, name)),
 		},
 	}, nil
 }
@@ -99,7 +99,7 @@ func main() {
 	log.Info("Starting Stateless SSE No GET SSE mode MCP server...")
 
 	// Create server info.
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateless-SSE-No-GETSSE-Server",
 		Version: "1.0.0",
 	}
@@ -119,8 +119,8 @@ func main() {
 	)
 
 	// Register a simple greeting tool.
-	greetTool := schema.NewTool("greet",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+	greetTool := mcp.NewTool("greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			name := "World"
 			if nameArg, ok := req.Params.Arguments["name"]; ok {
 				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
@@ -128,14 +128,14 @@ func main() {
 				}
 			}
 
-			return &schema.CallToolResult{
-				Content: []schema.ToolContent{
-					schema.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless SSE server.", name)),
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless SSE server.", name)),
 				},
 			}, nil
 		},
-		schema.WithDescription("A simple greeting tool."),
-		schema.WithString("name", schema.Description("Name to greet.")),
+		mcp.WithDescription("A simple greeting tool."),
+		mcp.WithString("name", mcp.Description("Name to greet.")),
 	)
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
@@ -144,13 +144,13 @@ func main() {
 	log.Info("Registered greet tool: greet")
 
 	// Register a multi-stage greeting tool (sends multiple notifications via SSE).
-	multiStageGreetingTool := schema.NewTool("multi-stage-greeting",
+	multiStageGreetingTool := mcp.NewTool("multi-stage-greeting",
 		handleMultiStageGreeting,
-		schema.WithDescription("Send multi-stage greeting via SSE."),
-		schema.WithString("name", schema.Description("Name to greet.")),
-		schema.WithNumber("stages",
-			schema.Description("Number of greeting stages."),
-			schema.Default(3),
+		mcp.WithDescription("Send multi-stage greeting via SSE."),
+		mcp.WithString("name", mcp.Description("Name to greet.")),
+		mcp.WithNumber("stages",
+			mcp.Description("Number of greeting stages."),
+			mcp.Default(3),
 		),
 	)
 

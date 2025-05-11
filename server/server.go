@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/modelcontextprotocol/streamable-mcp/protocol"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/protocol"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // ServerConfig stores all server configuration options
@@ -31,7 +31,7 @@ type ServerConfig struct {
 // Server MCP server
 type Server struct {
 	// Server information
-	serverInfo schema.Implementation
+	serverInfo mcp.Implementation
 
 	// Configuration
 	config *ServerConfig
@@ -56,7 +56,7 @@ type Server struct {
 type ServerOption func(*Server)
 
 // NewServer creates a new MCP server
-func NewServer(addr string, serverInfo schema.Implementation, options ...ServerOption) *Server {
+func NewServer(addr string, serverInfo mcp.Implementation, options ...ServerOption) *Server {
 	// Create default configuration
 	config := &ServerConfig{
 		Addr:                   addr,
@@ -199,7 +199,7 @@ func WithStatelessMode(enabled bool) ServerOption {
 }
 
 // RegisterTool registers a tool
-func (s *Server) RegisterTool(tool *schema.Tool) error {
+func (s *Server) RegisterTool(tool *mcp.Tool) error {
 	return s.toolManager.RegisterTool(tool)
 }
 
@@ -207,7 +207,7 @@ func (s *Server) RegisterTool(tool *schema.Tool) error {
 //
 // The resource feature is automatically enabled when the first resource is registered, no additional configuration is needed.
 // When the resource feature is enabled but no resources are registered, client requests will return an empty list rather than an error.
-func (s *Server) RegisterResource(resource *schema.Resource) error {
+func (s *Server) RegisterResource(resource *mcp.Resource) error {
 	return s.resourceManager.RegisterResource(resource)
 }
 
@@ -215,27 +215,27 @@ func (s *Server) RegisterResource(resource *schema.Resource) error {
 //
 // The prompt feature is automatically enabled when the first prompt is registered, no additional configuration is needed.
 // When the prompt feature is enabled but no prompts are registered, client requests will return an empty list rather than an error.
-func (s *Server) RegisterPrompt(prompt *schema.Prompt) error {
+func (s *Server) RegisterPrompt(prompt *mcp.Prompt) error {
 	return s.promptManager.RegisterPrompt(prompt)
 }
 
 // SendNotification sends a notification to a specific session
 func (s *Server) SendNotification(sessionID string, method string, params map[string]interface{}) error {
 	// Create notification object
-	notification := schema.NewNotification(method, params)
+	notification := mcp.NewJSONRPCNotificationFromMap(method, params)
 
 	// Use the internal httpHandler to send
 	return s.httpHandler.SendNotification(sessionID, notification)
 }
 
 // NewNotification creates a new notification object
-func (s *Server) NewNotification(method string, params map[string]interface{}) *schema.Notification {
-	return schema.NewNotification(method, params)
+func (s *Server) NewNotification(method string, params map[string]interface{}) *mcp.JSONRPCNotification {
+	return mcp.NewJSONRPCNotificationFromMap(method, params)
 }
 
 // BroadcastNotification broadcasts a notification to all active sessions
 func (s *Server) BroadcastNotification(method string, params map[string]interface{}) (int, error) {
-	notification := schema.NewNotification(method, params)
+	notification := mcp.NewJSONRPCNotificationFromMap(method, params)
 
 	// Get active sessions
 	sessions, err := s.getActiveSessions()
@@ -280,7 +280,7 @@ func (s *Server) SendFilteredNotification(
 	params map[string]interface{},
 	filter func(sessionID string) bool,
 ) (int, int, error) {
-	notification := schema.NewNotification(method, params)
+	notification := mcp.NewJSONRPCNotificationFromMap(method, params)
 
 	// Get active sessions
 	sessions, err := s.getActiveSessions()

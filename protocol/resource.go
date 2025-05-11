@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // ResourceManager manages resources
@@ -20,16 +20,16 @@ import (
 // This design simplifies API usage, eliminating the need for explicit configuration parameters to enable or disable resource functionality.
 type ResourceManager struct {
 	// Resource mapping table
-	resources map[string]*schema.Resource
+	resources map[string]*mcp.Resource
 
 	// Resource template mapping table
-	templates map[string]*schema.ResourceTemplate
+	templates map[string]*mcp.ResourceTemplate
 
 	// Mutex
 	mu sync.RWMutex
 
 	// Subscriber mapping table
-	subscribers map[string][]chan *schema.Notification
+	subscribers map[string][]chan *mcp.JSONRPCNotification
 
 	// Subscriber mutex
 	subMu sync.RWMutex
@@ -41,14 +41,14 @@ type ResourceManager struct {
 // it is only enabled when the first resource is added.
 func NewResourceManager() *ResourceManager {
 	return &ResourceManager{
-		resources:   make(map[string]*schema.Resource),
-		templates:   make(map[string]*schema.ResourceTemplate),
-		subscribers: make(map[string][]chan *schema.Notification),
+		resources:   make(map[string]*mcp.Resource),
+		templates:   make(map[string]*mcp.ResourceTemplate),
+		subscribers: make(map[string][]chan *mcp.JSONRPCNotification),
 	}
 }
 
 // RegisterResource registers a resource
-func (m *ResourceManager) RegisterResource(resource *schema.Resource) error {
+func (m *ResourceManager) RegisterResource(resource *mcp.Resource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -73,7 +73,7 @@ func (m *ResourceManager) RegisterResource(resource *schema.Resource) error {
 }
 
 // RegisterTemplate registers a resource template
-func (m *ResourceManager) RegisterTemplate(template *schema.ResourceTemplate) error {
+func (m *ResourceManager) RegisterTemplate(template *mcp.ResourceTemplate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (m *ResourceManager) RegisterTemplate(template *schema.ResourceTemplate) er
 }
 
 // GetResource retrieves a resource
-func (m *ResourceManager) GetResource(uri string) (*schema.Resource, bool) {
+func (m *ResourceManager) GetResource(uri string) (*mcp.Resource, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -107,11 +107,11 @@ func (m *ResourceManager) GetResource(uri string) (*schema.Resource, bool) {
 }
 
 // GetResources retrieves all resources
-func (m *ResourceManager) GetResources() []*schema.Resource {
+func (m *ResourceManager) GetResources() []*mcp.Resource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	resources := make([]*schema.Resource, 0, len(m.resources))
+	resources := make([]*mcp.Resource, 0, len(m.resources))
 	for _, resource := range m.resources {
 		resources = append(resources, resource)
 	}
@@ -119,11 +119,11 @@ func (m *ResourceManager) GetResources() []*schema.Resource {
 }
 
 // GetTemplates retrieves all resource templates
-func (m *ResourceManager) GetTemplates() []*schema.ResourceTemplate {
+func (m *ResourceManager) GetTemplates() []*mcp.ResourceTemplate {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	templates := make([]*schema.ResourceTemplate, 0, len(m.templates))
+	templates := make([]*mcp.ResourceTemplate, 0, len(m.templates))
 	for _, template := range m.templates {
 		templates = append(templates, template)
 	}
@@ -131,17 +131,17 @@ func (m *ResourceManager) GetTemplates() []*schema.ResourceTemplate {
 }
 
 // Subscribe subscribes to resource updates
-func (m *ResourceManager) Subscribe(uri string) chan *schema.Notification {
+func (m *ResourceManager) Subscribe(uri string) chan *mcp.JSONRPCNotification {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
-	ch := make(chan *schema.Notification, 10)
+	ch := make(chan *mcp.JSONRPCNotification, 10)
 	m.subscribers[uri] = append(m.subscribers[uri], ch)
 	return ch
 }
 
 // Unsubscribe cancels a subscription
-func (m *ResourceManager) Unsubscribe(uri string, ch chan *schema.Notification) {
+func (m *ResourceManager) Unsubscribe(uri string, ch chan *mcp.JSONRPCNotification) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -166,13 +166,21 @@ func (m *ResourceManager) NotifyUpdate(uri string) {
 	subs := m.subscribers[uri]
 	m.subMu.RUnlock()
 
-	notification := schema.NewNotification("notifications/resources/updated", map[string]interface{}{
-		"uri": uri,
-	})
+	// Create jsonrpcNotification params with correct struct type
+	notification := mcp.Notification{
+		Method: "notifications/resources/updated",
+		Params: mcp.NotificationParams{
+			AdditionalFields: map[string]interface{}{
+				"uri": uri,
+			},
+		},
+	}
+
+	jsonrpcNotification := mcp.NewJSONRPCNotification(notification)
 
 	for _, ch := range subs {
 		select {
-		case ch <- notification:
+		case ch <- jsonrpcNotification:
 		default:
 			// Skip this subscriber if the channel is full
 		}
@@ -180,62 +188,98 @@ func (m *ResourceManager) NotifyUpdate(uri string) {
 }
 
 // HandleListResources handles listing resources requests
-func (m *ResourceManager) HandleListResources(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+func (m *ResourceManager) HandleListResources(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
 	resources := m.GetResources()
-	result := &schema.ListResourcesResponse{
-		Resources: make([]schema.Resource, len(resources)),
-	}
 
+	// Convert []*mcp.Resource to []mcp.Resource for the result
+	resultResources := make([]mcp.Resource, len(resources))
 	for i, resource := range resources {
-		result.Resources[i] = *resource
+		resultResources[i] = *resource
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	// Create result
+	result := mcp.ListResourcesResult{
+		Resources: resultResources,
+	}
+
+	// Return response
+	return result, nil
 }
 
 // HandleReadResource handles reading resource requests
-func (m *ResourceManager) HandleReadResource(ctx context.Context, req *schema.Request) (*schema.Response, error) {
-	// Get resource URI from parameters
-	params := req.Params
-	uri, ok := params["uri"].(string)
+func (m *ResourceManager) HandleReadResource(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing resource URI", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+	}
+
+	// Get resource URI from parameters
+	uri, ok := paramsMap["uri"].(string)
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing resource URI", nil), nil
 	}
 
 	// Get resource
 	resource, exists := m.GetResource(uri)
 	if !exists {
-		return schema.NewErrorResponse(req.ID, schema.ErrMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
 	}
 
-	// Return resource content - just return the resource directly
-	// The response serialization will handle the structure correctly
-	return schema.NewResponse(req.ID, resource), nil
+	// Create a dummy text content for now
+	// In a real implementation, you would retrieve actual content
+	textContent := mcp.TextResourceContents{
+		URI:      resource.URI,
+		MIMEType: resource.MimeType,
+		Text:     fmt.Sprintf("Content for resource: %s", resource.Name),
+	}
+
+	var contents []mcp.ResourceContents
+	contents = append(contents, textContent)
+
+	result := &mcp.ReadResourceResult{
+		Contents: contents,
+	}
+
+	return result, nil
 }
 
 // HandleListTemplates handles listing templates requests
-func (m *ResourceManager) HandleListTemplates(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+func (m *ResourceManager) HandleListTemplates(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
 	templates := m.GetTemplates()
-	result := map[string]interface{}{
-		"templates": templates,
+
+	// Convert []*mcp.ResourceTemplate to []mcp.ResourceTemplate for the result
+	resultTemplates := make([]mcp.ResourceTemplate, len(templates))
+	for i, template := range templates {
+		resultTemplates[i] = *template
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	// Use map structure since ListResourceTemplatesResult might not be defined
+	result := map[string]interface{}{
+		"resourceTemplates": resultTemplates,
+	}
+
+	return result, nil
 }
 
 // HandleSubscribe handles subscription requests
-func (m *ResourceManager) HandleSubscribe(ctx context.Context, req *schema.Request) (*schema.Response, error) {
-	// Get resource URI from parameters
-	params := req.Params
-	uri, ok := params["uri"].(string)
+func (m *ResourceManager) HandleSubscribe(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing resource URI", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+	}
+
+	// Get resource URI from parameters
+	uri, ok := paramsMap["uri"].(string)
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing resource URI", nil), nil
 	}
 
 	// Check if resource exists
 	_, exists := m.GetResource(uri)
 	if !exists {
-		return schema.NewErrorResponse(req.ID, schema.ErrMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
 	}
 
 	// Subscribe to resource updates
@@ -247,16 +291,21 @@ func (m *ResourceManager) HandleSubscribe(ctx context.Context, req *schema.Reque
 		"subscribeTime": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	return result, nil
 }
 
 // HandleUnsubscribe handles unsubscription requests
-func (m *ResourceManager) HandleUnsubscribe(ctx context.Context, req *schema.Request) (*schema.Response, error) {
-	// Get resource URI from parameters
-	params := req.Params
-	uri, ok := params["uri"].(string)
+func (m *ResourceManager) HandleUnsubscribe(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing resource URI", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+	}
+
+	// Get resource URI from parameters
+	uri, ok := paramsMap["uri"].(string)
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing resource URI", nil), nil
 	}
 
 	// Unsubscribe from resource updates
@@ -269,5 +318,5 @@ func (m *ResourceManager) HandleUnsubscribe(ctx context.Context, req *schema.Req
 		"unsubscribeTime": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	return result, nil
 }

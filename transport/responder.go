@@ -9,7 +9,7 @@ import (
 // Responder defines the interface for different response handlers
 type Responder interface {
 	// Respond to a request
-	Respond(ctx context.Context, w http.ResponseWriter, r *http.Request, resp interface{}, session *Session) error
+	Respond(ctx context.Context, w http.ResponseWriter, r *http.Request, response interface{}, session *Session) error
 
 	// Check if the specified content type is supported
 	SupportsContentType(accepts []string) bool

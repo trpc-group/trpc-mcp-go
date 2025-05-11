@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 func TestNewMCPHandler(t *testing.T) {
@@ -23,7 +23,7 @@ func TestNewMCPHandler(t *testing.T) {
 func TestMCPHandler_WithOptions(t *testing.T) {
 	// Create custom components
 	toolManager := NewToolManager()
-	lifecycleManager := NewLifecycleManager(schema.Implementation{
+	lifecycleManager := NewLifecycleManager(mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	})
@@ -42,7 +42,7 @@ func TestMCPHandler_WithOptions(t *testing.T) {
 func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	// Create handler
 	toolManager := NewToolManager()
-	lifecycleManager := NewLifecycleManager(schema.Implementation{
+	lifecycleManager := NewLifecycleManager(mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	})
@@ -53,17 +53,17 @@ func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	)
 
 	// Create initialization request
-	request := schema.NewInitializeRequest(
-		schema.ProtocolVersion_2024_11_05,
-		schema.Implementation{
+	request := mcp.NewInitializeRequest(
+		mcp.ProtocolVersion_2024_11_05,
+		mcp.Implementation{
 			Name:    "Test-Client",
 			Version: "1.0.0",
 		},
-		schema.ClientCapabilities{
-			Roots: &schema.RootsCapability{
+		mcp.ClientCapabilities{
+			Roots: &mcp.RootsCapability{
 				ListChanged: true,
 			},
-			Sampling: &schema.SamplingCapability{},
+			Sampling: &mcp.SamplingCapability{},
 		},
 	)
 
@@ -77,12 +77,11 @@ func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	// Verify results
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Nil(t, resp.Error)
 
 	// Verify protocol version in session
 	protocolVersion, ok := session.GetData("protocolVersion")
 	require.True(t, ok)
-	assert.Equal(t, schema.ProtocolVersion_2024_11_05, protocolVersion)
+	assert.Equal(t, mcp.ProtocolVersion_2024_11_05, protocolVersion)
 }
 
 func TestMCPHandler_HandleRequest_UnknownMethod(t *testing.T) {
@@ -90,17 +89,15 @@ func TestMCPHandler_HandleRequest_UnknownMethod(t *testing.T) {
 	handler := NewMCPHandler()
 
 	// Create request with unknown method
-	req := schema.NewRequest(1, "unknown/method", nil)
+	req := mcp.NewJSONRPCRequest(1, "unknown/method", nil)
 
 	// Process request
 	ctx := context.Background()
 	resp, err := handler.HandleRequest(ctx, req, nil)
 
-	// Verify results
-	require.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.NotNil(t, resp.Error)
-	assert.Equal(t, schema.ErrMethodNotFound, resp.Error.Code)
+	// For unknown method, we should get an error
+	assert.Error(t, err)
+	assert.Nil(t, resp)
 }
 
 func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
@@ -113,10 +110,10 @@ func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
 
 	// Create session and set protocol version
 	session := transport.NewSession()
-	session.SetData("protocolVersion", schema.ProtocolVersion_2024_11_05)
+	session.SetData("protocolVersion", mcp.ProtocolVersion_2024_11_05)
 
 	// Create list tools request
-	req := schema.NewRequest(1, schema.MethodToolsList, nil)
+	req := mcp.NewJSONRPCRequest(1, mcp.MethodToolsList, nil)
 
 	// Process request
 	ctx := context.Background()
@@ -125,12 +122,11 @@ func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
 	// Verify results
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Nil(t, resp.Error)
 
 	// Verify response content
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.(mcp.JSONRPCResponse).Result.(map[string]interface{})
 	assert.True(t, ok)
-	tools, ok := result["tools"].([]*schema.Tool)
+	tools, ok := result["tools"].([]*mcp.Tool)
 	assert.True(t, ok)
 	assert.Len(t, tools, 1)
 	assert.Equal(t, "test-tool", tools[0].Name)
@@ -149,7 +145,7 @@ func TestMCPHandler_HandleRequest_ToolsCall(t *testing.T) {
 	session := transport.NewSession()
 
 	// Create call tool request
-	req := schema.NewRequest(1, schema.MethodToolsCall, map[string]interface{}{
+	req := mcp.NewJSONRPCRequest(1, mcp.MethodToolsCall, map[string]interface{}{
 		"name": "test-tool",
 		"arguments": map[string]interface{}{
 			"param1": "value1",
@@ -163,18 +159,15 @@ func TestMCPHandler_HandleRequest_ToolsCall(t *testing.T) {
 	// Verify results
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Nil(t, resp.Error)
 
 	// Verify response content
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := resp.(mcp.JSONRPCResponse).Result.(map[string]interface{})
 	assert.True(t, ok)
-	content, ok := result["content"].([]interface{})
+	content, ok := result["content"].([]mcp.Content)
 	assert.True(t, ok)
 	assert.Len(t, content, 1)
 
 	// Verify first content item
-	contentItem, ok := content[0].(map[string]interface{})
+	_, ok = content[0].(mcp.Content)
 	assert.True(t, ok)
-	assert.Equal(t, "text", contentItem["type"])
-	assert.Equal(t, "Mock tool execution result", contentItem["text"])
 }

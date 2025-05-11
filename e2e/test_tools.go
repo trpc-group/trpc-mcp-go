@@ -6,81 +6,81 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
-// RegisterTestTools 注册所有测试工具到服务器
+// RegisterTestTools registers all test tools to the server.
 func RegisterTestTools(s *server.Server) {
-	// 注册基本的问候工具
+	// Register the basic greeting tool.
 	if err := s.RegisterTool(NewBasicTool()); err != nil {
-		panic(fmt.Sprintf("注册 BasicTool 失败: %v", err))
+		panic(fmt.Sprintf("Failed to register BasicTool: %v", err))
 	}
 
-	// 注册流式工具
+	// Register the streaming tool.
 	if err := s.RegisterTool(NewStreamingTool()); err != nil {
-		panic(fmt.Sprintf("注册 StreamingTool 失败: %v", err))
+		panic(fmt.Sprintf("Failed to register StreamingTool: %v", err))
 	}
 
-	// 注册故障工具
+	// Register the error tool.
 	if err := s.RegisterTool(NewErrorTool()); err != nil {
-		panic(fmt.Sprintf("注册 ErrorTool 失败: %v", err))
+		panic(fmt.Sprintf("Failed to register ErrorTool: %v", err))
 	}
 
-	// 注册延迟工具
+	// Register the delay tool.
 	if err := s.RegisterTool(NewDelayTool()); err != nil {
-		panic(fmt.Sprintf("注册 DelayTool 失败: %v", err))
+		panic(fmt.Sprintf("Failed to register DelayTool: %v", err))
 	}
 
-	// 注册 SSE 进度工具
+	// Register the SSE progress tool.
 	if err := s.RegisterTool(NewSSEProgressTool()); err != nil {
-		panic(fmt.Sprintf("注册 SSEProgressTool 失败: %v", err))
+		panic(fmt.Sprintf("Failed to register SSEProgressTool: %v", err))
 	}
 }
 
-// NewBasicTool 创建一个简单的问候工具
-func NewBasicTool() *schema.Tool {
-	return schema.NewTool("basic-greet",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			// 检查上下文是否已取消
+// NewBasicTool creates a simple greeting tool.
+func NewBasicTool() *mcp.Tool {
+	return mcp.NewTool("basic-greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Check if context is cancelled.
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			default:
-				// 继续执行
+				// Continue execution.
 			}
 
-			// 提取名称参数
-			name := "世界"
+			// Extract name parameter.
+			name := "World"
 			if nameArg, ok := req.Params.Arguments["name"]; ok {
 				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
 					name = nameStr
 				}
 			}
 
-			// 创建问候消息
-			greeting := fmt.Sprintf("你好，%s！这是一个测试消息。", name)
+			// Create greeting message.
+			greeting := fmt.Sprintf("Hello, %s", name)
 
-			// 创建工具结果
-			return &schema.CallToolResult{
-				Content: []schema.ToolContent{
-					schema.NewTextContent(greeting),
+			// Create tool result.
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(greeting),
 				},
 			}, nil
 		},
-		schema.WithDescription("一个简单的问候工具，返回问候消息"),
-		schema.WithString("name",
-			schema.Description("要问候的名称"),
+		mcp.WithDescription("A simple greeting tool that returns a greeting message."),
+		mcp.WithString("name",
+			mcp.Description("The name to greet."),
 		),
 	)
 }
 
-// NewStreamingTool 创建一个产生多条消息的流式工具
-func NewStreamingTool() *schema.Tool {
-	return schema.NewTool("streaming-greet",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			// 提取参数
-			name := "世界"
+// NewStreamingTool creates a streaming tool that generates multiple messages.
+func NewStreamingTool() *mcp.Tool {
+	return mcp.NewTool("streaming-greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract parameters.
+			name := "World"
 			if nameArg, ok := req.Params.Arguments["name"]; ok {
 				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
 					name = nameStr
@@ -94,65 +94,65 @@ func NewStreamingTool() *schema.Tool {
 				}
 			}
 
-			// 创建多条消息
-			content := make([]schema.ToolContent, 0, count)
+			// Create multiple messages.
+			content := make([]mcp.Content, 0, count)
 			for i := 1; i <= count; i++ {
 				select {
 				case <-ctx.Done():
-					return &schema.CallToolResult{Content: content}, ctx.Err()
+					return &mcp.CallToolResult{Content: content}, ctx.Err()
 				default:
-					// 继续执行
+					// Continue execution.
 				}
 
-				// 创建问候消息
-				greeting := fmt.Sprintf("流式消息 %d/%d: 你好，%s！", i, count, name)
-				content = append(content, schema.NewTextContent(greeting))
+				// Create greeting message.
+				greeting := fmt.Sprintf("Streaming Message %d/%d: Hello, %s!", i, count, name)
+				content = append(content, mcp.NewTextContent(greeting))
 
-				// 添加一个简单的延迟模拟流式传输
+				// Add a simple delay to simulate streaming.
 				time.Sleep(100 * time.Millisecond)
 			}
 
-			return &schema.CallToolResult{Content: content}, nil
+			return &mcp.CallToolResult{Content: content}, nil
 		},
-		schema.WithDescription("一个流式问候工具，返回多条问候消息"),
-		schema.WithString("name",
-			schema.Description("要问候的名称"),
+		mcp.WithDescription("A streaming greeting tool that returns multiple greeting messages."),
+		mcp.WithString("name",
+			mcp.Description("The name to greet."),
 		),
-		schema.WithNumber("count",
-			schema.Description("生成的消息数量"),
-			schema.Default(3),
+		mcp.WithNumber("count",
+			mcp.Description("The number of messages to generate."),
+			mcp.Default(3),
 		),
 	)
 }
 
-// NewErrorTool 创建一个总是返回错误的工具
-func NewErrorTool() *schema.Tool {
-	return schema.NewTool("error-tool",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			// 提取错误消息
-			errorMsg := "这是一个故意的错误"
+// NewErrorTool creates a tool that always returns an error.
+func NewErrorTool() *mcp.Tool {
+	return mcp.NewTool("error-tool",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract error message.
+			errorMsg := "This is an intentional error"
 			if msgArg, ok := req.Params.Arguments["error_message"]; ok {
 				if msgStr, ok := msgArg.(string); ok && msgStr != "" {
 					errorMsg = msgStr
 				}
 			}
 
-			// 直接返回错误
+			// Directly return error.
 			return nil, errors.New(errorMsg)
 		},
-		schema.WithDescription("一个总是返回错误的工具"),
-		schema.WithString("error_message",
-			schema.Description("要返回的错误消息"),
-			schema.Default("这是一个故意的错误"),
+		mcp.WithDescription("A tool that always returns an error."),
+		mcp.WithString("error_message",
+			mcp.Description("The error message to return."),
+			mcp.Default("This is an intentional error"),
 		),
 	)
 }
 
-// NewDelayTool 创建一个会延迟指定时间的工具
-func NewDelayTool() *schema.Tool {
-	return schema.NewTool("delay-tool",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			// 提取延迟时间
+// NewDelayTool creates a tool that delays for a specified time.
+func NewDelayTool() *mcp.Tool {
+	return mcp.NewTool("delay-tool",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract delay time.
 			delayMs := 1000
 			if delayArg, ok := req.Params.Arguments["delay_ms"]; ok {
 				if delayInt, ok := delayArg.(float64); ok && delayInt > 0 {
@@ -160,49 +160,49 @@ func NewDelayTool() *schema.Tool {
 				}
 			}
 
-			// 提取消息
-			message := "延迟结束"
+			// Extract message.
+			message := "Delay finished"
 			if msgArg, ok := req.Params.Arguments["message"]; ok {
 				if msgStr, ok := msgArg.(string); ok && msgStr != "" {
 					message = msgStr
 				}
 			}
 
-			// 创建定时器
+			// Create timer.
 			timer := time.NewTimer(time.Duration(delayMs) * time.Millisecond)
 			defer timer.Stop()
 
-			// 等待定时器或上下文取消
+			// Wait for timer or context cancellation.
 			select {
 			case <-timer.C:
-				// 定时器到期，返回结果
-				return &schema.CallToolResult{
-					Content: []schema.ToolContent{
-						schema.NewTextContent(fmt.Sprintf("%s（延迟%dms）", message, delayMs)),
+				// Timer expired, return result.
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						mcp.NewTextContent(fmt.Sprintf("%s (delay %dms)", message, delayMs)),
 					},
 				}, nil
 			case <-ctx.Done():
-				// 上下文取消，返回错误
+				// Context cancelled, return error.
 				return nil, ctx.Err()
 			}
 		},
-		schema.WithDescription("一个会延迟指定时间的工具"),
-		schema.WithNumber("delay_ms",
-			schema.Description("延迟的毫秒数"),
-			schema.Default(1000),
+		mcp.WithDescription("A tool that delays for a specified time."),
+		mcp.WithNumber("delay_ms",
+			mcp.Description("Delay time in milliseconds."),
+			mcp.Default(1000),
 		),
-		schema.WithString("message",
-			schema.Description("延迟后返回的消息"),
-			schema.Default("延迟结束"),
+		mcp.WithString("message",
+			mcp.Description("Message to return after delay."),
+			mcp.Default("Delay finished"),
 		),
 	)
 }
 
 // NewSSEProgressTool 创建一个支持发送进度通知的 SSE 测试工具
-func NewSSEProgressTool() *schema.Tool {
-	return schema.NewTool("sse-progress-tool",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			// 提取参数
+func NewSSEProgressTool() *mcp.Tool {
+	return mcp.NewTool("sse-progress-tool",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract parameters.
 			steps := 5
 			if stepsArg, ok := req.Params.Arguments["steps"]; ok {
 				if stepsFloat, ok := stepsArg.(float64); ok && stepsFloat > 0 {
@@ -217,66 +217,66 @@ func NewSSEProgressTool() *schema.Tool {
 				}
 			}
 
-			message := "SSE 进度测试完成"
+			message := "SSE progress test completed"
 			if msgArg, ok := req.Params.Arguments["message"]; ok {
 				if msgStr, ok := msgArg.(string); ok && msgStr != "" {
 					message = msgStr
 				}
 			}
 
-			// 发送进度通知
+			// Send progress notifications.
 			for i := 1; i <= steps; i++ {
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				default:
-					// 计算进度百分比
+					// Calculate progress percentage.
 					progress := float64(i) / float64(steps)
-					// 发送进度通知
-					if sender, ok := schema.GetNotificationSender(ctx); ok {
-						err := sender.SendProgress(progress, fmt.Sprintf("步骤 %d/%d", i, steps))
+					// Send progress notification.
+					if sender, ok := mcp.GetNotificationSender(ctx); ok {
+						err := sender.SendProgress(progress, fmt.Sprintf("Step %d/%d", i, steps))
 						if err != nil {
-							return nil, fmt.Errorf("发送进度通知失败: %v", err)
+							return nil, fmt.Errorf("Failed to send progress notification: %v", err)
 						}
-						// 发送日志消息
-						sender.SendLogMessage("info", fmt.Sprintf("完成步骤 %d", i))
+						// Send log message.
+						sender.SendLogMessage("info", fmt.Sprintf("Finished step %d", i))
 					}
-					// 等待指定延迟
+					// Wait for the specified delay.
 					time.Sleep(time.Duration(delayMs) * time.Millisecond)
 				}
 			}
 
-			// 返回最终结果
-			return &schema.CallToolResult{
-				Content: []schema.ToolContent{
-					schema.NewTextContent(message),
+			// Return the final result.
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(message),
 				},
 			}, nil
 		},
-		schema.WithDescription("一个 SSE 进度工具，使用 SSE 发送进度通知"),
-		schema.WithNumber("steps",
-			schema.Description("进度步骤数量"),
-			schema.Default(5),
+		mcp.WithDescription("An SSE progress tool that sends progress notifications using SSE."),
+		mcp.WithNumber("steps",
+			mcp.Description("Number of progress steps."),
+			mcp.Default(5),
 		),
-		schema.WithNumber("delay_ms",
-			schema.Description("每个步骤之间的延迟毫秒数"),
-			schema.Default(100),
+		mcp.WithNumber("delay_ms",
+			mcp.Description("Delay between each step in milliseconds."),
+			mcp.Default(100),
 		),
-		schema.WithString("message",
-			schema.Description("响应消息"),
-			schema.Default("SSE 进度测试完成"),
+		mcp.WithString("message",
+			mcp.Description("Response message."),
+			mcp.Default("SSE progress test completed"),
 		),
 	)
 }
 
-// HandleCustomNotification 处理自定义通知
-func (nc *NotificationCollector) HandleCustomNotification(notification *schema.Notification) error {
+// HandleCustomNotification handles custom notifications.
+func (nc *NotificationCollector) HandleCustomNotification(notification *mcp.JSONRPCNotification) error {
 	nc.addNotification(notification)
 	return nil
 }
 
-// HandleNotification 处理标准通知
-func (nc *NotificationCollector) HandleNotification(notification *schema.Notification) error {
+// HandleNotification handles standard notifications.
+func (nc *NotificationCollector) HandleNotification(notification *mcp.JSONRPCNotification) error {
 	nc.addNotification(notification)
 	return nil
 }

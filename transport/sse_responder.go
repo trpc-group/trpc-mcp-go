@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // SSEResponder implements the SSE response handler
@@ -112,7 +112,7 @@ func (r *SSEResponder) ContainsRequest(body []byte) bool {
 // SendNotification sends a notification event
 func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
 	// Check if it's a response type, which should be sent using the Respond method
-	if _, ok := notification.(*schema.Response); ok {
+	if _, ok := notification.(*mcp.JSONRPCResponse); ok {
 		return "", fmt.Errorf("response types should be sent using the Respond method")
 	}
 
@@ -120,16 +120,16 @@ func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flus
 	eventID := r.nextEventID()
 
 	// Ensure notification object is a core.Notification type with correct jsonrpc field
-	var notifObj *schema.Notification
+	var notifObj *mcp.JSONRPCNotification
 	var notifBytes []byte
 	var err error
 
 	// Try to convert to core.Notification to validate format
-	if n, ok := notification.(*schema.Notification); ok {
+	if n, ok := notification.(*mcp.JSONRPCNotification); ok {
 		notifObj = n
 		// Ensure jsonrpc field is set correctly
 		if notifObj.JSONRPC == "" {
-			notifObj.JSONRPC = schema.JSONRPCVersion
+			notifObj.JSONRPC = mcp.JSONRPCVersion
 		}
 		// Serialize notification
 		notifBytes, err = json.Marshal(notifObj)

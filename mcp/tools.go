@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 import (
 	"context"
@@ -8,9 +8,25 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+type ListToolsRequest struct {
+	PaginatedRequest
+}
+
+type PaginatedRequest struct {
+	Request
+	Params struct {
+		Cursor Cursor `json:"cursor,omitempty"`
+	} `json:"params,omitempty"`
+}
+
+type ListToolsResult struct {
+	PaginatedResult
+	Tools []Tool `json:"tools"`
+}
+
 // CallToolRequest represents a tool call request (conforming to MCP specification)
 type CallToolRequest struct {
-	Method string         `json:"method"` // Fixed value: "tools/call"
+	Request
 	Params CallToolParams `json:"params"`
 }
 
@@ -27,9 +43,9 @@ type RequestMeta struct {
 
 // CallToolResult represents tool call result
 type CallToolResult struct {
-	Content []ToolContent `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
-	Meta    *ResultMeta   `json:"_meta,omitempty"`
+	Result
+	Content []Content `json:"content"`
+	IsError bool      `json:"isError,omitempty"`
 }
 
 // ResultMeta represents result metadata
@@ -37,55 +53,9 @@ type ResultMeta struct {
 	AdditionalData map[string]interface{} `json:"-"`
 }
 
-// ToolContent represents the interface for tool response content items
-type ToolContent interface {
-	GetType() string
-}
-
-// TextContent represents text content
-type TextContent struct {
-	Type        string       `json:"type"`
-	Text        string       `json:"text"`
-	Annotations *Annotations `json:"annotations,omitempty"`
-}
-
-func (t TextContent) GetType() string {
-	return t.Type
-}
-
-// ImageContent represents image content
-type ImageContent struct {
-	Type        string       `json:"type"`
-	Data        string       `json:"data"` // base64 encoded image data
-	MimeType    string       `json:"mimeType"`
-	Annotations *Annotations `json:"annotations,omitempty"`
-}
-
-func (i ImageContent) GetType() string {
-	return i.Type
-}
-
-// AudioContent represents audio content
-type AudioContent struct {
-	Type        string       `json:"type"`
-	Data        string       `json:"data"` // base64 encoded audio data
-	MimeType    string       `json:"mimeType"`
-	Annotations *Annotations `json:"annotations,omitempty"`
-}
-
-func (a AudioContent) GetType() string {
-	return a.Type
-}
-
-// EmbeddedResource represents an embedded resource
-type EmbeddedResource struct {
-	Type        string       `json:"type"`
-	Resource    interface{}  `json:"resource"` // Using generic interface type
-	Annotations *Annotations `json:"annotations,omitempty"`
-}
-
-func (e EmbeddedResource) GetType() string {
-	return e.Type
+// ToolListChangedNotification describes a tool list changed notification.
+type ToolListChangedNotification struct {
+	Notification
 }
 
 // Tool represents an MCP tool
@@ -202,73 +172,24 @@ func Default(value interface{}) PropertyOption {
 	}
 }
 
-// Helper functions for content creation
-func NewTextContent(text string) TextContent {
-	return TextContent{
-		Type: "text",
-		Text: text,
-	}
-}
-
-func NewImageContent(data string, mimeType string) ImageContent {
-	return ImageContent{
-		Type:     "image",
-		Data:     data,
-		MimeType: mimeType,
-	}
-}
-
-func NewAudioContent(data string, mimeType string) AudioContent {
-	return AudioContent{
-		Type:     "audio",
-		Data:     data,
-		MimeType: mimeType,
-	}
-}
-
-func NewEmbeddedResource(resource interface{}) EmbeddedResource {
-	return EmbeddedResource{
-		Type:     "resource",
-		Resource: resource,
-	}
-}
-
 // Result creation helper functions
-func NewCallToolResult(content []ToolContent) *CallToolResult {
-	return &CallToolResult{
-		Content: content,
-	}
-}
+//func NewCallToolResult(content []Content) *CallToolResult {
+//	return &CallToolResult{
+//		Content: content,
+//	}
+//}
 
 func NewTextResult(text string) *CallToolResult {
 	return &CallToolResult{
-		Content: []ToolContent{NewTextContent(text)},
+		Content: []Content{NewTextContent(text)},
 	}
 }
 
 func NewErrorResult(text string) *CallToolResult {
 	return &CallToolResult{
 		IsError: true,
-		Content: []ToolContent{NewTextContent(text)},
+		Content: []Content{NewTextContent(text)},
 	}
-}
-
-func NewMultiContentResult(contents ...ToolContent) *CallToolResult {
-	return &CallToolResult{
-		Content: contents,
-	}
-}
-
-// Backwards compatibility types and functions
-// ToolResult is a type alias kept for backwards compatibility
-type ToolResult = CallToolResult
-
-// ListToolsResult represents tool list response
-type ListToolsResult struct {
-	// Tool list
-	Tools []*Tool `json:"tools"`
-	// Next page cursor
-	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 // ParseListToolsResult parses a tool list response
@@ -284,7 +205,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 
 	// Parse next page cursor
 	if cursor, ok := resultMap["nextCursor"].(string); ok {
-		toolsResult.NextCursor = cursor
+		toolsResult.NextCursor = Cursor(cursor)
 	}
 
 	// Parse tool list
@@ -293,13 +214,15 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 		return nil, fmt.Errorf("missing tool list in response")
 	}
 
-	tools := make([]*Tool, 0, len(toolsArray))
+	// Create a slice of Tool (not *Tool)
+	tools := make([]Tool, 0, len(toolsArray))
 	for _, item := range toolsArray {
 		tool, err := parseToolItem(item)
 		if err != nil {
 			continue // or return error
 		}
-		tools = append(tools, tool)
+		// Dereference the pointer to add a copy to the slice
+		tools = append(tools, *tool)
 	}
 	toolsResult.Tools = tools
 
@@ -347,89 +270,134 @@ func parseToolItem(item interface{}) (*Tool, error) {
 	return tool, nil
 }
 
-// ParseCallToolResult parses a tool call result
-func ParseCallToolResult(result interface{}) (*CallToolResult, error) {
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid tool call result format")
+func ParseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
+	var jsonContent map[string]any
+	if err := json.Unmarshal(*rawMessage, &jsonContent); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	// Create result object
-	toolResult := &CallToolResult{}
+	var result CallToolResult
 
-	// Parse content list
-	contentArray, ok := resultMap["content"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("missing content list in response")
+	meta, ok := jsonContent["_meta"]
+	if ok {
+		if metaMap, ok := meta.(map[string]any); ok {
+			result.Meta = metaMap
+		}
 	}
 
-	// Parse content items
-	contents := make([]ToolContent, 0, len(contentArray))
-	for _, item := range contentArray {
-		content, err := parseToolContentItem(item)
+	isError, ok := jsonContent["isError"]
+	if ok {
+		if isErrorBool, ok := isError.(bool); ok {
+			result.IsError = isErrorBool
+		}
+	}
+
+	contents, ok := jsonContent["content"]
+	if !ok {
+		return nil, fmt.Errorf("content is missing")
+	}
+
+	contentArr, ok := contents.([]any)
+	if !ok {
+		return nil, fmt.Errorf("content is not an array")
+	}
+
+	for _, content := range contentArr {
+		// Extract content
+		contentMap, ok := content.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("content is not an object")
+		}
+
+		// Process content
+		content, err := ParseContent(contentMap)
 		if err != nil {
-			continue // or return error
+			return nil, err
 		}
-		contents = append(contents, content)
-	}
-	toolResult.Content = contents
 
-	// Parse error flag
-	if isError, ok := resultMap["isError"].(bool); ok {
-		toolResult.IsError = isError
+		result.Content = append(result.Content, content)
 	}
 
-	// Parse metadata (if present)
-	if meta, ok := resultMap["_meta"].(map[string]interface{}); ok {
-		toolResult.Meta = &ResultMeta{
-			AdditionalData: meta,
-		}
-	}
-
-	return toolResult, nil
+	return &result, nil
 }
 
-// parseToolContentItem parses a single content item
-func parseToolContentItem(item interface{}) (ToolContent, error) {
-	contentMap, ok := item.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid content item format")
-	}
+func ParseContent(contentMap map[string]any) (Content, error) {
+	contentType := ExtractString(contentMap, "type")
 
-	// Extract type
-	contentType, ok := contentMap["type"].(string)
-	if !ok {
-		return nil, fmt.Errorf("content item missing type")
-	}
-
-	// Create appropriate content object based on type
 	switch contentType {
 	case "text":
-		text, _ := contentMap["text"].(string)
-		return NewTextContent(text), nil
-	case "image":
-		data, _ := contentMap["data"].(string)
-		mimeType, _ := contentMap["mimeType"].(string)
-		return NewImageContent(data, mimeType), nil
-	case "audio":
-		data, _ := contentMap["data"].(string)
-		mimeType, _ := contentMap["mimeType"].(string)
-		return NewAudioContent(data, mimeType), nil
-	case "resource":
-		// Resource content needs special handling
-		if resource, ok := contentMap["resource"].(map[string]interface{}); ok {
-			// Use the raw resource data directly
-			return EmbeddedResource{
-				Type:     "resource",
-				Resource: resource,
-			}, nil
+		text := ExtractString(contentMap, "text")
+		if text == "" {
+			return nil, fmt.Errorf("text is missing")
 		}
-		return nil, fmt.Errorf("invalid resource content format")
-	default:
-		// For unknown types, create a generic content
-		return TextContent{
-			Type: contentType,
-			Text: fmt.Sprintf("Unknown content type: %s", contentType),
+		return NewTextContent(text), nil
+
+	case "image":
+		data := ExtractString(contentMap, "data")
+		mimeType := ExtractString(contentMap, "mimeType")
+		if data == "" || mimeType == "" {
+			return nil, fmt.Errorf("image data or mimeType is missing")
+		}
+		return NewImageContent(data, mimeType), nil
+
+	case "resource":
+		resourceMap := ExtractMap(contentMap, "resource")
+		if resourceMap == nil {
+			return nil, fmt.Errorf("resource is missing")
+		}
+
+		resourceContents, err := ParseResourceContents(resourceMap)
+		if err != nil {
+			return nil, err
+		}
+
+		return NewEmbeddedResource(resourceContents), nil
+	}
+
+	return nil, fmt.Errorf("unsupported content type: %s", contentType)
+}
+
+func ExtractString(data map[string]any, key string) string {
+	if value, ok := data[key]; ok {
+		if str, ok := value.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func ExtractMap(data map[string]any, key string) map[string]any {
+	if value, ok := data[key]; ok {
+		if m, ok := value.(map[string]any); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+func ParseResourceContents(contentMap map[string]any) (ResourceContents, error) {
+	uri := ExtractString(contentMap, "uri")
+	if uri == "" {
+		return nil, fmt.Errorf("resource uri is missing")
+	}
+
+	mimeType := ExtractString(contentMap, "mimeType")
+
+	if text := ExtractString(contentMap, "text"); text != "" {
+		return TextResourceContents{
+			URI:      uri,
+			MIMEType: mimeType,
+			Text:     text,
 		}, nil
 	}
+
+	if blob := ExtractString(contentMap, "blob"); blob != "" {
+		return BlobResourceContents{
+			URI:      uri,
+			MIMEType: mimeType,
+			Blob:     blob,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported resource type")
 }

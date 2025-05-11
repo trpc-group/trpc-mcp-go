@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 import (
 	"encoding/json"
@@ -6,47 +6,6 @@ import (
 	"io"
 	"net/http"
 )
-
-// JSONRPCRequest represents a JSON-RPC request
-// Conforms to the JSONRPCRequest definition in schema.json
-type JSONRPCRequest struct {
-	JSONRPC string                 `json:"jsonrpc"`
-	ID      interface{}            `json:"id,omitempty"`
-	Method  string                 `json:"method"`
-	Params  map[string]interface{} `json:"params,omitempty"`
-}
-
-// JSONRPCResponse represents a JSON-RPC response
-// Conforms to the JSONRPCResponse definition in schema.json
-type JSONRPCResponse struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      interface{}   `json:"id"`
-	Result  interface{}   `json:"result,omitempty"`
-	Error   *JSONRPCError `json:"error,omitempty"`
-}
-
-// JSONRPCNotification represents a JSON-RPC notification
-// Conforms to the JSONRPCNotification definition in schema.json
-type JSONRPCNotification struct {
-	JSONRPC string                 `json:"jsonrpc"`
-	Method  string                 `json:"method"`
-	Params  map[string]interface{} `json:"params,omitempty"`
-}
-
-// JSONRPCError represents a JSON-RPC error
-// Conforms to the JSONRPCError definition in schema.json
-type JSONRPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
-}
-
-// Backward compatibility type aliases
-// Note: These type aliases will be removed in future versions, please use the types with JSONRPC prefix
-type Request = JSONRPCRequest
-type Response = JSONRPCResponse
-type Notification = JSONRPCNotification
-type Error = JSONRPCError
 
 // Constants definition
 const (
@@ -62,25 +21,66 @@ const (
 	// MCP custom error code range: -32000 to -32099
 )
 
-// JSONRPCMessageType represents the type of a JSON-RPC message
-type JSONRPCMessageType string
+// JSONRPCBase contains the common fields for all JSON-RPC messages
+type JSONRPCBase struct {
+	JSONRPC string    `json:"jsonrpc"`
+	ID      RequestId `json:"id,omitempty"`
+}
 
-const (
-	JSONRPCMessageTypeRequest      JSONRPCMessageType = "request"
-	JSONRPCMessageTypeResponse     JSONRPCMessageType = "response"
-	JSONRPCMessageTypeNotification JSONRPCMessageType = "notification"
-	JSONRPCMessageTypeError        JSONRPCMessageType = "error"
-	JSONRPCMessageTypeUnknown      JSONRPCMessageType = "unknown"
-)
+// JSONRPCRequest represents a JSON-RPC request
+// Conforms to the JSONRPCRequest definition in schema.json
+type JSONRPCRequest struct {
+	JSONRPCBase
+	Params interface{} `json:"params,omitempty"`
+	Request
+}
+
+// JSONRPCResponse represents a JSON-RPC success response
+// Conforms to the JSONRPCResponse definition in schema.json
+type JSONRPCResponse struct {
+	JSONRPC string      `json:"jsonrpc"`
+	ID      RequestId   `json:"id"`
+	Result  interface{} `json:"result,omitempty"`
+}
+
+// JSONRPCError represents a JSON-RPC error response
+// Conforms to the JSONRPCError definition in schema.json
+type JSONRPCError struct {
+	JSONRPCBase
+	Error struct {
+		Code    int         `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data,omitempty"`
+	} `json:"error"`
+}
+
+// JSONRPCNotification represents a JSON-RPC notification
+// Conforms to the JSONRPCNotification definition in schema.json
+type JSONRPCNotification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Notification
+}
 
 // NewJSONRPCRequest creates a new JSON-RPC request
 func NewJSONRPCRequest(id interface{}, method string, params map[string]interface{}) *JSONRPCRequest {
-	return &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      id,
-		Method:  method,
-		Params:  params,
+	req := &JSONRPCRequest{
+		JSONRPCBase: JSONRPCBase{
+			JSONRPC: JSONRPCVersion,
+			ID:      id,
+		},
+		Request: Request{
+			Method: method,
+		},
 	}
+
+	// 如果 params 非空，需要单独处理
+	if params != nil {
+		// 将 params 直接赋值到 Params 字段，假设 Request 的 json tag 会正确处理
+		b, _ := json.Marshal(params)
+		json.Unmarshal(b, &req.Params)
+	}
+
+	return req
 }
 
 // NewJSONRPCResponse creates a new JSON-RPC response
@@ -93,37 +93,67 @@ func NewJSONRPCResponse(id interface{}, result interface{}) *JSONRPCResponse {
 }
 
 // NewJSONRPCErrorResponse creates a new JSON-RPC error response
-func NewJSONRPCErrorResponse(id interface{}, code int, message string, data interface{}) *JSONRPCResponse {
-	return &JSONRPCResponse{
-		JSONRPC: JSONRPCVersion,
-		ID:      id,
-		Error: &JSONRPCError{
-			Code:    code,
-			Message: message,
-			Data:    data,
+func NewJSONRPCErrorResponse(id interface{}, code int, message string, data interface{}) *JSONRPCError {
+	errResp := &JSONRPCError{
+		JSONRPCBase: JSONRPCBase{
+			JSONRPC: JSONRPCVersion,
+			ID:      id,
 		},
 	}
+	errResp.Error.Code = code
+	errResp.Error.Message = message
+	errResp.Error.Data = data
+	return errResp
 }
 
 // NewJSONRPCNotification creates a new JSON-RPC notification
-func NewJSONRPCNotification(method string, params map[string]interface{}) *JSONRPCNotification {
+func NewJSONRPCNotification(notification Notification) *JSONRPCNotification {
 	return &JSONRPCNotification{
-		JSONRPC: JSONRPCVersion,
-		Method:  method,
-		Params:  params,
+		JSONRPC:      JSONRPCVersion,
+		Notification: notification,
 	}
 }
 
-// Backward compatibility function aliases
-var (
-	// NewRequest is a backward compatibility alias for NewJSONRPCRequest
-	NewRequest = NewJSONRPCRequest
-	// NewResponse is a backward compatibility alias for NewJSONRPCResponse
-	NewResponse = NewJSONRPCResponse
-	// NewErrorResponse is a backward compatibility alias for NewJSONRPCErrorResponse
-	NewErrorResponse = NewJSONRPCErrorResponse
-	// NewNotification is a backward compatibility alias for NewJSONRPCNotification
-	NewNotification = NewJSONRPCNotification
+// NewJSONRPCNotificationFromMap creates a new JSON-RPC notification from a map of parameters
+// This is a convenience function that converts map[string]interface{} to NotificationParams
+func NewJSONRPCNotificationFromMap(method string, params map[string]interface{}) *JSONRPCNotification {
+	notificationParams := NotificationParams{
+		AdditionalFields: make(map[string]interface{}),
+	}
+
+	// Extract meta field if present
+	if meta, ok := params["_meta"]; ok {
+		if metaMap, ok := meta.(map[string]interface{}); ok {
+			notificationParams.Meta = metaMap
+		}
+		delete(params, "_meta")
+	}
+
+	// Add remaining fields to AdditionalFields
+	for k, v := range params {
+		notificationParams.AdditionalFields[k] = v
+	}
+
+	notification := Notification{
+		Method: method,
+		Params: notificationParams,
+	}
+
+	return NewJSONRPCNotification(notification)
+}
+
+// RequestId is the base request id struct for all MCP requests.
+type RequestId interface{}
+
+// JSONRPCMessageType represents the type of a JSON-RPC message
+type JSONRPCMessageType string
+
+const (
+	JSONRPCMessageTypeRequest      JSONRPCMessageType = "request"
+	JSONRPCMessageTypeResponse     JSONRPCMessageType = "response"
+	JSONRPCMessageTypeNotification JSONRPCMessageType = "notification"
+	JSONRPCMessageTypeError        JSONRPCMessageType = "error"
+	JSONRPCMessageTypeUnknown      JSONRPCMessageType = "unknown"
 )
 
 // ParseJSONRPCMessageType determines the type of a JSON-RPC message
@@ -160,28 +190,28 @@ func ParseJSONRPCMessage(data []byte) (interface{}, JSONRPCMessageType, error) {
 	// Parse into specific structure based on type
 	switch msgType {
 	case JSONRPCMessageTypeResponse:
-		var resp Response
+		var resp JSONRPCResponse
 		if err := json.Unmarshal(data, &resp); err != nil {
 			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC response: %w", err)
 		}
 		return &resp, msgType, nil
 
 	case JSONRPCMessageTypeError:
-		var respError Response // Error also uses Response type, just with Error field set
-		if err := json.Unmarshal(data, &respError); err != nil {
+		var errResp JSONRPCError
+		if err := json.Unmarshal(data, &errResp); err != nil {
 			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC error response: %w", err)
 		}
-		return &respError, msgType, nil
+		return &errResp, msgType, nil
 
 	case JSONRPCMessageTypeNotification:
-		var notification Notification
+		var notification JSONRPCNotification
 		if err := json.Unmarshal(data, &notification); err != nil {
 			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC notification: %w", err)
 		}
 		return &notification, msgType, nil
 
 	case JSONRPCMessageTypeRequest:
-		var request Request
+		var request JSONRPCRequest
 		if err := json.Unmarshal(data, &request); err != nil {
 			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC request: %w", err)
 		}
@@ -193,7 +223,7 @@ func ParseJSONRPCMessage(data []byte) (interface{}, JSONRPCMessageType, error) {
 }
 
 // IsResponseForRequest checks if a response corresponds to a specific request
-func IsResponseForRequest(resp *Response, reqID interface{}) bool {
+func IsResponseForRequest(resp *JSONRPCResponse, reqID interface{}) bool {
 	// Use string comparison to handle different types (numbers or strings)
 	return fmt.Sprintf("%v", resp.ID) == fmt.Sprintf("%v", reqID)
 }
@@ -201,15 +231,13 @@ func IsResponseForRequest(resp *Response, reqID interface{}) bool {
 // FormatJSONRPCMessage returns a description of a JSON-RPC message (for logging)
 func FormatJSONRPCMessage(msg interface{}) string {
 	switch m := msg.(type) {
-	case *Response:
-		if m.Error != nil {
-			return fmt.Sprintf("Error response(ID=%v, Code=%d): %s",
-				m.ID, m.Error.Code, m.Error.Message)
-		}
+	case *JSONRPCResponse:
 		return fmt.Sprintf("Response(ID=%v)", m.ID)
-	case *Notification:
+	case *JSONRPCError:
+		return fmt.Sprintf("Error(ID=%v, Code=%d, Message=%s)", m.ID, m.Error.Code, m.Error.Message)
+	case *JSONRPCNotification:
 		return fmt.Sprintf("Notification(Method=%s)", m.Method)
-	case *Request:
+	case *JSONRPCRequest:
 		return fmt.Sprintf("Request(ID=%v, Method=%s)", m.ID, m.Method)
 	default:
 		return "Unknown message type"
@@ -217,7 +245,7 @@ func FormatJSONRPCMessage(msg interface{}) string {
 }
 
 // ParseJSONRequest parses a JSON-RPC request from the request body
-func ParseJSONRequest(body io.ReadCloser, request *Request) error {
+func ParseJSONRequest(body io.ReadCloser, request *JSONRPCRequest) error {
 	defer body.Close()
 
 	// Read request body
@@ -268,26 +296,66 @@ func WriteJSONResponse(w http.ResponseWriter, response interface{}) error {
 }
 
 // GetMethodFromRequest extracts method from request
-func GetMethodFromRequest(req *Request) string {
+func GetMethodFromRequest(req *JSONRPCRequest) string {
 	return req.Method
 }
 
 // IsSuccessResponse checks if a response indicates success
-func IsSuccessResponse(resp *Response) bool {
-	return resp != nil && resp.Error == nil && resp.Result != nil
+func IsSuccessResponse(resp *json.RawMessage) bool {
+	// Check if the raw message contains an "error" field
+	var message map[string]interface{}
+	if err := json.Unmarshal(*resp, &message); err != nil {
+		return false
+	}
+	_, hasError := message["error"]
+	return !hasError
 }
 
 // IsErrorResponse checks if a response indicates error
-func IsErrorResponse(resp *Response) bool {
-	return resp != nil && resp.Error != nil
+func IsErrorResponse(resp *json.RawMessage) bool {
+	// Check if the raw message contains an "error" field
+	var message map[string]interface{}
+	if err := json.Unmarshal(*resp, &message); err != nil {
+		return false
+	}
+	_, hasError := message["error"]
+	return hasError
+}
+
+// ParseRawMessageToError parses a raw message into a JSONRPCError
+func ParseRawMessageToError(raw *json.RawMessage) (*JSONRPCError, error) {
+	var errResp JSONRPCError
+	if err := json.Unmarshal(*raw, &errResp); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON-RPC error: %w", err)
+	}
+	return &errResp, nil
+}
+
+// ParseRawMessageToResponse parses a raw message into a JSONRPCResponse
+func ParseRawMessageToResponse(raw *json.RawMessage) (*JSONRPCResponse, error) {
+	var resp JSONRPCResponse
+	if err := json.Unmarshal(*raw, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON-RPC response: %w", err)
+	}
+	return &resp, nil
 }
 
 // ParseJSONRPCResponse parses JSON-RPC response based on method
-func ParseJSONRPCResponse(resp *Response, method string) (interface{}, error) {
+func ParseJSONRPCResponse(rawResp *json.RawMessage, method string) (interface{}, error) {
 	// Check error
-	if IsErrorResponse(resp) {
+	if IsErrorResponse(rawResp) {
+		errResp, err := ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("JSON-RPC error response (Code=%d): %s",
-			resp.Error.Code, resp.Error.Message)
+			errResp.Error.Code, errResp.Error.Message)
+	}
+
+	// Parse success response
+	resp, err := ParseRawMessageToResponse(rawResp)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if result exists
@@ -304,8 +372,8 @@ func ParseMethodSpecificResponse(result interface{}, method string) (interface{}
 	switch method {
 	case MethodToolsList:
 		return ParseListToolsResult(result)
-	case MethodToolsCall:
-		return ParseCallToolResult(result)
+	//case MethodToolsCall:
+	//return ParseCallToolResult(result)
 	case MethodPromptsList:
 		return ParseListPromptsResult(result)
 	case MethodPromptsGet:
@@ -341,20 +409,20 @@ func ParseInitializeResult(result interface{}) (*InitializeResult, error) {
 }
 
 // NewToolResultResponse creates a response containing tool call result
-func NewToolResultResponse(id interface{}, result *CallToolResult) *Response {
+func NewToolResultResponse(id interface{}, result *CallToolResult) *JSONRPCResponse {
 	responseData := map[string]interface{}{
 		"content": result.Content,
 	}
 
-	// Automatically handle error flag
+	// Automatically handle an error flag
 	if result.IsError {
 		responseData["isError"] = true
 	}
 
 	// If there is metadata, include it
-	if result.Meta != nil && result.Meta.AdditionalData != nil {
-		responseData["_meta"] = result.Meta.AdditionalData
+	if result.Meta != nil {
+		responseData["_meta"] = result.Meta
 	}
 
-	return NewResponse(id, responseData)
+	return NewJSONRPCResponse(id, responseData)
 }

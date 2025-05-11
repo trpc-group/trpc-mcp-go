@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // StreamableHTTPClientTransport implements an HTTP-based MCP transport
@@ -54,7 +54,7 @@ type StreamableHTTPClientTransport struct {
 }
 
 // NotificationHandler is a handler for notifications
-type NotificationHandler func(notification *schema.Notification) error
+type NotificationHandler func(notification *mcp.JSONRPCNotification) error
 
 // StreamOptions represents streaming options
 type StreamOptions struct {
@@ -108,24 +108,69 @@ func WithEnableGetSSE(enabled bool) func(*StreamableHTTPClientTransport) {
 }
 
 // SendRequest sends a request and waits for a response
-func (t *StreamableHTTPClientTransport) SendRequest(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+func (t *StreamableHTTPClientTransport) SendRequest(ctx context.Context, req *mcp.JSONRPCRequest) (*json.RawMessage, error) {
 	return t.sendRequest(ctx, req, nil)
 }
 
 // SendRequestAndParse sends a request and parses the response, returning a result of a specific type
-func (t *StreamableHTTPClientTransport) SendRequestAndParse(ctx context.Context, req *schema.Request) (interface{}, error) {
+func (t *StreamableHTTPClientTransport) SendRequestAndParse(ctx context.Context, req *mcp.JSONRPCRequest) (interface{}, error) {
 	// Send request to get raw response
-	resp, err := t.SendRequest(ctx, req)
+	rawResp, err := t.SendRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use unified parsing function to handle the response
-	return schema.ParseJSONRPCResponse(resp, req.Method)
+	// Check for errors first
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("server error: %s (code: %d)", errResp.Error.Message, errResp.Error.Code)
+	}
+
+	// Parse the response based on method
+	var result interface{}
+	var parseErr error
+
+	switch req.Method {
+	case mcp.MethodInitialize:
+		result, parseErr = mcp.ParseInitializeResultFromJSON(rawResp)
+
+	case mcp.MethodToolsList:
+		result, parseErr = mcp.ParseListToolsResultFromJSON(rawResp)
+
+	case mcp.MethodToolsCall:
+		result, parseErr = mcp.ParseCallToolResult(rawResp)
+
+	case mcp.MethodPromptsList:
+		result, parseErr = mcp.ParseListPromptsResultFromJSON(rawResp)
+
+	case mcp.MethodPromptsGet:
+		result, parseErr = mcp.ParseGetPromptResultFromJSON(rawResp)
+
+	case mcp.MethodResourcesList:
+		result, parseErr = mcp.ParseListResourcesResultFromJSON(rawResp)
+
+	case mcp.MethodResourcesRead:
+		result, parseErr = mcp.ParseReadResourceResultFromJSON(rawResp)
+
+	default:
+		// Default fallback for unknown methods - attempt simple unmarshal
+		var genericResult interface{}
+		parseErr = json.Unmarshal(*rawResp, &genericResult)
+		result = genericResult
+	}
+
+	if parseErr != nil {
+		return nil, fmt.Errorf("failed to parse response for method %s: %v", req.Method, parseErr)
+	}
+
+	return result, nil
 }
 
 // sendRequest sends a request and handles the response
-func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *schema.Request, options *StreamOptions) (*schema.Response, error) {
+func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mcp.JSONRPCRequest, options *StreamOptions) (*json.RawMessage, error) {
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
@@ -162,7 +207,7 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *sc
 	if sessionID := httpResp.Header.Get(SessionIDHeader); sessionID != "" {
 		t.sessionID = sessionID
 		t.isStatelessMode = false
-	} else if req.Method == schema.MethodInitialize && !t.isStatelessMode {
+	} else if req.Method == mcp.MethodInitialize && !t.isStatelessMode {
 		// If this is an initialize request and no session ID was received, auto-detect as stateless mode
 		t.isStatelessMode = true
 		t.enableGetSSE = false // Disable GET SSE in stateless mode
@@ -189,25 +234,39 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *sc
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Use unified message parsing function
-	message, msgType, err := schema.ParseJSONRPCMessage(respBytes)
+	// Parse the response as a JSON-RPC response
+	var jsonResp map[string]interface{}
+	if err := json.Unmarshal(respBytes, &jsonResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	// Check if this is an error response
+	if _, hasError := jsonResp["error"]; hasError {
+		// Return the raw error response for error handling
+		rawMessage := json.RawMessage(respBytes)
+		return &rawMessage, nil
+	}
+
+	// Extract result part
+	resultData, ok := jsonResp["result"]
+	if !ok {
+		return nil, fmt.Errorf("response missing result field")
+	}
+
+	// Serialize result to JSON
+	resultBytes, err := json.Marshal(resultData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("failed to marshal result: %v", err)
 	}
 
-	// Confirm it's a response type
-	if msgType != schema.JSONRPCMessageTypeResponse && msgType != schema.JSONRPCMessageTypeError {
-		return nil, fmt.Errorf("received unexpected message type: %s", msgType)
-	}
-
-	// Return the response
-	return message.(*schema.Response), nil
+	rawMessage := json.RawMessage(resultBytes)
+	return &rawMessage, nil
 }
 
 // Handle SSE response
-func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, httpResp *http.Response, reqID interface{}, options *StreamOptions) (*schema.Response, error) {
+func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, httpResp *http.Response, reqID interface{}, options *StreamOptions) (*json.RawMessage, error) {
 	reader := bufio.NewReader(httpResp.Body)
-	var result *schema.Response
+	var rawResult *json.RawMessage
 	var resultReceived bool
 
 	// Merge notification handlers
@@ -230,14 +289,14 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 	for {
 		select {
 		case <-ctx.Done():
-			return result, ctx.Err()
+			return rawResult, ctx.Err()
 		default:
 			// Read SSE event
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				if err == io.EOF {
 					if resultReceived {
-						return result, nil
+						return rawResult, nil
 					}
 					return nil, fmt.Errorf("connection closed but no final response received")
 				}
@@ -260,59 +319,56 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 			if strings.HasPrefix(line, "data:") {
 				data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
-				// Use new unified parsing function
-				message, msgType, err := schema.ParseJSONRPCMessage([]byte(data))
-				if err != nil {
-					log.Infof("Failed to parse SSE data: %v", err)
-					continue
+				// Create a raw message from the data
+				rawMessage := json.RawMessage(data)
+
+				// First, check if it's a response to our request by looking at the ID
+				var jsonResp map[string]interface{}
+				if err := json.Unmarshal(rawMessage, &jsonResp); err == nil {
+					// Check if it has an ID that matches our request ID
+					if id, hasID := jsonResp["id"]; hasID && fmt.Sprintf("%v", id) == fmt.Sprintf("%v", reqID) {
+						// Check if it's an error response
+						if _, hasError := jsonResp["error"]; hasError {
+							// Return the raw error response for error handling
+							resultReceived = true
+							rawResult = &rawMessage
+							log.Infof("Received error response for ID: %v", reqID)
+							continue
+						}
+
+						// Extract result from the response
+						if result, hasResult := jsonResp["result"]; hasResult {
+							// Serialize just the result part
+							resultBytes, err := json.Marshal(result)
+							if err != nil {
+								return nil, fmt.Errorf("failed to marshal result: %v", err)
+							}
+
+							resultRaw := json.RawMessage(resultBytes)
+							rawResult = &resultRaw
+							resultReceived = true
+							log.Infof("Received matching response for ID: %v", reqID)
+
+							// If there are no other handlers, we can return early
+							if len(handlers) == 0 {
+								return rawResult, nil
+							}
+							continue
+						}
+					}
 				}
 
-				// Process based on message type
-				switch msgType {
-				case schema.JSONRPCMessageTypeResponse, schema.JSONRPCMessageTypeError:
-					// This is a response
-					resp := message.(*schema.Response)
-
-					// Check if it's the response we're expecting
-					if schema.IsResponseForRequest(resp, reqID) {
-						result = resp
-						resultReceived = true
-
-						log.Infof("Received matching response: %s", schema.FormatJSONRPCMessage(resp))
-
-						// If there are no other handlers, we can return early
-						if len(handlers) == 0 {
-							return result, nil
+				// Check if it's a notification
+				var notification mcp.JSONRPCNotification
+				if err := json.Unmarshal(rawMessage, &notification); err == nil && notification.Method != "" {
+					// Process notification
+					if handler, ok := handlers[notification.Method]; ok {
+						if err := handler(&notification); err != nil {
+							log.Infof("Notification handler error: %v", err)
 						}
 					} else {
-						// ID doesn't match, likely a response to another concurrent request, ignore it
-						log.Infof("Received non-matching response: %s", schema.FormatJSONRPCMessage(resp))
+						log.Infof("Received unhandled notification: %s", notification.Method)
 					}
-
-				case schema.JSONRPCMessageTypeNotification:
-					// This is a notification
-					notification := message.(*schema.Notification)
-
-					// Call the corresponding handler
-					if handler, exists := handlers[notification.Method]; exists {
-						if err := handler(notification); err != nil {
-							log.Infof("Failed to handle notification (%s): %v",
-								schema.FormatJSONRPCMessage(notification), err)
-						} else {
-							log.Infof("Successfully handled notification: %s",
-								schema.FormatJSONRPCMessage(notification))
-						}
-					} else {
-						log.Infof("Received unhandled notification: %s",
-							schema.FormatJSONRPCMessage(notification))
-					}
-
-				case schema.JSONRPCMessageTypeRequest:
-					// Clients typically don't handle requests
-					log.Infof("Received unexpected request message, ignored")
-
-				default:
-					log.Infof("Received unknown message type, ignored")
 				}
 			}
 		}
@@ -336,7 +392,7 @@ func (t *StreamableHTTPClientTransport) UnregisterNotificationHandler(method str
 }
 
 // SendNotification sends a notification (no response expected)
-func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, notification *schema.Notification) error {
+func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, notification *mcp.JSONRPCNotification) error {
 	// Serialize notification to JSON
 	notifBytes, err := json.Marshal(notification)
 	if err != nil {
@@ -377,7 +433,7 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 }
 
 // SendResponse sends a response (clients don't need to implement this method)
-func (t *StreamableHTTPClientTransport) SendResponse(ctx context.Context, resp *schema.Response) error {
+func (t *StreamableHTTPClientTransport) SendResponse(ctx context.Context, resp *mcp.JSONRPCResponse) error {
 	return fmt.Errorf("client transport does not support sending responses")
 }
 
@@ -557,15 +613,15 @@ func (t *StreamableHTTPClientTransport) processSSEEvent(eventID, eventData strin
 	log.Infof("Received GET SSE event: ID=%s, data length: %d", eventID, len(eventData))
 
 	// Use the new unified parsing function to parse the message
-	message, msgType, err := schema.ParseJSONRPCMessage([]byte(eventData))
+	message, msgType, err := mcp.ParseJSONRPCMessage([]byte(eventData))
 	if err != nil {
 		log.Infof("Failed to parse SSE event: %v", err)
 		return
 	}
 
 	// Only handle notification type messages
-	if msgType == schema.JSONRPCMessageTypeNotification {
-		notification := message.(*schema.Notification)
+	if msgType == mcp.JSONRPCMessageTypeNotification {
+		notification := message.(*mcp.JSONRPCNotification)
 
 		// Call the appropriate handler
 		t.handlersMutex.RLock()
@@ -575,14 +631,14 @@ func (t *StreamableHTTPClientTransport) processSSEEvent(eventID, eventData strin
 		if ok && handler != nil {
 			if err := handler(notification); err != nil {
 				log.Infof("Failed to handle notification: %s, error: %v",
-					schema.FormatJSONRPCMessage(notification), err)
+					mcp.FormatJSONRPCMessage(notification), err)
 			} else {
 				log.Infof("Successfully handled notification: %s",
-					schema.FormatJSONRPCMessage(notification))
+					mcp.FormatJSONRPCMessage(notification))
 			}
 		} else {
 			log.Infof("Received notification with no registered handler: %s",
-				schema.FormatJSONRPCMessage(notification))
+				mcp.FormatJSONRPCMessage(notification))
 		}
 	} else {
 		// In GET SSE connection, we expect to receive only notifications
@@ -637,12 +693,7 @@ func (t *StreamableHTTPClientTransport) IsStatelessMode() bool {
 	return t.isStatelessMode
 }
 
-// SendRequestWithStream sends a streaming request
-func (t *StreamableHTTPClientTransport) SendRequestWithStream(ctx context.Context, req *schema.Request, options *StreamOptions) (*schema.Response, error) {
-	// If no options provided, create a new one
-	if options == nil {
-		options = &StreamOptions{}
-	}
-
+// SendRequestWithStream sends a request with streaming options
+func (t *StreamableHTTPClientTransport) SendRequestWithStream(ctx context.Context, req *mcp.JSONRPCRequest, options *StreamOptions) (*json.RawMessage, error) {
 	return t.sendRequest(ctx, req, options)
 }

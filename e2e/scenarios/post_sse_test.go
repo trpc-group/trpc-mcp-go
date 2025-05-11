@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/e2e"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // TestSSEMode tests the basic SSE mode functionality.
@@ -34,7 +34,7 @@ func TestSSEMode(t *testing.T) {
 		require.Len(t, content, 1, "Should have only one content")
 
 		// Type assert to TextContent.
-		textContent, ok := content[0].(schema.TextContent)
+		textContent, ok := content[0].(mcp.TextContent)
 		assert.True(t, ok, "Content should be of type TextContent")
 		assert.Equal(t, "text", textContent.Type, "Content type should be text")
 		assert.Contains(t, textContent.Text, "Hello, SSE Test", "Greet content should contain username")
@@ -74,7 +74,7 @@ func TestSSEProgress(t *testing.T) {
 		require.Len(t, content, 1, "Should have only one content")
 
 		// Type assert to TextContent.
-		textContent, ok := content[0].(schema.TextContent)
+		textContent, ok := content[0].(mcp.TextContent)
 		assert.True(t, ok, "Content should be of type TextContent")
 		assert.Equal(t, "text", textContent.Type, "Content type should be text")
 		assert.Equal(t, "SSE progress test succeeded", textContent.Text, "Final message should be the specified message")
@@ -92,22 +92,28 @@ func TestSSEProgress(t *testing.T) {
 		progressNotifications := collector.GetProgressNotifications()
 		for i, notification := range progressNotifications {
 			// Verify progress parameter.
-			progress, ok := notification.Params["progress"].(float64)
+			progress, ok := notification.Params.AdditionalFields["progress"].(float64)
 			assert.True(t, ok, "Progress parameter should be float64")
 			expectedProgress := float64(i+1) / float64(steps)
 			assert.InDelta(t, expectedProgress, progress, 0.01, "Progress value for step %d should be %f", i+1, expectedProgress)
 
 			// Verify message parameter.
-			message, ok := notification.Params["message"].(string)
+			message, ok := notification.Params.AdditionalFields["message"].(string)
 			assert.True(t, ok, "Message parameter should be string")
-			assert.Contains(t, message, "step", "Progress message should contain 'step'")
+			assert.Contains(t, message, "Step", "Progress message should contain 'step'")
 		}
 
 		// Verify log messages.
 		logNotifications := collector.GetLogNotifications()
 		require.Len(t, logNotifications, 5, "Should have 5 log messages")
-		assert.Equal(t, "info", logNotifications[0].Params["level"], "Log level should be info")
-		assert.Contains(t, logNotifications[0].Params["data"].(string), "completed", "Log message should contain 'completed'")
+		assert.Equal(t, "info", logNotifications[0].Params.AdditionalFields["level"], "Log level should be info")
+		dataMap, ok := logNotifications[0].Params.AdditionalFields["data"].(map[string]interface{})
+		assert.True(t, ok, "Data parameter should be map[string]interface{}")
+		var messageStr string
+		var isString bool
+		messageStr, isString = dataMap["message"].(string)
+		assert.True(t, isString, "Message should be a string in data map")
+		assert.Contains(t, messageStr, "Finished", "Log message should contain 'Finished'")
 	})
 }
 
@@ -147,7 +153,7 @@ func TestSSEReconnection(t *testing.T) {
 		require.Len(t, content, 1, "Should have only one content")
 
 		// Type assert to TextContent.
-		textContent, ok := content[0].(schema.TextContent)
+		textContent, ok := content[0].(mcp.TextContent)
 		assert.True(t, ok, "Content should be of type TextContent")
 		assert.Equal(t, "text", textContent.Type, "Content type should be text")
 
@@ -183,7 +189,7 @@ func TestSSEReconnection(t *testing.T) {
 		require.Len(t, content, 1, "Should have only one content")
 
 		// Type assert to TextContent.
-		textContent, ok := content[0].(schema.TextContent)
+		textContent, ok := content[0].(mcp.TextContent)
 		assert.True(t, ok, "Content should be of type TextContent")
 		assert.Equal(t, "Second call", textContent.Text, "Final message should be the specified message")
 

@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // NewMockTool creates a new mock tool
-func NewMockTool(name, description string, toolSchema map[string]interface{}) *schema.Tool {
-	opts := []schema.ToolOption{
-		schema.WithDescription(description),
+func NewMockTool(name, description string, toolSchema map[string]interface{}) *mcp.Tool {
+	opts := []mcp.ToolOption{
+		mcp.WithDescription(description),
 	}
 
 	// If schema is provided, add parameters
@@ -24,11 +24,11 @@ func NewMockTool(name, description string, toolSchema map[string]interface{}) *s
 					if paramType, ok := paramMap["type"].(string); ok {
 						switch paramType {
 						case "string":
-							opts = append(opts, schema.WithString(paramName))
+							opts = append(opts, mcp.WithString(paramName))
 						case "number":
-							opts = append(opts, schema.WithNumber(paramName))
+							opts = append(opts, mcp.WithNumber(paramName))
 						case "boolean":
-							opts = append(opts, schema.WithBoolean(paramName))
+							opts = append(opts, mcp.WithBoolean(paramName))
 						}
 					}
 				}
@@ -36,9 +36,9 @@ func NewMockTool(name, description string, toolSchema map[string]interface{}) *s
 		}
 	}
 
-	return schema.NewTool(name,
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			return schema.NewTextResult("Mock tool execution result"), nil
+	return mcp.NewTool(name,
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewTextResult("Mock tool execution result"), nil
 		},
 		opts...,
 	)
@@ -131,7 +131,7 @@ func TestToolManager_GetTools(t *testing.T) {
 	assert.Len(t, tools, 2)
 
 	// Verify tool information
-	var tool1Info, tool2Info *schema.Tool
+	var tool1Info, tool2Info *mcp.Tool
 	for _, tool := range tools {
 		if tool.Name == "tool1" {
 			tool1Info = tool
@@ -166,7 +166,7 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request
-	req := schema.NewRequest("call-1", schema.MethodToolsCall, map[string]interface{}{
+	req := mcp.NewJSONRPCRequest("call-1", mcp.MethodToolsCall, map[string]interface{}{
 		"name": "test-exec-tool",
 		"arguments": map[string]interface{}{
 			"param1": "value1",
@@ -177,10 +177,13 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	resp, err := manager.HandleCallTool(ctx, req, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Nil(t, resp.Error)
+
+	// Type assert to JSONRPCResponse
+	successResp, ok := resp.(mcp.JSONRPCResponse)
+	assert.True(t, ok, "Expected JSONRPCResponse but got different type")
 
 	// Verify response content
-	result, ok := resp.Result.(map[string]interface{})
+	result, ok := successResp.Result.(map[string]interface{})
 	assert.True(t, ok)
 
 	// Verify content field
@@ -195,13 +198,16 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	assert.Equal(t, "Mock tool execution result", contentItem["text"])
 
 	// Test executing a non-existent tool
-	req = schema.NewRequest("call-2", schema.MethodToolsCall, map[string]interface{}{
+	req = mcp.NewJSONRPCRequest("call-2", mcp.MethodToolsCall, map[string]interface{}{
 		"name": "non-existent-tool",
 	})
 
 	resp, err = manager.HandleCallTool(ctx, req, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.NotNil(t, resp.Error)
-	assert.Equal(t, schema.ErrMethodNotFound, resp.Error.Code)
+
+	// Type assert to JSONRPCError
+	errorResp, ok := resp.(mcp.JSONRPCError)
+	assert.True(t, ok, "Expected JSONRPCError but got different type")
+	assert.Equal(t, mcp.ErrMethodNotFound, errorResp.Error.Code)
 }

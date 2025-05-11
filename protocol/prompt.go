@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // PromptManager manages prompt templates
@@ -19,7 +19,7 @@ import (
 // This design simplifies API usage, eliminating the need for explicit configuration parameters to enable or disable prompt functionality.
 type PromptManager struct {
 	// Prompt mapping table
-	prompts map[string]*schema.Prompt
+	prompts map[string]*mcp.Prompt
 
 	// Mutex
 	mu sync.RWMutex
@@ -31,12 +31,12 @@ type PromptManager struct {
 // it is only enabled when the first prompt is added.
 func NewPromptManager() *PromptManager {
 	return &PromptManager{
-		prompts: make(map[string]*schema.Prompt),
+		prompts: make(map[string]*mcp.Prompt),
 	}
 }
 
 // RegisterPrompt registers a prompt
-func (m *PromptManager) RegisterPrompt(prompt *schema.Prompt) error {
+func (m *PromptManager) RegisterPrompt(prompt *mcp.Prompt) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -57,7 +57,7 @@ func (m *PromptManager) RegisterPrompt(prompt *schema.Prompt) error {
 }
 
 // GetPrompt retrieves a prompt
-func (m *PromptManager) GetPrompt(name string) (*schema.Prompt, bool) {
+func (m *PromptManager) GetPrompt(name string) (*mcp.Prompt, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -66,11 +66,11 @@ func (m *PromptManager) GetPrompt(name string) (*schema.Prompt, bool) {
 }
 
 // GetPrompts retrieves all prompts
-func (m *PromptManager) GetPrompts() []*schema.Prompt {
+func (m *PromptManager) GetPrompts() []*mcp.Prompt {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	prompts := make([]*schema.Prompt, 0, len(m.prompts))
+	prompts := make([]*mcp.Prompt, 0, len(m.prompts))
 	for _, prompt := range m.prompts {
 		prompts = append(prompts, prompt)
 	}
@@ -78,43 +78,51 @@ func (m *PromptManager) GetPrompts() []*schema.Prompt {
 }
 
 // HandleListPrompts handles listing prompts requests
-func (m *PromptManager) HandleListPrompts(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+func (m *PromptManager) HandleListPrompts(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
 	prompts := m.GetPrompts()
-	result := &schema.ListPromptsResponse{
-		Prompts: make([]schema.Prompt, len(prompts)),
-	}
 
+	// Convert []*mcp.Prompt to []mcp.Prompt for the result
+	resultPrompts := make([]mcp.Prompt, len(prompts))
 	for i, prompt := range prompts {
-		result.Prompts[i] = *prompt
+		resultPrompts[i] = *prompt
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	result := &mcp.ListPromptsResult{
+		Prompts: resultPrompts,
+	}
+
+	return result, nil
 }
 
 // HandleGetPrompt handles retrieving prompt requests
-func (m *PromptManager) HandleGetPrompt(ctx context.Context, req *schema.Request) (*schema.Response, error) {
-	// Get prompt name from parameters
-	params := req.Params
-	name, ok := params["name"].(string)
+func (m *PromptManager) HandleGetPrompt(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing prompt name", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+	}
+
+	// Get prompt name from parameters
+	name, ok := paramsMap["name"].(string)
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing prompt name", nil), nil
 	}
 
 	// Get prompt
 	prompt, exists := m.GetPrompt(name)
 	if !exists {
-		return schema.NewErrorResponse(req.ID, schema.ErrMethodNotFound, fmt.Sprintf("prompt %s does not exist", name), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("prompt %s does not exist", name), nil), nil
 	}
 
 	// Get arguments
-	arguments, ok := params["arguments"].(map[string]interface{})
+	arguments, ok := paramsMap["arguments"].(map[string]interface{})
 	if !ok {
 		arguments = make(map[string]interface{})
 	}
 
 	// Create response
 	// Generate actual messages based on prompt type and parameters
-	messages := []map[string]interface{}{}
+	messages := []mcp.PromptMessage{}
 
 	// Add an example user message
 	userPrompt := fmt.Sprintf("This is an example rendering of the %s prompt.", prompt.Name)
@@ -129,68 +137,73 @@ func (m *PromptManager) HandleGetPrompt(ctx context.Context, req *schema.Request
 	}
 
 	// Add user message
-	messages = append(messages, map[string]interface{}{
-		"role": "user",
-		"content": map[string]interface{}{
-			"type": "text",
-			"text": userPrompt,
+	messages = append(messages, mcp.PromptMessage{
+		Role: "user",
+		Content: mcp.TextContent{
+			Type: "text",
+			Text: userPrompt,
 		},
 	})
 
-	result := map[string]interface{}{
-		"description": prompt.Description,
-		"messages":    messages,
+	result := &mcp.GetPromptResult{
+		Description: prompt.Description,
+		Messages:    messages,
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	return result, nil
 }
 
 // HandleCompletionComplete handles prompt completion requests
-func (m *PromptManager) HandleCompletionComplete(ctx context.Context, req *schema.Request) (*schema.Response, error) {
-	// Get reference type and name from parameters
-	params := req.Params
-	ref, ok := params["ref"].(map[string]interface{})
+func (m *PromptManager) HandleCompletionComplete(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing reference information", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+	}
+
+	// Get reference type and name from parameters
+	ref, ok := paramsMap["ref"].(map[string]interface{})
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing reference information", nil), nil
 	}
 
 	// Check reference type
 	refType, ok := ref["type"].(string)
 	if !ok || refType != "ref/prompt" {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "invalid reference type", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid reference type", nil), nil
 	}
 
 	// Get prompt name
 	promptName, ok := ref["name"].(string)
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing prompt name", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing prompt name", nil), nil
 	}
 
 	// Get prompt
 	prompt, exists := m.GetPrompt(promptName)
 	if !exists {
-		return schema.NewErrorResponse(req.ID, schema.ErrMethodNotFound, fmt.Sprintf("prompt %s does not exist", promptName), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("prompt %s does not exist", promptName), nil), nil
 	}
 
 	// Get arguments
-	argument, ok := params["argument"].(map[string]interface{})
+	argument, ok := paramsMap["argument"].(map[string]interface{})
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing arguments", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing arguments", nil), nil
 	}
 
 	// Extract argument name and value
 	argName, ok := argument["name"].(string)
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing argument name", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing argument name", nil), nil
 	}
 
 	argValue, ok := argument["value"].(string)
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing argument value", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing argument value", nil), nil
 	}
 
 	// Check if argument is valid
-	var foundArg *schema.PromptArgument
+	var foundArg *mcp.PromptArgument
 	for _, arg := range prompt.Arguments {
 		if arg.Name == argName {
 			foundArg = &arg
@@ -199,15 +212,20 @@ func (m *PromptManager) HandleCompletionComplete(ctx context.Context, req *schem
 	}
 
 	if foundArg == nil {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, fmt.Sprintf("argument %s not found in prompt", argName), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, fmt.Sprintf("argument %s not found in prompt", argName), nil), nil
 	}
 
 	// Create a response with completion results
 	// In a real implementation, you would process the prompt with the given argument
 	// Here we just return an example completion
+	values := []string{fmt.Sprintf("Completion for %s with %s=%s", promptName, argName, argValue)}
+
+	// Create a standard map response structure for completions
 	result := map[string]interface{}{
-		"completion": fmt.Sprintf("Completion for %s with %s=%s", promptName, argName, argValue),
+		"completion": map[string]interface{}{
+			"values": values,
+		},
 	}
 
-	return schema.NewResponse(req.ID, result), nil
+	return result, nil
 }

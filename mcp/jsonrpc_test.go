@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 import (
 	"testing"
@@ -21,10 +21,14 @@ func TestNewJSONRPCRequest(t *testing.T) {
 			method: "test.method",
 			params: nil,
 			expected: &JSONRPCRequest{
-				JSONRPC: JSONRPCVersion,
-				ID:      1,
-				Method:  "test.method",
-				Params:  nil,
+				JSONRPCBase: JSONRPCBase{
+					JSONRPC: JSONRPCVersion,
+					ID:      1,
+				},
+				Request: Request{
+					Method: "test.method",
+				},
+				Params: nil,
 			},
 		},
 		{
@@ -36,9 +40,13 @@ func TestNewJSONRPCRequest(t *testing.T) {
 				"arguments": map[string]interface{}{"param1": "value1"},
 			},
 			expected: &JSONRPCRequest{
-				JSONRPC: JSONRPCVersion,
-				ID:      "request-1",
-				Method:  "tools/call",
+				JSONRPCBase: JSONRPCBase{
+					JSONRPC: JSONRPCVersion,
+					ID:      "request-1",
+				},
+				Request: Request{
+					Method: "tools/call",
+				},
 				Params: map[string]interface{}{
 					"name":      "test-tool",
 					"arguments": map[string]interface{}{"param1": "value1"},
@@ -58,17 +66,6 @@ func TestNewJSONRPCRequest(t *testing.T) {
 			assert.Equal(t, tc.expected.Params, result.Params)
 		})
 	}
-
-	// Test backward compatibility function
-	t.Run("Backward compatibility", func(t *testing.T) {
-		req1 := NewJSONRPCRequest(1, "test.method", nil)
-		req2 := NewRequest(1, "test.method", nil)
-
-		assert.Equal(t, req1.JSONRPC, req2.JSONRPC)
-		assert.Equal(t, req1.ID, req2.ID)
-		assert.Equal(t, req1.Method, req2.Method)
-		assert.Equal(t, req1.Params, req2.Params)
-	})
 }
 
 func TestNewJSONRPCResponse(t *testing.T) {
@@ -87,7 +84,6 @@ func TestNewJSONRPCResponse(t *testing.T) {
 				JSONRPC: JSONRPCVersion,
 				ID:      1,
 				Result:  "test-result",
-				Error:   nil,
 			},
 		},
 		{
@@ -102,7 +98,6 @@ func TestNewJSONRPCResponse(t *testing.T) {
 				Result: map[string]interface{}{
 					"data": []string{"item1", "item2"},
 				},
-				Error: nil,
 			},
 		},
 	}
@@ -115,19 +110,8 @@ func TestNewJSONRPCResponse(t *testing.T) {
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
 			assert.Equal(t, tc.expected.Result, result.Result)
-			assert.Nil(t, result.Error)
 		})
 	}
-
-	// Test backward compatibility function
-	t.Run("Backward compatibility", func(t *testing.T) {
-		resp1 := NewJSONRPCResponse(1, "test-result")
-		resp2 := NewResponse(1, "test-result")
-
-		assert.Equal(t, resp1.JSONRPC, resp2.JSONRPC)
-		assert.Equal(t, resp1.ID, resp2.ID)
-		assert.Equal(t, resp1.Result, resp2.Result)
-	})
 }
 
 func TestNewJSONRPCErrorResponse(t *testing.T) {
@@ -138,7 +122,7 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 		code     int
 		message  string
 		data     interface{}
-		expected *JSONRPCResponse
+		expected *JSONRPCError
 	}{
 		{
 			name:    "Simple error",
@@ -146,11 +130,16 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 			code:    ErrInvalidRequest,
 			message: "Invalid request",
 			data:    nil,
-			expected: &JSONRPCResponse{
-				JSONRPC: JSONRPCVersion,
-				ID:      1,
-				Result:  nil,
-				Error: &JSONRPCError{
+			expected: &JSONRPCError{
+				JSONRPCBase: JSONRPCBase{
+					JSONRPC: JSONRPCVersion,
+					ID:      1,
+				},
+				Error: struct {
+					Code    int         `json:"code"`
+					Message string      `json:"message"`
+					Data    interface{} `json:"data,omitempty"`
+				}{
 					Code:    ErrInvalidRequest,
 					Message: "Invalid request",
 					Data:    nil,
@@ -163,11 +152,16 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 			code:    ErrMethodNotFound,
 			message: "Method not found",
 			data:    "Requested method not found",
-			expected: &JSONRPCResponse{
-				JSONRPC: JSONRPCVersion,
-				ID:      "error-1",
-				Result:  nil,
-				Error: &JSONRPCError{
+			expected: &JSONRPCError{
+				JSONRPCBase: JSONRPCBase{
+					JSONRPC: JSONRPCVersion,
+					ID:      "error-1",
+				},
+				Error: struct {
+					Code    int         `json:"code"`
+					Message string      `json:"message"`
+					Data    interface{} `json:"data,omitempty"`
+				}{
 					Code:    ErrMethodNotFound,
 					Message: "Method not found",
 					Data:    "Requested method not found",
@@ -183,7 +177,6 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
-			assert.Nil(t, result.Result)
 			assert.Equal(t, tc.expected.Error.Code, result.Error.Code)
 			assert.Equal(t, tc.expected.Error.Message, result.Error.Message)
 			assert.Equal(t, tc.expected.Error.Data, result.Error.Data)
@@ -193,7 +186,7 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 	// Test backward compatibility function
 	t.Run("Backward compatibility", func(t *testing.T) {
 		errResp1 := NewJSONRPCErrorResponse(1, ErrInvalidRequest, "Invalid request", nil)
-		errResp2 := NewErrorResponse(1, ErrInvalidRequest, "Invalid request", nil)
+		errResp2 := NewJSONRPCErrorResponse(1, ErrInvalidRequest, "Invalid request", nil)
 
 		assert.Equal(t, errResp1.JSONRPC, errResp2.JSONRPC)
 		assert.Equal(t, errResp1.ID, errResp2.ID)
@@ -207,32 +200,47 @@ func TestNewJSONRPCNotification(t *testing.T) {
 	testCases := []struct {
 		name     string
 		method   string
-		params   map[string]interface{}
+		params   NotificationParams
 		expected *JSONRPCNotification
 	}{
 		{
 			name:   "Notification without parameters",
 			method: "notifications/initialized",
-			params: nil,
+			params: NotificationParams{
+				Meta: nil,
+			},
 			expected: &JSONRPCNotification{
 				JSONRPC: JSONRPCVersion,
-				Method:  "notifications/initialized",
-				Params:  nil,
+				Notification: Notification{
+					Method: "notifications/initialized",
+					Params: NotificationParams{
+						Meta:             nil,
+						AdditionalFields: nil,
+					},
+				},
 			},
 		},
 		{
 			name:   "Notification with parameters",
 			method: "utilities/logging",
-			params: map[string]interface{}{
-				"level": "info",
-				"data":  "Test log message",
+			params: NotificationParams{
+				Meta: nil,
+				AdditionalFields: map[string]interface{}{
+					"level": "info",
+					"data":  "Test log message",
+				},
 			},
 			expected: &JSONRPCNotification{
 				JSONRPC: JSONRPCVersion,
-				Method:  "utilities/logging",
-				Params: map[string]interface{}{
-					"level": "info",
-					"data":  "Test log message",
+				Notification: Notification{
+					Method: "utilities/logging",
+					Params: NotificationParams{
+						Meta: nil,
+						AdditionalFields: map[string]interface{}{
+							"level": "info",
+							"data":  "Test log message",
+						},
+					},
 				},
 			},
 		},
@@ -241,21 +249,18 @@ func TestNewJSONRPCNotification(t *testing.T) {
 	// Execute tests
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := NewJSONRPCNotification(tc.method, tc.params)
+			inputMap := make(map[string]interface{})
+			if tc.params.Meta != nil {
+				inputMap["_meta"] = tc.params.Meta
+			}
+			for k, v := range tc.params.AdditionalFields {
+				inputMap[k] = v
+			}
+			result := NewJSONRPCNotificationFromMap(tc.method, inputMap)
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.Method, result.Method)
 			assert.Equal(t, tc.expected.Params, result.Params)
 		})
 	}
-
-	// Test backward compatibility function
-	t.Run("Backward compatibility", func(t *testing.T) {
-		notif1 := NewJSONRPCNotification("notifications/initialized", nil)
-		notif2 := NewNotification("notifications/initialized", nil)
-
-		assert.Equal(t, notif1.JSONRPC, notif2.JSONRPC)
-		assert.Equal(t, notif1.Method, notif2.Method)
-		assert.Equal(t, notif1.Params, notif2.Params)
-	})
 }

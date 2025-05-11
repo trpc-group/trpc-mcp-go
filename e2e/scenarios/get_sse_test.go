@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/e2e"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 // TestGetSSEBasic tests the basic GET SSE connection and notification functionality.
@@ -52,18 +52,17 @@ func TestGetSSEBasic(t *testing.T) {
 	require.NotEmpty(t, sessionID, "Session ID should not be empty")
 
 	// Send system status notification to session.
-	statusNotification := &schema.Notification{
-		Method: "notifications/message",
-		Params: map[string]interface{}{
-			"level": "info",
-			"data": map[string]interface{}{
-				"cpu":        75.5,
-				"memory":     60.2,
-				"disk":       45.8,
-				"network":    120.5,
-				"conditions": "normal",
-				"timestamp":  time.Now().Unix(),
-			},
+	statusNotification := &mcp.JSONRPCNotification{}
+	statusNotification.Method = "notifications/message"
+	statusNotification.Params.AdditionalFields = map[string]interface{}{
+		"level": "info",
+		"data": map[string]interface{}{
+			"cpu":        75.5,
+			"memory":     60.2,
+			"disk":       45.8,
+			"network":    120.5,
+			"conditions": "normal",
+			"timestamp":  time.Now().Unix(),
 		},
 	}
 
@@ -91,7 +90,7 @@ func TestGetSSEBasic(t *testing.T) {
 	assert.Equal(t, "notifications/message", notifications[0].Method, "Notification method should match")
 
 	// Verify notification content.
-	params := notifications[0].Params
+	params := notifications[0].Params.AdditionalFields
 	assert.Equal(t, "info", params["level"], "Notification level should be info")
 	data, ok := params["data"].(map[string]interface{})
 	require.True(t, ok, "data field should be an object")

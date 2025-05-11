@@ -2,8 +2,9 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // HTTP Header constants
@@ -20,13 +21,13 @@ const (
 // Transport represents the interface for the communication transport layer
 type Transport interface {
 	// Send a request and wait for a response
-	SendRequest(ctx context.Context, req *schema.Request) (*schema.Response, error)
+	SendRequest(ctx context.Context, req *mcp.JSONRPCRequest) (*json.RawMessage, error)
 
 	// Send a notification (no response expected)
-	SendNotification(ctx context.Context, notification *schema.Notification) error
+	SendNotification(ctx context.Context, notification *mcp.JSONRPCNotification) error
 
 	// Send a response
-	SendResponse(ctx context.Context, resp *schema.Response) error
+	SendResponse(ctx context.Context, resp *mcp.JSONRPCResponse) error
 
 	// Close the transport
 	Close() error

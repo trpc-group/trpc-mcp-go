@@ -1,6 +1,40 @@
-package schema
+package mcp
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// ListPromptsRequest describes a request to list prompts.
+type ListPromptsRequest struct {
+	PaginatedRequest
+}
+
+// ListPromptsResult describes a result of listing prompts.
+type ListPromptsResult struct {
+	PaginatedResult
+	Prompts []Prompt `json:"prompts"`
+}
+
+// GetPromptRequest describes a request to get a prompt.
+type GetPromptRequest struct {
+	Request
+	Params struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments,omitempty"`
+	} `json:"params"`
+}
+
+// GetPromptResult describes a result of getting a prompt.
+type GetPromptResult struct {
+	Result
+	Description string          `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
+}
+
+type PromptListChangedNotification struct {
+	Notification
+}
 
 // Prompt represents a prompt or prompt template provided by the server
 type Prompt struct {
@@ -35,7 +69,44 @@ type PromptMessage struct {
 	Role Role `json:"role"`
 
 	// Message content
-	Content interface{} `json:"content"`
+	Content Content `json:"content"`
+}
+
+// UnmarshalJSON implements custom unmarshaling for PromptMessage to handle polymorphic Content.
+func (pm *PromptMessage) UnmarshalJSON(data []byte) error {
+	type Alias PromptMessage // Create an alias to avoid recursion with UnmarshalJSON.
+	temp := &struct {
+		Content json.RawMessage `json:"content"` // Capture content as raw message first.
+		*Alias
+	}{
+		Alias: (*Alias)(pm),
+	}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return fmt.Errorf("failed to unmarshal prompt message structure: %w", err)
+	}
+
+	if temp.Content != nil && len(temp.Content) > 0 && string(temp.Content) != "null" {
+		// Use mcp.ParseContent (from mcp/tools.go, assuming it's accessible)
+		// to parse the raw JSON into the correct concrete Content type.
+		var contentMap map[string]interface{}
+		if err := json.Unmarshal(temp.Content, &contentMap); err != nil {
+			return fmt.Errorf("failed to unmarshal content field to map for ParseContent: %w", err)
+		}
+
+		// Assuming ParseContent is a function in the mcp package (e.g., mcp.ParseContent)
+		// If it's not directly accessible, this call needs adjustment (e.g., qualifying with package if different and public).
+		// For this example, we assume it can be called directly if in the same package or mcp.ParseContent if ParseContent is public.
+		concreteContent, err := ParseContent(contentMap) // This function is in mcp/tools.go (mcp.ParseContent)
+		if err != nil {
+			return fmt.Errorf("failed to parse concrete content using ParseContent: %w", err)
+		}
+		pm.Content = concreteContent
+	} else {
+		// If content is null or not present, set it to nil.
+		pm.Content = nil
+	}
+	return nil
 }
 
 // GetPromptResponse represents the response when getting a prompt
@@ -204,7 +275,7 @@ func parsePromptMessageItem(item interface{}) (PromptMessage, error) {
 
 	// Extract content
 	if content, ok := msgMap["content"]; ok {
-		message.Content = content
+		message.Content = content.(Content)
 	} else {
 		return PromptMessage{}, fmt.Errorf("message missing content")
 	}

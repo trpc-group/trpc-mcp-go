@@ -5,124 +5,124 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/e2e"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
-// TestStreamingContent 测试流式内容从服务器到客户端的传输
+// TestStreamingContent tests streaming content transmission from server to client.
 func TestStreamingContent(t *testing.T) {
-	// 设置测试服务器
+	// Set up test server.
 	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
-	// 创建测试客户端
+	// Create test client.
 	client := e2e.CreateTestClient(t, serverURL)
 	defer e2e.CleanupClient(t, client)
 
-	// 初始化客户端
+	// Initialize client.
 	e2e.InitializeClient(t, client)
 
-	// 测试流式问候工具
+	// Test streaming greet tool.
 	t.Run("StreamingGreet", func(t *testing.T) {
-		// 设置消息数量
+		// Set message count.
 		messageCount := 5
 
-		// 调用流式问候工具
+		// Call streaming greet tool.
 		content := e2e.ExecuteTestTool(t, client, "streaming-greet", map[string]interface{}{
-			"name":  "流式测试",
+			"name":  "StreamingTest",
 			"count": messageCount,
 		})
 
-		// 验证结果
-		require.Len(t, content, messageCount, "应该有指定数量的内容")
+		// Verify result.
+		require.Len(t, content, messageCount, "should have the specified number of content items")
 
-		// 验证每条内容
+		// Verify each content item.
 		for _, item := range content {
-			// 使用类型断言转换为 TextContent
-			textContent, ok := item.(schema.TextContent)
-			assert.True(t, ok, "内容应该是 TextContent 类型")
-			assert.Equal(t, "text", textContent.Type, "内容类型应为文本")
-			assert.Contains(t, textContent.Text, "流式消息", "内容应包含流式消息标记")
-			assert.Contains(t, textContent.Text, "流式测试", "内容应包含用户名")
+			// Type assertion to TextContent.
+			textContent, ok := item.(mcp.TextContent)
+			assert.True(t, ok, "content should be of type TextContent")
+			assert.Equal(t, "text", textContent.Type, "content type should be text")
+			assert.Contains(t, textContent.Text, "Streaming Message", "content should contain streaming message marker")
+			assert.Contains(t, textContent.Text, "StreamingTest", "content should contain username")
 		}
 	})
 }
 
-// TestDelayedResponse 测试延迟响应
+// TestDelayedResponse tests delayed response.
 func TestDelayedResponse(t *testing.T) {
-	// 设置测试服务器
+	// Set up test server.
 	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
-	// 创建测试客户端
+	// Create test client.
 	client := e2e.CreateTestClient(t, serverURL)
 	defer e2e.CleanupClient(t, client)
 
-	// 初始化客户端
+	// Initialize client.
 	e2e.InitializeClient(t, client)
 
-	// 测试延迟工具
+	// Test delay tool.
 	t.Run("DelayTool", func(t *testing.T) {
-		// 设置延迟时间
+		// Set delay time.
 		delayMs := 1000
-		message := "延迟测试消息"
+		message := "Delay test message"
 
-		// 记录开始时间
+		// Record start time.
 		startTime := time.Now()
 
-		// 调用延迟工具
+		// Call delay tool.
 		content := e2e.ExecuteTestTool(t, client, "delay-tool", map[string]interface{}{
 			"delay_ms": delayMs,
 			"message":  message,
 		})
 
-		// 计算经过的时间
+		// Calculate elapsed time.
 		elapsed := time.Since(startTime)
 
-		// 验证结果
-		require.Len(t, content, 1, "应该只有一条内容")
+		// Verify result.
+		require.Len(t, content, 1, "should have only one content item")
 
-		// 使用类型断言转换为 TextContent
-		textContent, ok := content[0].(schema.TextContent)
-		assert.True(t, ok, "内容应该是 TextContent 类型")
-		assert.Equal(t, "text", textContent.Type, "内容类型应为文本")
-		assert.Contains(t, textContent.Text, message, "内容应包含提供的消息")
+		// Type assertion to TextContent.
+		textContent, ok := content[0].(mcp.TextContent)
+		assert.True(t, ok, "content should be of type TextContent")
+		assert.Equal(t, "text", textContent.Type, "content type should be text")
+		assert.Contains(t, textContent.Text, message, "content should contain the provided message")
 
-		// 验证至少经过了指定的延迟时间
+		// Verify at least the specified delay time has elapsed.
 		assert.GreaterOrEqual(t, elapsed.Milliseconds(), int64(delayMs),
-			"响应时间应至少为指定的延迟时间")
+			"response time should be at least the specified delay time")
 	})
 }
 
-// TestContextCancellation 测试上下文取消
+// TestContextCancellation tests context cancellation.
 func TestContextCancellation(t *testing.T) {
-	// 设置测试服务器
+	// Set up test server.
 	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
-	// 创建测试客户端
+	// Create test client.
 	client := e2e.CreateTestClient(t, serverURL)
 	defer e2e.CleanupClient(t, client)
 
-	// 初始化客户端
+	// Initialize client.
 	e2e.InitializeClient(t, client)
 
-	// 测试上下文取消
+	// Test context cancellation.
 	t.Run("CancelDelayTool", func(t *testing.T) {
-		// 创建一个短超时的上下文
+		// Create a context with short timeout.
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
 
-		// 调用长延迟工具
+		// Call long delay tool.
 		_, err := client.CallTool(ctx, "delay-tool", map[string]interface{}{
-			"delay_ms": 2000, // 设置长于上下文超时的延迟
-			"message":  "这条消息应该不会收到",
+			"delay_ms": 2000, // Set delay longer than context timeout.
+			"message":  "This message should not be received",
 		})
 
-		// 验证错误
-		require.Error(t, err, "应该返回超时错误")
-		assert.Contains(t, err.Error(), "context", "错误应与上下文取消有关")
+		// Verify error.
+		require.Error(t, err, "should return timeout error")
+		assert.Contains(t, err.Error(), "context", "error should be related to context cancellation")
 	})
 }

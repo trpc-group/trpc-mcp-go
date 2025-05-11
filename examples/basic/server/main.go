@@ -5,10 +5,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/modelcontextprotocol/streamable-mcp/examples/basic/tools"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/examples/basic/tools"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 	log.Info("Starting basic example server...")
 
 	// Create server, set API path to "/mcp".
-	mcpServer := server.NewServer(":3000", schema.Implementation{
+	mcpServer := server.NewServer(":3000", mcp.Implementation{
 		Name:    "Basic-Example-Server",
 		Version: "0.1.0",
 	}, server.WithPathPrefix("/mcp"))

@@ -2,11 +2,12 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // Client state constants.
@@ -22,7 +23,7 @@ type Client struct {
 	transport transport.HTTPTransport
 
 	// Client information.
-	clientInfo schema.Implementation
+	clientInfo mcp.Implementation
 
 	// Protocol version.
 	protocolVersion string
@@ -41,7 +42,7 @@ type Client struct {
 type ClientOption func(*Client)
 
 // NewClient creates a new MCP client.
-func NewClient(serverURL string, clientInfo schema.Implementation, options ...ClientOption) (*Client, error) {
+func NewClient(serverURL string, clientInfo mcp.Implementation, options ...ClientOption) (*Client, error) {
 	// Parse the server URL.
 	parsedURL, err := url.Parse(serverURL)
 	if err != nil {
@@ -51,7 +52,7 @@ func NewClient(serverURL string, clientInfo schema.Implementation, options ...Cl
 	// Create client
 	client := &Client{
 		clientInfo:      clientInfo,
-		protocolVersion: schema.ProtocolVersion_2024_11_05, // Default compatible version
+		protocolVersion: mcp.ProtocolVersion_2024_11_05, // Default compatible version
 		capabilities:    make(map[string]interface{}),
 		state:           StateDisconnected,
 	}
@@ -95,70 +96,37 @@ func WithGetSSEEnabled(enabled bool) ClientOption {
 }
 
 // Initialize initializes the client connection.
-func (c *Client) Initialize(ctx context.Context) (*schema.InitializeResult, error) {
-	// Create an initialization request.
-	req := schema.NewInitializeRequest(
-		c.protocolVersion,
-		c.clientInfo,
-		schema.ClientCapabilities{
-			Roots: &schema.RootsCapability{
-				ListChanged: true,
-			},
-			Sampling: &schema.SamplingCapability{},
-		},
-	)
-
-	// Use SendRequestAndParse to send request and parse response
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("initialization request failed: %v", err)
-		}
-
-		// Type assert to InitializeResult.
-		initResult, ok := result.(*schema.InitializeResult)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse initialization response: type assertion error")
-		}
-
-		// Send initialized notification.
-		if err := c.SendInitialized(ctx); err != nil {
-			return nil, fmt.Errorf("failed to send initialized notification: %v", err)
-		}
-
-		// Ensure session ID is set, which is crucial for GET SSE connection establishment.
-		// Get session ID - should already be set by the transport layer after initialization response.
-		sessionID := httpTransport.GetSessionID()
-
-		// Check if stateless mode is enabled.
-		isStateless := httpTransport.IsStatelessMode()
-
-		if sessionID == "" && !isStateless {
-			// Only output warning in non-stateless mode.
-			fmt.Println("warning: session ID is empty, GET SSE connection may not be established")
-		} else if sessionID != "" {
-			// Explicitly trigger GET SSE connection attempt
-			// SetSessionID will automatically try to establish a GET SSE connection (if enabled)
-			httpTransport.SetSessionID(sessionID)
-		}
-
-		c.initialized = true
-		return initResult, nil
+func (c *Client) Initialize(ctx context.Context) (*mcp.InitializeResult, error) {
+	// Check if already initialized.
+	if c.initialized {
+		return nil, fmt.Errorf("client already initialized")
 	}
 
+	// Create request.
+	req := mcp.NewJSONRPCRequest("initialize", mcp.MethodInitialize, map[string]interface{}{
+		"protocolVersion": c.protocolVersion,
+		"clientInfo":      c.clientInfo,
+		"capabilities":    c.capabilities,
+	})
+
 	// Fallback to old method (for cases that don't support StreamableHTTPClientTransport)
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("initialization request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("initialization error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("initialization error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Parse response.
-	initResult, err := schema.ParseInitializeResult(resp.Result)
+	// Parse the response using our specialized parser
+	initResult, err := mcp.ParseInitializeResultFromJSON(rawResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse initialization response: %v", err)
 	}
@@ -174,19 +142,19 @@ func (c *Client) Initialize(ctx context.Context) (*schema.InitializeResult, erro
 
 // SendInitialized sends an initialized notification.
 func (c *Client) SendInitialized(ctx context.Context) error {
-	notification := schema.NewInitializedNotification()
+	notification := mcp.NewInitializedNotification()
 	return c.transport.SendNotification(ctx, notification)
 }
 
 // ListTools lists available tools.
-func (c *Client) ListTools(ctx context.Context) ([]*schema.Tool, error) {
+func (c *Client) ListTools(ctx context.Context) (*mcp.ListToolsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request.
-	req := schema.NewRequest("tools-list", schema.MethodToolsList, nil)
+	req := mcp.NewJSONRPCRequest("tools-list", mcp.MethodToolsList, nil)
 
 	// Send request and parse response.
 	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
@@ -196,77 +164,86 @@ func (c *Client) ListTools(ctx context.Context) ([]*schema.Tool, error) {
 		}
 
 		// Type assert.
-		if toolsResult, ok := result.(*schema.ListToolsResult); ok {
-			return toolsResult.Tools, nil
+		if toolsResult, ok := result.(*mcp.ListToolsResult); ok {
+			return toolsResult, nil
 		}
 		return nil, fmt.Errorf("failed to parse list tools result: type assertion error")
 	}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("list tools error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("list tools error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	toolsResult, err := schema.ParseListToolsResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse list tools result: %v", err)
-	}
-
-	return toolsResult.Tools, nil
+	// Parse response using specialized parser
+	return mcp.ParseListToolsResultFromJSON(rawResp)
 }
 
 // CallTool calls a tool.
-func (c *Client) CallTool(ctx context.Context, name string, args map[string]interface{}) ([]schema.ToolContent, error) {
+func (c *Client) CallTool(ctx context.Context, name string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request
-	req := schema.NewRequest("tool-call", schema.MethodToolsCall, map[string]interface{}{
+	req := mcp.NewJSONRPCRequest("tool-call", mcp.MethodToolsCall, map[string]interface{}{
 		"name":      name,
 		"arguments": args,
 	})
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("tool call failed: %v", err)
-		}
-
-		// Type assert.
-		if toolResult, ok := result.(*schema.ToolResult); ok {
-			return toolResult.Content, nil
-		}
-		return nil, fmt.Errorf("failed to parse tool call result: type assertion error")
-	}
+	//// Send request and parse response.
+	//if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
+	//	result, err := httpTransport.SendRequestAndParse(ctx, req)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("tool call failed: %v", err)
+	//	}
+	//
+	//	// Type assert.
+	//	if toolResult, ok := result.(*mcp.CallToolResult); ok {
+	//		return toolResult, nil
+	//	}
+	//	return nil, fmt.Errorf("failed to parse tool call result: type assertion error")
+	//}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("tool call request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("tool call error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("tool call error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	toolResult, err := schema.ParseCallToolResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse tool call result: %v", err)
-	}
+	return mcp.ParseCallToolResult(rawResp)
 
-	return toolResult.Content, nil
+	//// Parse response as success response
+	//var resp struct {
+	//	Result mcp.CallToolResult `json:"result"`
+	//}
+	//if err := json.Unmarshal(*rawResp, &resp); err != nil {
+	//	return nil, fmt.Errorf("failed to unmarshal tool call response: %w", err)
+	//}
+	//
+	//return &resp.Result, nil
 }
 
 // Close closes the client connection.
@@ -299,14 +276,14 @@ func (c *Client) UnregisterNotificationHandler(method string) {
 }
 
 // CallToolWithStream calls a tool with streaming support.
-func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[string]interface{}, streamOpts *transport.StreamOptions) ([]schema.ToolContent, error) {
+func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[string]interface{}, streamOpts *transport.StreamOptions) (*mcp.CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request.
-	req := schema.NewRequest("tool-call", schema.MethodToolsCall, map[string]interface{}{
+	req := mcp.NewJSONRPCRequest("tool-call", mcp.MethodToolsCall, map[string]interface{}{
 		"name":      name,
 		"arguments": args,
 	})
@@ -321,61 +298,52 @@ func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[s
 			}
 
 			// Type assert.
-			if toolResult, ok := result.(*schema.ToolResult); ok {
-				return toolResult.Content, nil
+			if toolResult, ok := result.(*mcp.CallToolResult); ok {
+				return toolResult, nil
 			}
 			return nil, fmt.Errorf("failed to parse tool call result: type assertion error")
 		}
 
 		// Use streaming request if streaming options are provided
-		resp, err := httpTransport.SendRequestWithStream(ctx, req, streamOpts)
+		rawResp, err := httpTransport.SendRequestWithStream(ctx, req, streamOpts)
 		if err != nil {
 			return nil, fmt.Errorf("tool call request failed: %v", err)
 		}
 
-		// Check for errors.
-		if resp.Error != nil {
-			return nil, fmt.Errorf("tool call error: %s", resp.Error.Message)
+		// Check for error response
+		if mcp.IsErrorResponse(rawResp) {
+			errResp, err := mcp.ParseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("tool call error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
 		}
 
-		// Parse result.
-		toolResult, err := schema.ParseCallToolResult(resp.Result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse tool call result: %v", err)
+		// Parse response as success response
+		var resp struct {
+			Result mcp.CallToolResult `json:"result"`
+		}
+		if err := json.Unmarshal(*rawResp, &resp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tool call response: %w", err)
 		}
 
-		return toolResult.Content, nil
+		return &resp.Result, nil
 	}
 
-	// Fallback to regular request
-	resp, err := c.transport.SendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("tool call request failed: %v", err)
-	}
-
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("tool call error: %s", resp.Error.Message)
-	}
-
-	// Use dedicated parsing function to handle response.
-	toolResult, err := schema.ParseCallToolResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse tool call result: %v", err)
-	}
-
-	return toolResult.Content, nil
+	// Fall back to regular call for non-streaming transports
+	return c.CallTool(ctx, name, args)
 }
 
 // ListPrompts lists available prompts.
-func (c *Client) ListPrompts(ctx context.Context) ([]schema.Prompt, error) {
+func (c *Client) ListPrompts(ctx context.Context) (*mcp.ListPromptsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request.
-	req := schema.NewRequest("prompts-list", schema.MethodPromptsList, nil)
+	req := mcp.NewJSONRPCRequest("prompts-list", mcp.MethodPromptsList, nil)
 
 	// Send request and parse response.
 	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
@@ -385,34 +353,34 @@ func (c *Client) ListPrompts(ctx context.Context) ([]schema.Prompt, error) {
 		}
 
 		// Type assert.
-		if promptsResult, ok := result.(*schema.ListPromptsResponse); ok {
-			return promptsResult.Prompts, nil
+		if promptsResult, ok := result.(*mcp.ListPromptsResult); ok {
+			return promptsResult, nil
 		}
 		return nil, fmt.Errorf("failed to parse list prompts result: type assertion error")
 	}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list prompts request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("list prompts error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("list prompts error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	promptsResult, err := schema.ParseListPromptsResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse list prompts result: %v", err)
-	}
-
-	return promptsResult.Prompts, nil
+	// Parse response using specialized parser
+	return mcp.ParseListPromptsResultFromJSON(rawResp)
 }
 
 // GetPrompt gets a specific prompt.
-func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) (*schema.GetPromptResponse, error) {
+func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) (*mcp.GetPromptResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
@@ -429,7 +397,7 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 	}
 
 	// Create request.
-	req := schema.NewRequest("prompt-get", schema.MethodPromptsGet, params)
+	req := mcp.NewJSONRPCRequest("prompt-get", mcp.MethodPromptsGet, params)
 
 	// Send request and parse response.
 	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
@@ -439,41 +407,41 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 		}
 
 		// Type assert.
-		if promptResult, ok := result.(*schema.GetPromptResponse); ok {
+		if promptResult, ok := result.(*mcp.GetPromptResult); ok {
 			return promptResult, nil
 		}
 		return nil, fmt.Errorf("failed to parse get prompt result: type assertion error")
 	}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("get prompt error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("get prompt error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	promptResult, err := schema.ParseGetPromptResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse get prompt result: %v", err)
-	}
-
-	return promptResult, nil
+	// Parse response using specialized parser
+	return mcp.ParseGetPromptResultFromJSON(rawResp)
 }
 
 // ListResources lists available resources.
-func (c *Client) ListResources(ctx context.Context) ([]schema.Resource, error) {
+func (c *Client) ListResources(ctx context.Context) (*mcp.ListResourcesResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request.
-	req := schema.NewRequest("resources-list", schema.MethodResourcesList, nil)
+	req := mcp.NewJSONRPCRequest("resources-list", mcp.MethodResourcesList, nil)
 
 	// Send request and parse response.
 	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
@@ -483,41 +451,41 @@ func (c *Client) ListResources(ctx context.Context) ([]schema.Resource, error) {
 		}
 
 		// Type assert.
-		if resourcesResult, ok := result.(*schema.ListResourcesResponse); ok {
-			return resourcesResult.Resources, nil
+		if resourcesResult, ok := result.(*mcp.ListResourcesResult); ok {
+			return resourcesResult, nil
 		}
 		return nil, fmt.Errorf("failed to parse list resources result: type assertion error")
 	}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list resources request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("list resources error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("list resources error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	resourcesResult, err := schema.ParseListResourcesResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse list resources result: %v", err)
-	}
-
-	return resourcesResult.Resources, nil
+	// Parse response using specialized parser
+	return mcp.ParseListResourcesResultFromJSON(rawResp)
 }
 
-// ReadResource reads resource content.
-func (c *Client) ReadResource(ctx context.Context, uri string) (*schema.ReadResourceResponse, error) {
+// ReadResource reads a specific resource.
+func (c *Client) ReadResource(ctx context.Context, uri string) (*mcp.ReadResourceResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	// Create request.
-	req := schema.NewRequest("resource-read", schema.MethodResourcesRead, map[string]interface{}{
+	req := mcp.NewJSONRPCRequest("resource-read", mcp.MethodResourcesRead, map[string]interface{}{
 		"uri": uri,
 	})
 
@@ -529,28 +497,28 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*schema.ReadReso
 		}
 
 		// Type assert.
-		if resourceResult, ok := result.(*schema.ReadResourceResponse); ok {
-			return resourceResult, nil
+		if resourceContent, ok := result.(*mcp.ReadResourceResult); ok {
+			return resourceContent, nil
 		}
 		return nil, fmt.Errorf("failed to parse read resource result: type assertion error")
 	}
 
 	// Fallback to old method
-	resp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("read resource request failed: %v", err)
 	}
 
-	// Check for errors.
-	if resp.Error != nil {
-		return nil, fmt.Errorf("read resource error: %s", resp.Error.Message)
+	// Check for error response
+	if mcp.IsErrorResponse(rawResp) {
+		errResp, err := mcp.ParseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("read resource error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	// Use dedicated parsing function to handle response.
-	resourceResult, err := schema.ParseReadResourceResult(resp.Result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse read resource result: %v", err)
-	}
-
-	return resourceResult, nil
+	// Parse response using specialized parser
+	return mcp.ParseReadResourceResultFromJSON(rawResp)
 }

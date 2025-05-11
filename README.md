@@ -1,4 +1,4 @@
-# Streamable MCP: Model Context Protocol Implementation with Streaming HTTP Support
+# Trpc MCP Go: Model Context Protocol Implementation with Streaming HTTP Support
 
 A Go implementation of the [Model Context Protocol (MCP)](https://github.com/model-context-protocol/model-context-protocol) with comprehensive streaming support via Server-Sent Events (SSE). This library enables efficient communication between client applications and tools/resources.
 
@@ -6,7 +6,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 
 ### Core Features
 
-- **Full MCP Specification Support**: Implements the MCP 2024-11-05 specification
+- **Full MCP Specification Support**: Implements MCP, supporting protocol versions up to 2025-03-26 (defaulting to 2024-11-05 for client compatibility in examples).
 - **Streaming Support**: Real-time data streaming with Server-Sent Events (SSE)
 - **Tool Framework**: Register and execute tools with structured parameter handling
 - **Resource Management**: Serve text and binary resources with RESTful interfaces
@@ -27,7 +27,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 ## Installation
 
 ```bash
-go get github.com/modelcontextprotocol/streamable-mcp
+go get trpc.group/trpc-go/trpc-mcp-go
 ```
 
 ## Quick Start
@@ -42,9 +42,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/examples/basic/tools" // Assuming tools package is here
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 func main() {
@@ -53,7 +54,7 @@ func main() {
 	log.Info("Starting example server...")
 
 	// Create server
-	mcpServer := server.NewServer(":3000", schema.Implementation{
+	mcpServer := server.NewServer(":3000", mcp.Implementation{
 		Name:    "Example-Server",
 		Version: "1.0.0",
 	}, server.WithPathPrefix("/mcp"))
@@ -84,19 +85,19 @@ func main() {
 ### Tool Definition Example
 
 ```go
-package tools
+package tools // Assuming this is in a 'tools' sub-package
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // NewGreetTool creates a simple greeting tool
-func NewGreetTool() *schema.Tool {
-	return schema.NewTool("greet",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func NewGreetTool() *mcp.Tool {
+	return mcp.NewTool("greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Check for context cancellation
 			select {
 			case <-ctx.Done():
@@ -117,11 +118,11 @@ func NewGreetTool() *schema.Tool {
 			greeting := fmt.Sprintf("Hello, %s!", name)
 			
 			// Return result
-			return schema.NewTextResult(greeting), nil
+			return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent(greeting)}}, nil
 		},
-		schema.WithDescription("A simple greeting tool"),
-		schema.WithString("name", 
-			schema.Description("Name to greet"),
+		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithString("name", 
+			mcp.Description("Name to greet"),
 		),
 	)
 }
@@ -136,23 +137,24 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 func main() {
 	// Initialize logging
+	log.SetLevel(log.InfoLevel)
 	log.Info("Starting client...")
 	
 	// Create context
 	ctx := context.Background()
 	
 	// Create client
-	mcpClient, err := client.NewClient("http://localhost:3000/mcp", schema.Implementation{
+	mcpClient, err := client.NewClient("http://localhost:3000/mcp", mcp.Implementation{
 		Name:    "MCP-Go-Client",
 		Version: "1.0.0",
-	}, client.WithProtocolVersion(schema.ProtocolVersion_2024_11_05))
+	}, client.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05))
 	if err != nil {
 		log.Errorf("Failed to create client: %v", err)
 		return
@@ -177,16 +179,16 @@ func main() {
 	}
 	
 	// List available tools
-	tools, err := mcpClient.ListTools(ctx)
+	toolsResult, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Errorf("Failed to list tools: %v", err)
 		return
 	}
 	
 	// Call a tool if available
-	if len(tools) > 0 {
-		log.Infof("Calling tool: %s", tools[0].Name)
-		content, err := mcpClient.CallTool(ctx, tools[0].Name, map[string]interface{}{
+	if len(toolsResult.Tools) > 0 {
+		log.Infof("Calling tool: %s", toolsResult.Tools[0].Name)
+		callRes, err := mcpClient.CallTool(ctx, toolsResult.Tools[0].Name, map[string]interface{}{
 			"name": "MCP User",
 		})
 		if err != nil {
@@ -195,8 +197,8 @@ func main() {
 		}
 		
 		// Process results
-		for _, item := range content {
-			if textContent, ok := item.(schema.TextContent); ok {
+		for _, item := range callRes.Content {
+			if textContent, ok := item.(mcp.TextContent); ok {
 				log.Infof("Result: %s", textContent.Text)
 			}
 		}
@@ -220,7 +222,7 @@ The server can be configured using option functions:
 ```go
 server := server.NewServer(
     ":3000",                        // Listen address
-    schema.Implementation{          // Server info
+    mcp.Implementation{             // Server info
         Name:    "My-MCP-Server",
         Version: "1.0.0",
     },
@@ -252,11 +254,11 @@ The client can be configured using option functions:
 ```go
 client, err := client.NewClient(
     "http://localhost:3000/mcp",             // Server URL
-    schema.Implementation{                   // Client info
+    mcp.Implementation{                      // Client info
         Name:    "MCP-Client",
         Version: "1.0.0",
     },
-    client.WithProtocolVersion(schema.ProtocolVersion_2024_11_05),  // Protocol version
+    client.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05),  // Protocol version
     client.WithGetSSEEnabled(true),                                // Use GET for SSE
 )
 ```
@@ -265,8 +267,10 @@ client, err := client.NewClient(
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `WithProtocolVersion` | Specify MCP protocol version | Latest version |
+| `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2024_11_05` |
 | `WithGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
+| `WithTransport`     | Use a custom HTTP transport   | Default `http.DefaultTransport` |
+
 
 ## Advanced Features
 
@@ -275,9 +279,20 @@ client, err := client.NewClient(
 Create tools that provide real-time progress updates:
 
 ```go
-func NewStreamingTool() *schema.Tool {
-    return schema.NewTool("sse-progress",
-        func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+package tools // Assuming this is in a 'tools' sub-package
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+)
+
+
+func NewStreamingTool() *mcp.Tool {
+    return mcp.NewTool("sse-progress",
+        func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
             // Extract parameters
             steps := 5 // Default
             if stepsArg, ok := req.Params.Arguments["steps"]; ok {
@@ -287,14 +302,14 @@ func NewStreamingTool() *schema.Tool {
             }
             
             // Get notification sender from context
-            notifier, ok := schema.GetNotificationSender(ctx)
+            notifier, ok := mcp.GetNotificationSender(ctx)
             if !ok {
-                return schema.NewTextResult("No notification sender available"), nil
+                return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent("No notification sender available")}}, nil
             }
             
             // Send initial progress
             notifier.SendProgress(0.0, "Starting process")
-            notifier.SendLogMessage("info", "Starting process")
+            notifier.SendLogMessage("info", "Starting process") // Assuming data is a simple string here
             
             // Process steps and send progress updates
             for i := 1; i <= steps; i++ {
@@ -308,6 +323,8 @@ func NewStreamingTool() *schema.Tool {
                     
                     // Send notifications
                     notifier.SendProgress(progress, message)
+                    // For SendLogMessage, the 'data' part might be a structured map or a simple string.
+                    // Example with simple string:
                     notifier.SendLogMessage("info", fmt.Sprintf("Completed %s", message))
                     
                     // Simulate work
@@ -318,12 +335,12 @@ func NewStreamingTool() *schema.Tool {
             // Final progress update
             notifier.SendProgress(1.0, "Complete")
             
-            return schema.NewTextResult("Process completed successfully"), nil
+            return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent("Process completed successfully")}}, nil
         },
-        schema.WithDescription("Tool with progress notifications"),
-        schema.WithNumber("steps",
-            schema.Description("Number of steps to process"),
-            schema.Default(5),
+        mcp.WithDescription("Tool with progress notifications"),
+        mcp.WithNumber("steps",
+            mcp.Description("Number of steps to process"),
+            mcp.Default(5),
         ),
     )
 }
@@ -332,28 +349,102 @@ func NewStreamingTool() *schema.Tool {
 ### Client-Side Progress Handling
 
 ```go
-// Create notification collector
-collector := &NotificationCollector{
-    progressHandler: func(progress float64, message string) {
-        fmt.Printf("Progress: %.0f%% - %s\n", progress*100, message)
-    },
-    logHandler: func(level string, message string) {
-        fmt.Printf("[%s] %s\n", level, message)
-    },
+package main
+
+import (
+	"context"
+	"fmt"
+	// ... other necessary imports like client, log, mcp, transport
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
+)
+
+
+// Example NotificationCollector structure and methods
+type NotificationCollector struct{}
+
+func (nc *NotificationCollector) HandleProgress(notification *mcp.JSONRPCNotification) error {
+	progress, _ := notification.Params.AdditionalFields["progress"].(float64)
+	message, _ := notification.Params.AdditionalFields["message"].(string)
+	fmt.Printf("Progress: %.0f%% - %s\n", progress*100, message)
+	return nil
 }
 
-// Set up stream options
-streamOpts := &transport.StreamOptions{
-    NotificationHandlers: map[string]transport.NotificationHandler{
-        "notifications/progress": collector.HandleProgressNotification,
-        "notifications/message": collector.HandleLogNotification,
-    },
+func (nc *NotificationCollector) HandleLog(notification *mcp.JSONRPCNotification) error {
+	level, _ := notification.Params.AdditionalFields["level"].(string)
+	// The 'data' field for log messages can be a string or a structured map.
+	// This example assumes it's a simple string for brevity.
+	// In a real application, you might need to check its type.
+	logMessageText := "Could not extract log message data"
+	if dataStr, ok := notification.Params.AdditionalFields["data"].(string); ok {
+		logMessageText = dataStr
+	} else if dataMap, ok := notification.Params.AdditionalFields["data"].(map[string]interface{}); ok {
+		// If it's a map, you might want to format it or extract a specific field.
+		// For this example, we'll just try to get a "message" field if it exists.
+		if msg, found := dataMap["message"].(string); found {
+			logMessageText = msg
+		} else {
+			logMessageText = fmt.Sprintf("%+v", dataMap) // Or some other formatting
+		}
+	}
+	fmt.Printf("[%s] %s\n", level, logMessageText)
+	return nil
 }
 
-// Call tool with streaming
-content, err := client.CallToolWithStream(ctx, "sse-progress", map[string]interface{}{
-    "steps": 5,
-}, streamOpts)
+func main() {
+	// ... (client setup as in previous example)
+	log.SetLevel(log.InfoLevel)
+	ctx := context.Background()
+	mcpClient, err := client.NewClient("http://localhost:3000/mcp", mcp.Implementation{
+		Name:    "MCP-Go-Client-Stream-Handler",
+		Version: "1.0.0",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer mcpClient.Close()
+	// ... (client initialization)
+	_, err = mcpClient.Initialize(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize client: %v", err)
+	}
+
+
+	// Create notification collector
+	collector := &NotificationCollector{}
+
+	// Set up stream options
+	streamOpts := &transport.StreamOptions{
+		NotificationHandlers: map[string]transport.NotificationHandler{
+			"notifications/progress": collector.HandleProgress,
+			"notifications/message":  collector.HandleLog,
+		},
+	}
+
+	// Call tool with streaming
+	log.Info("Calling tool with streaming...")
+	callRes, err := mcpClient.CallToolWithStream(ctx, "sse-progress", map[string]interface{}{ // Ensure "sse-progress" tool is registered on server
+		"steps": 5,
+	}, streamOpts)
+	if err != nil {
+		log.Errorf("Tool call with stream failed: %v", err)
+		return
+	}
+
+	// Process final result from CallToolWithStream (if any)
+	if callRes != nil {
+		for _, item := range callRes.Content {
+			if textContent, ok := item.(mcp.TextContent); ok {
+				log.Infof("Final tool result: %s", textContent.Text)
+			}
+		}
+	}
+	// Keep the main function running for a bit to receive notifications if the tool runs asynchronously
+	// time.Sleep(10 * time.Second) // Uncomment if needed for testing async notifications
+	log.Info("Client example finished.")
+}
 ```
 
 ### Resource Management
@@ -361,14 +452,27 @@ content, err := client.CallToolWithStream(ctx, "sse-progress", map[string]interf
 Register and serve resources:
 
 ```go
+// Presuming 'server' is an initialized *server.Server instance
 // Register a text resource
-textResource := &schema.Resource{
-    URI:         "resource://example/text",
+textResource := &mcp.Resource{
+    URI:         "resource://example/text", // Ensure URI scheme is meaningful
     Name:        "example-text",
     Description: "Example text resource",
     MimeType:    "text/plain",
+	// Content can be set via a handler or direct data if supported by your server setup.
+	// This example focuses on registration. Serving actual content requires a handler.
 }
-server.RegisterResource(textResource)
+// The actual registration mechanism might vary. If RegisterResource takes a handler:
+// server.RegisterResource(textResource, myTextResourceHandler)
+// If it's just metadata for now:
+err := mcpServer.RegisterResource(textResource, func(ctx context.Context, uri string) (io.ReadCloser, error) {
+    // Example handler: return a string reader
+    return io.NopCloser(strings.NewReader("This is the content of the text resource.")), nil
+})
+if err != nil {
+    log.Fatalf("Failed to register resource: %v", err)
+}
+
 
 // Resource handler is automatically set up through the HTTP handler
 ```
@@ -378,19 +482,35 @@ server.RegisterResource(textResource)
 Register prompt templates:
 
 ```go
+// Presuming 'mcpServer' is an initialized *server.Server instance
 // Register a prompt template
-promptTemplate := &schema.Prompt{
+promptTemplate := &mcp.Prompt{
     Name:        "example-prompt",
     Description: "Example prompt template",
-    Arguments: []schema.PromptArgument{
+    Arguments: []mcp.PromptArgument{
         {
             Name:        "topic",
             Description: "Topic to discuss",
             Required:    true,
         },
     },
+	// Template string itself would be part of how it's handled or stored.
+	// For example:
+	// Template: "Please tell me more about {{topic}}.",
 }
-server.RegisterPrompt(promptTemplate)
+// The registration of the template string itself might be part of the server's prompt handling logic.
+// This example focuses on registering the metadata.
+err := mcpServer.RegisterPrompt(promptTemplate, func(ctx context.Context, args map[string]interface{}) (string, error) {
+    // Example handler:
+    topic, ok := args["topic"].(string)
+    if !ok {
+        return "", fmt.Errorf("topic argument is missing or not a string")
+    }
+    return fmt.Sprintf("Please tell me more about %s.", topic), nil
+})
+if err != nil {
+    log.Fatalf("Failed to register prompt: %v", err)
+}
 ```
 
 ## Example Patterns
@@ -404,9 +524,9 @@ The project includes several example patterns:
 | `stateful_json` | Stateful connections with JSON-RPC |
 | `stateful_sse` | Stateful connections with SSE |
 | `stateful_json_getsse` | Stateful JSON with GET SSE support |
-| `stateful_sse_yes_getsse` | Stateful SSE with GET SSE support |
+| `stateful_sse_getsse` | Stateful SSE with GET SSE support |
 | `stateless_json` | Stateless connections with JSON-RPC |
-| `stateless_sse_no_getsse` | Stateless connections with SSE |
+| `stateless_sse` | Stateless connections with SSE |
 
 ## License
 

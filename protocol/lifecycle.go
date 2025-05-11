@@ -4,15 +4,15 @@ import (
 	"context"
 	"sync"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // LifecycleManager is responsible for managing the MCP protocol lifecycle
 type LifecycleManager struct {
 	// Server information
-	serverInfo schema.Implementation
+	serverInfo mcp.Implementation
 
 	// Default protocol version
 	defaultProtocolVersion string
@@ -40,11 +40,11 @@ type LifecycleManager struct {
 }
 
 // NewLifecycleManager creates a lifecycle manager
-func NewLifecycleManager(serverInfo schema.Implementation) *LifecycleManager {
+func NewLifecycleManager(serverInfo mcp.Implementation) *LifecycleManager {
 	return &LifecycleManager{
 		serverInfo:             serverInfo,
-		defaultProtocolVersion: schema.ProtocolVersion_2024_11_05,           // Using 2024-11-05 version, according to MCP protocol specification
-		supportedVersions:      []string{schema.ProtocolVersion_2024_11_05}, // Only supporting 2024-11-05 version
+		defaultProtocolVersion: mcp.ProtocolVersion_2024_11_05,           // Using 2024-11-05 version, according to MCP protocol specification
+		supportedVersions:      []string{mcp.ProtocolVersion_2024_11_05}, // Only supporting 2024-11-05 version
 		capabilities: map[string]interface{}{
 			"tools": map[string]interface{}{
 				"listChanged": true,
@@ -124,16 +124,22 @@ func (m *LifecycleManager) updateCapabilities() {
 }
 
 // HandleInitialize handles initialize requests
-func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *schema.Request, session *transport.Session) (*schema.Response, error) {
+func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *mcp.JSONRPCRequest, session *transport.Session) (mcp.JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "parameters are empty", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "parameters are empty", nil), nil
+	}
+
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
 	}
 
 	// Get protocol version
-	protocolVersion, ok := req.Params["protocolVersion"].(string)
+	protocolVersion, ok := paramsMap["protocolVersion"].(string)
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing protocolVersion", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing protocolVersion", nil), nil
 	}
 
 	// Check if protocol version is supported
@@ -171,9 +177,9 @@ func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *schema.Req
 	m.updateCapabilities()
 
 	// Create initialization response
-	response := schema.InitializeResult{
+	response := mcp.InitializeResult{
 		ProtocolVersion: supportedVersion,
-		ServerInfo: schema.Implementation{
+		ServerInfo: mcp.Implementation{
 			Name:    m.serverInfo.Name,
 			Version: m.serverInfo.Version,
 		},
@@ -181,16 +187,16 @@ func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *schema.Req
 		Instructions: "MCP server is ready",
 	}
 
-	return schema.NewResponse(req.ID, response), nil
+	return response, nil
 }
 
 // convertToServerCapabilities converts a map to ServerCapabilities structure
-func convertToServerCapabilities(capMap map[string]interface{}) schema.ServerCapabilities {
-	capabilities := schema.ServerCapabilities{}
+func convertToServerCapabilities(capMap map[string]interface{}) mcp.ServerCapabilities {
+	capabilities := mcp.ServerCapabilities{}
 
 	// Handle tools capability
 	if toolsMap, ok := capMap["tools"].(map[string]interface{}); ok {
-		capabilities.Tools = &schema.ToolsCapability{}
+		capabilities.Tools = &mcp.ToolsCapability{}
 		if listChanged, ok := toolsMap["listChanged"].(bool); ok && listChanged {
 			capabilities.Tools.ListChanged = true
 		}
@@ -198,7 +204,7 @@ func convertToServerCapabilities(capMap map[string]interface{}) schema.ServerCap
 
 	// Handle resources capability
 	if resourcesMap, ok := capMap["resources"].(map[string]interface{}); ok {
-		capabilities.Resources = &schema.ResourcesCapability{}
+		capabilities.Resources = &mcp.ResourcesCapability{}
 		if listChanged, ok := resourcesMap["listChanged"].(bool); ok && listChanged {
 			capabilities.Resources.ListChanged = true
 		}
@@ -211,24 +217,24 @@ func convertToServerCapabilities(capMap map[string]interface{}) schema.ServerCap
 	if _, exists := capMap["prompts"]; exists {
 		promptsMap, isMap := capMap["prompts"].(map[string]interface{})
 		if isMap {
-			capabilities.Prompts = &schema.PromptsCapability{}
+			capabilities.Prompts = &mcp.PromptsCapability{}
 			if listChanged, ok := promptsMap["listChanged"].(bool); ok && listChanged {
 				capabilities.Prompts.ListChanged = true
 			}
 		} else {
 			// If not the expected map type, at least create an empty PromptsCapability instance
-			capabilities.Prompts = &schema.PromptsCapability{}
+			capabilities.Prompts = &mcp.PromptsCapability{}
 		}
 	}
 
 	// Handle logging capability
 	if _, ok := capMap["logging"].(map[string]interface{}); ok {
-		capabilities.Logging = &schema.LoggingCapability{}
+		capabilities.Logging = &mcp.LoggingCapability{}
 	}
 
 	// Handle completions capability
 	if _, ok := capMap["completions"].(map[string]interface{}); ok {
-		capabilities.Completions = &schema.CompletionsCapability{}
+		capabilities.Completions = &mcp.CompletionsCapability{}
 	}
 
 	// Handle experimental capability
@@ -240,7 +246,7 @@ func convertToServerCapabilities(capMap map[string]interface{}) schema.ServerCap
 }
 
 // HandleInitialized handles initialized notifications
-func (m *LifecycleManager) HandleInitialized(ctx context.Context, notification *schema.Notification, session *transport.Session) error {
+func (m *LifecycleManager) HandleInitialized(ctx context.Context, notification *mcp.JSONRPCNotification, session *transport.Session) error {
 	// Mark session as initialized
 	if session != nil {
 		m.mu.Lock()

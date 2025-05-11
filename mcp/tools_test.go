@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func (t *MockTool) Execute(ctx context.Context, args map[string]interface{}) (*C
 		return t.executeFunc(ctx, args)
 	}
 	return &CallToolResult{
-		Content: []ToolContent{
+		Content: []Content{
 			NewTextContent("Mock tool execution result"),
 		},
 	}, nil
@@ -158,7 +158,7 @@ func TestMockTool(t *testing.T) {
 
 	// Test custom execution function
 	customResult := &CallToolResult{
-		Content: []ToolContent{
+		Content: []Content{
 			NewTextContent("Custom result"),
 		},
 	}

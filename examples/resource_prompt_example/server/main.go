@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 func main() {
 	// Create server.
-	mcpServer := server.NewServer(":3000", schema.Implementation{
+	mcpServer := server.NewServer(":3000", mcp.Implementation{
 		Name:    "Resource-Prompt-Example",
 		Version: "0.1.0",
 	})
@@ -36,7 +36,7 @@ func main() {
 // Register example resources.
 func registerExampleResources(s *server.Server) {
 	// Register text resource.
-	textResource := &schema.Resource{
+	textResource := &mcp.Resource{
 		URI:         "resource://example/text",
 		Name:        "example-text",
 		Description: "Example text resource",
@@ -50,7 +50,7 @@ func registerExampleResources(s *server.Server) {
 	}
 
 	// Register image resource.
-	imageResource := &schema.Resource{
+	imageResource := &mcp.Resource{
 		URI:         "resource://example/image",
 		Name:        "example-image",
 		Description: "Example image resource",
@@ -67,10 +67,10 @@ func registerExampleResources(s *server.Server) {
 // Register example prompts.
 func registerExamplePrompts(s *server.Server) {
 	// Register basic prompt.
-	basicPrompt := &schema.Prompt{
+	basicPrompt := &mcp.Prompt{
 		Name:        "basic-prompt",
 		Description: "Basic prompt example",
-		Arguments: []schema.PromptArgument{
+		Arguments: []mcp.PromptArgument{
 			{
 				Name:        "name",
 				Description: "User name",
@@ -86,10 +86,10 @@ func registerExamplePrompts(s *server.Server) {
 	}
 
 	// Register advanced prompt.
-	advancedPrompt := &schema.Prompt{
+	advancedPrompt := &mcp.Prompt{
 		Name:        "advanced-prompt",
 		Description: "Advanced prompt example",
-		Arguments: []schema.PromptArgument{
+		Arguments: []mcp.PromptArgument{
 			{
 				Name:        "topic",
 				Description: "Topic",
@@ -113,7 +113,7 @@ func registerExamplePrompts(s *server.Server) {
 // Register example tools.
 func registerExampleTools(s *server.Server) {
 	// Register a simple greeting tool.
-	greetTool := schema.NewTool("greet", func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+	greetTool := mcp.NewTool("greet", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Extract name from parameters.
 		name, _ := req.Params.Arguments["name"].(string)
 		if name == "" {
@@ -121,8 +121,8 @@ func registerExampleTools(s *server.Server) {
 		}
 
 		// Create response content.
-		return schema.NewTextResult(fmt.Sprintf("Hello, %s! Welcome to the resource and prompt example server.", name)), nil
-	}, schema.WithDescription("Greeting tool"))
+		return mcp.NewTextResult(fmt.Sprintf("Hello, %s! Welcome to the resource and prompt example server.", name)), nil
+	}, mcp.WithDescription("Greeting tool"))
 
 	err := s.RegisterTool(greetTool)
 	if err != nil {

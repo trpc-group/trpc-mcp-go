@@ -5,27 +5,27 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // MockHTTPTransport is a mock implementation of the HTTPTransport interface
 type MockHTTPTransport struct {
-	sendRequestFunc      func(ctx context.Context, req *schema.Request) (*schema.Response, error)
-	sendNotificationFunc func(ctx context.Context, notification *schema.Notification) error
+	sendRequestFunc      func(ctx context.Context, req *mcp.JSONRPCRequest) (*mcp.JSONRPCResponse, error)
+	sendNotificationFunc func(ctx context.Context, notification *mcp.JSONRPCNotification) error
 	closeFunc            func() error
 	getSessionIDFunc     func() string
 	terminateSessionFunc func(ctx context.Context) error
 }
 
-func (m *MockHTTPTransport) SendRequest(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+func (m *MockHTTPTransport) SendRequest(ctx context.Context, req *mcp.JSONRPCRequest) (*mcp.JSONRPCResponse, error) {
 	if m.sendRequestFunc != nil {
 		return m.sendRequestFunc(ctx, req)
 	}
 	return nil, nil
 }
 
-func (m *MockHTTPTransport) SendNotification(ctx context.Context, notification *schema.Notification) error {
+func (m *MockHTTPTransport) SendNotification(ctx context.Context, notification *mcp.JSONRPCNotification) error {
 	if m.sendNotificationFunc != nil {
 		return m.sendNotificationFunc(ctx, notification)
 	}
@@ -56,18 +56,18 @@ func (m *MockHTTPTransport) TerminateSession(ctx context.Context) error {
 func TestMockHTTPTransport(t *testing.T) {
 	// Create mock transport with custom behaviors
 	mockTransport := &MockHTTPTransport{
-		sendRequestFunc: func(ctx context.Context, req *schema.Request) (*schema.Response, error) {
+		sendRequestFunc: func(ctx context.Context, req *mcp.JSONRPCRequest) (*mcp.JSONRPCResponse, error) {
 			// Verify request
 			assert.Equal(t, "test.method", req.Method)
 
 			// Return mock response
-			return &schema.Response{
-				JSONRPC: schema.JSONRPCVersion,
+			return &mcp.JSONRPCResponse{
+				JSONRPC: mcp.JSONRPCVersion,
 				ID:      req.ID,
 				Result:  "test result",
 			}, nil
 		},
-		sendNotificationFunc: func(ctx context.Context, notification *schema.Notification) error {
+		sendNotificationFunc: func(ctx context.Context, notification *mcp.JSONRPCNotification) error {
 			// Verify notification
 			assert.Equal(t, "test.notification", notification.Method)
 			return nil
@@ -85,14 +85,14 @@ func TestMockHTTPTransport(t *testing.T) {
 
 	// Test SendRequest
 	ctx := context.Background()
-	req := schema.NewRequest(1, "test.method", nil)
+	req := mcp.NewJSONRPCRequest(1, "test.method", nil)
 	resp, err := mockTransport.SendRequest(ctx, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "test result", resp.Result)
 
 	// Test SendNotification
-	notification := schema.NewNotification("test.notification", nil)
+	notification := mcp.NewJSONRPCNotificationFromMap("test.notification", nil)
 	err = mockTransport.SendNotification(ctx, notification)
 	assert.NoError(t, err)
 

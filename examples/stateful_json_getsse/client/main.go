@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // Handler function for server notifications.
-func handleNotification(notification *schema.Notification) error {
-	paramsMap := notification.Params // Use directly, since Params is already map[string]interface{}.
+func handleNotification(notification *mcp.JSONRPCNotification) error {
+	paramsMap := notification.Params.AdditionalFields // Use AdditionalFields here.
 
 	level, _ := paramsMap["level"].(string)
 	dataMap, ok := paramsMap["data"].(map[string]interface{})
@@ -55,7 +55,7 @@ func main() {
 	defer cancel()
 
 	// Create client info.
-	clientInfo := schema.Implementation{
+	clientInfo := mcp.Implementation{
 		Name:    "Stateful-JSON-GETSSE-Client",
 		Version: "1.0.0",
 	}
@@ -100,8 +100,8 @@ func main() {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
 
-	log.Infof("Server provides %d tools", len(tools))
-	for _, tool := range tools {
+	log.Infof("Server provides %d tools", len(tools.Tools))
+	for _, tool := range tools.Tools {
 		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
@@ -116,8 +116,8 @@ func main() {
 
 	// Show call result.
 	log.Info("Call result:")
-	for _, content := range callResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range callResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		} else {
 			log.Infof("- Other type content: %+v", content)
@@ -135,8 +135,8 @@ func main() {
 
 	// Show counter result.
 	log.Info("Counter result (first time):")
-	for _, content := range counterResult1 {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range counterResult1.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}
@@ -152,8 +152,8 @@ func main() {
 
 	// Show counter result.
 	log.Info("Counter result (second time):")
-	for _, content := range counterResult2 {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range counterResult2.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}
@@ -170,8 +170,8 @@ func main() {
 
 	// Show call result.
 	log.Info("Notification tool call result:")
-	for _, content := range notifyResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range notifyResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		}
 	}

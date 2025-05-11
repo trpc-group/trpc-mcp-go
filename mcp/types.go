@@ -1,26 +1,22 @@
-package schema
+package mcp
 
-// Role represents the sender or recipient of a message
-type Role string
+// ClientRequest represents all client requests.
+type ClientRequest interface{}
 
-const (
-	// RoleUser represents the user role
-	RoleUser Role = "user"
+// ClientNotification represents all client notifications.
+type ClientNotification interface{}
 
-	// RoleAssistant represents the assistant role
-	RoleAssistant Role = "assistant"
-)
+// ClientResult represents all client results.
+type ClientResult interface{}
 
-// Annotations represents optional client annotations
-type Annotations struct {
-	// Audience describes the target user for this object or data
-	Audience []Role `json:"audience,omitempty"`
+// ServerRequest represents all server requests.
+type ServerRequest interface{}
 
-	// Priority describes the importance of this data to server operation
-	// 1 means "most important", the data is actually required
-	// 0 means "least important", the data is completely optional
-	Priority float64 `json:"priority,omitempty"`
-}
+// ServerNotification represents all server notifications.
+type ServerNotification interface{}
+
+// ServerResult represents all server results.
+type ServerResult interface{}
 
 // LoggingLevel represents the severity of a log message
 //

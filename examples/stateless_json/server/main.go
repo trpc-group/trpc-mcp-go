@@ -8,13 +8,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 // Simple greet tool handler.
-func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract name from parameters.
 	name := "World"
 	if nameArg, ok := req.Params.Arguments["name"]; ok {
@@ -24,11 +24,11 @@ func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.Call
 	}
 
 	// Create response content.
-	content := []schema.ToolContent{
-		schema.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless JSON server.", name)),
+	content := []mcp.Content{
+		mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless JSON server.", name)),
 	}
 
-	return &schema.CallToolResult{Content: content}, nil
+	return &mcp.CallToolResult{Content: content}, nil
 }
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 	log.Info("Starting Stateless JSON No GET SSE mode MCP server...")
 
 	// Create server info.
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateless-JSON-No-GETSSE-Server",
 		Version: "1.0.0",
 	}
@@ -57,9 +57,9 @@ func main() {
 	)
 
 	// Register a greet tool.
-	greetTool := schema.NewTool("greet", handleGreet,
-		schema.WithDescription("A simple greeting tool."),
-		schema.WithString("name", schema.Description("Name to greet.")))
+	greetTool := mcp.NewTool("greet", handleGreet,
+		mcp.WithDescription("A simple greeting tool."),
+		mcp.WithString("name", mcp.Description("Name to greet.")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)

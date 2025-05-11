@@ -4,15 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 func TestNewLifecycleManager(t *testing.T) {
 	// Create lifecycle manager
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}
@@ -26,7 +26,7 @@ func TestNewLifecycleManager(t *testing.T) {
 
 func TestLifecycleManager_HandleInitialize(t *testing.T) {
 	// Create lifecycle manager
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}
@@ -45,7 +45,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 	}{
 		{
 			name:            "Valid protocol version 2024-11-05",
-			protocolVersion: schema.ProtocolVersion_2024_11_05,
+			protocolVersion: mcp.ProtocolVersion_2024_11_05,
 			expectError:     false,
 		},
 		{
@@ -59,17 +59,17 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create request
-			request := schema.NewInitializeRequest(
+			request := mcp.NewInitializeRequest(
 				tc.protocolVersion,
-				schema.Implementation{
+				mcp.Implementation{
 					Name:    "Test-Client",
 					Version: "1.0.0",
 				},
-				schema.ClientCapabilities{
-					Roots: &schema.RootsCapability{
+				mcp.ClientCapabilities{
+					Roots: &mcp.RootsCapability{
 						ListChanged: true,
 					},
-					Sampling: &schema.SamplingCapability{},
+					Sampling: &mcp.SamplingCapability{},
 				},
 			)
 
@@ -81,17 +81,21 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 			require.NoError(t, err)
 
 			if tc.expectError {
-				assert.NotNil(t, response.Error)
-				assert.Equal(t, tc.errorCode, response.Error.Code)
+				// Type assert to JSONRPCError
+				errorResp, ok := response.(mcp.JSONRPCError)
+				require.True(t, ok, "Expected JSONRPCError but got different type")
+				assert.Equal(t, tc.errorCode, errorResp.Error.Code)
 			} else {
-				assert.Nil(t, response.Error)
+				// Type assert to JSONRPCResponse
+				successResp, ok := response.(mcp.JSONRPCResponse)
+				require.True(t, ok, "Expected JSONRPCResponse but got different type")
 
 				// Verify response content
-				initResp, ok := response.Result.(schema.InitializeResult)
+				initResp, ok := successResp.Result.(mcp.InitializeResult)
 				require.True(t, ok)
 
 				if tc.protocolVersion == "2023-01-01" {
-					assert.Equal(t, schema.ProtocolVersion_2024_11_05, initResp.ProtocolVersion)
+					assert.Equal(t, mcp.ProtocolVersion_2024_11_05, initResp.ProtocolVersion)
 				} else {
 					assert.Equal(t, tc.protocolVersion, initResp.ProtocolVersion)
 				}
@@ -105,7 +109,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 				require.True(t, ok)
 
 				if tc.protocolVersion == "2023-01-01" {
-					assert.Equal(t, schema.ProtocolVersion_2024_11_05, storedVersion)
+					assert.Equal(t, mcp.ProtocolVersion_2024_11_05, storedVersion)
 				} else {
 					assert.Equal(t, tc.protocolVersion, storedVersion)
 				}
@@ -116,7 +120,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 
 func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 	// Create lifecycle manager
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}
@@ -151,17 +155,17 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 	session := transport.NewSession()
 
 	// Create request
-	request := schema.NewInitializeRequest(
-		schema.ProtocolVersion_2024_11_05,
-		schema.Implementation{
+	request := mcp.NewInitializeRequest(
+		mcp.ProtocolVersion_2024_11_05,
+		mcp.Implementation{
 			Name:    "Test-Client",
 			Version: "1.0.0",
 		},
-		schema.ClientCapabilities{
-			Roots: &schema.RootsCapability{
+		mcp.ClientCapabilities{
+			Roots: &mcp.RootsCapability{
 				ListChanged: true,
 			},
-			Sampling: &schema.SamplingCapability{},
+			Sampling: &mcp.SamplingCapability{},
 		},
 	)
 
@@ -171,10 +175,13 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 
 	// Verify results
 	require.NoError(t, err)
-	assert.Nil(t, response.Error)
+
+	// Type assert to JSONRPCResponse
+	successResp, ok := response.(mcp.JSONRPCResponse)
+	require.True(t, ok, "Expected JSONRPCResponse but got different type")
 
 	// Verify custom capabilities in response
-	initResp, ok := response.Result.(schema.InitializeResult)
+	initResp, ok := successResp.Result.(mcp.InitializeResult)
 	require.True(t, ok)
 
 	// Check Tools capability

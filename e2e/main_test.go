@@ -8,48 +8,48 @@ import (
 	"time"
 )
 
-// 全局标志
+// Global flags.
 var (
-	// useRealServer 标志用于控制是否使用真实 HTTP 服务器
-	useRealServer = flag.Bool("real", false, "使用真实 HTTP 服务器而不是 httptest")
+	// useRealServer controls whether to use a real HTTP server.
+	useRealServer = flag.Bool("real", false, "Use real HTTP server instead of httptest.")
 
-	// serverAddr 指定真实服务器地址
-	serverAddr = flag.String("addr", "localhost:3456", "真实服务器地址")
+	// serverAddr specifies the real server address.
+	serverAddr = flag.String("addr", "localhost:3456", "Real server address.")
 
-	// verboseLogging 控制详细日志
-	verboseLogging = flag.Bool("verbose", false, "启用详细日志")
+	// verboseLogging controls verbose logging.
+	verboseLogging = flag.Bool("verbose", false, "Enable verbose logging.")
 
-	// TestGetSSEEnabled 标志用于控制是否启用 GET SSE 测试
-	TestGetSSEEnabled = flag.Bool("getsse", true, "启用 GET SSE 测试")
+	// TestGetSSEEnabled controls whether to enable GET SSE tests.
+	TestGetSSEEnabled = flag.Bool("getsse", true, "Enable GET SSE tests.")
 )
 
-// 全局超时设置
+// Global timeout settings.
 const (
-	// 默认测试超时
+	// Default test timeout.
 	defaultTestTimeout = 5 * time.Second
 
-	// 长测试超时
+	// Long test timeout.
 	longTestTimeout = 10 * time.Second
 )
 
-// TestMain 设置整个测试包的环境
+// TestMain sets up the environment for the entire test package.
 func TestMain(m *testing.M) {
-	// 解析命令行标志
+	// Parse command line flags.
 	flag.Parse()
 
-	// 设置日志前缀
+	// Set log prefix.
 	if *verboseLogging {
-		fmt.Println("启用详细日志模式")
+		fmt.Println("Verbose logging mode enabled.")
 	}
 
-	// 运行测试
+	// Run tests.
 	exitCode := m.Run()
 
-	// 退出
+	// Exit.
 	os.Exit(exitCode)
 }
 
-// 辅助函数：基于短名称获取完整测试名称
+// Helper function: get full test name based on short name.
 func getTestName(t *testing.T, shortName string) string {
 	return fmt.Sprintf("%s/%s", t.Name(), shortName)
 }

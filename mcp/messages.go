@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 // Implementation describes the name and version of an MCP implementation
 // Corresponds to the "Implementation" definition in schema.json
@@ -123,21 +123,14 @@ type InitializeParams struct {
 // InitializeRequest describes an initialization request
 // Corresponds to the "InitializeRequest" definition in schema.json
 type InitializeRequest struct {
-	// Method is fixed as "initialize"
-	// Corresponds to schema: "method": {"const": "initialize", "type": "string"}
-	Method string `json:"method"`
-
-	// Params are the request parameters
-	// Corresponds to schema: "params": {properties: {...}}
+	Request
 	Params InitializeParams `json:"params"`
 }
 
 // InitializeResult describes an initialization response result
 // Corresponds to the "InitializeResult" definition in schema.json
 type InitializeResult struct {
-	// Meta is a metadata field reserved by the protocol
-	// Corresponds to schema: "_meta": {"description": "This result property is reserved by the protocol..."}
-	Meta map[string]interface{} `json:"_meta,omitempty"`
+	Result
 
 	// ProtocolVersion is the version of the protocol that the server wants to use
 	// Corresponds to schema: "protocolVersion": {"description": "The version of the Model Context Protocol that the server wants to use."}
@@ -154,6 +147,12 @@ type InitializeResult struct {
 	// Instructions describe how to use the server and its features
 	// Corresponds to schema: "instructions": {"description": "Instructions describing how to use the server and its features."}
 	Instructions string `json:"instructions,omitempty"`
+}
+
+// InitializedNotification describes an initialized notification
+// Corresponds to the "InitializedNotification" definition in schema.json
+type InitializedNotification struct {
+	Notification
 }
 
 // Method constant definitions
@@ -231,5 +230,5 @@ func NewInitializeResponse(reqID interface{}, protocolVersion string, serverInfo
 
 // NewInitializedNotification creates an initialized notification
 func NewInitializedNotification() *JSONRPCNotification {
-	return NewJSONRPCNotification(MethodNotificationsInitialized, nil)
+	return NewJSONRPCNotification(Notification{Method: MethodNotificationsInitialized, Params: NotificationParams{}})
 }

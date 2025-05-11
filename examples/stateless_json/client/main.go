@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 func main() {
@@ -19,7 +19,7 @@ func main() {
 	defer cancel()
 
 	// Create client info.
-	clientInfo := schema.Implementation{
+	clientInfo := mcp.Implementation{
 		Name:    "Stateless-JSON-Client",
 		Version: "1.0.0",
 	}
@@ -42,15 +42,15 @@ func main() {
 		initResp.ServerInfo.Name, initResp.ServerInfo.Version, initResp.ProtocolVersion)
 	log.Infof("Server capabilities: %+v", initResp.Capabilities)
 
-	// Get available tools list.
+	// Get an available tools list.
 	log.Info("Listing tools...")
-	tools, err := mcpClient.ListTools(ctx)
+	listToolsResp, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
 
-	log.Infof("Server provides %d tools", len(tools))
-	for _, tool := range tools {
+	log.Infof("Server provides %d tools", len(listToolsResp.Tools))
+	for _, tool := range listToolsResp.Tools {
 		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
@@ -65,8 +65,8 @@ func main() {
 
 	// Show call result.
 	log.Info("Call result:")
-	for _, content := range callResult {
-		if textContent, ok := content.(schema.TextContent); ok {
+	for _, content := range callResult.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
 			log.Infof("- Text: %s", textContent.Text)
 		} else {
 			log.Infof("- Other type content: %+v", content)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // ServerProvider interface defines components that can provide server instances
@@ -18,7 +18,7 @@ type ServerProvider interface {
 // ToolManager is responsible for managing MCP tools
 type ToolManager struct {
 	// Registered tools
-	tools map[string]*schema.Tool
+	tools map[string]*mcp.Tool
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
@@ -30,7 +30,7 @@ type ToolManager struct {
 // NewToolManager creates a tool manager
 func NewToolManager() *ToolManager {
 	return &ToolManager{
-		tools: make(map[string]*schema.Tool),
+		tools: make(map[string]*mcp.Tool),
 	}
 }
 
@@ -41,7 +41,7 @@ func (m *ToolManager) WithServerProvider(provider ServerProvider) *ToolManager {
 }
 
 // RegisterTool registers a tool
-func (m *ToolManager) RegisterTool(tool *schema.Tool) error {
+func (m *ToolManager) RegisterTool(tool *mcp.Tool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -58,7 +58,7 @@ func (m *ToolManager) RegisterTool(tool *schema.Tool) error {
 }
 
 // GetTool retrieves a tool by name
-func (m *ToolManager) GetTool(name string) (*schema.Tool, bool) {
+func (m *ToolManager) GetTool(name string) (*mcp.Tool, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -67,11 +67,11 @@ func (m *ToolManager) GetTool(name string) (*schema.Tool, bool) {
 }
 
 // GetTools gets all registered tools
-func (m *ToolManager) GetTools(protocolVersion string) []*schema.Tool {
+func (m *ToolManager) GetTools(protocolVersion string) []*mcp.Tool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tools := make([]*schema.Tool, 0, len(m.tools))
+	tools := make([]*mcp.Tool, 0, len(m.tools))
 	for _, tool := range m.tools {
 		tools = append(tools, tool)
 	}
@@ -80,58 +80,76 @@ func (m *ToolManager) GetTools(protocolVersion string) []*schema.Tool {
 }
 
 // HandleListTools handles tools/list requests
-func (m *ToolManager) HandleListTools(ctx context.Context, req *schema.Request, session *transport.Session) (*schema.Response, error) {
+func (m *ToolManager) HandleListTools(ctx context.Context, req *mcp.JSONRPCRequest, session *transport.Session) (mcp.JSONRPCMessage, error) {
 	// Get all tools
-	tools := m.GetTools("")
+	toolPtrs := m.GetTools("")
 
-	// Create response
-	return schema.NewResponse(req.ID, map[string]interface{}{
-		"tools": tools,
-	}), nil
+	// Convert []*mcp.Tool to []mcp.Tool
+	tools := make([]mcp.Tool, len(toolPtrs))
+	for i, toolPtr := range toolPtrs {
+		if toolPtr != nil {
+			tools[i] = *toolPtr
+		}
+	}
+
+	// Format and return response
+	result := mcp.ListToolsResult{
+		Tools: tools,
+	}
+
+	return result, nil
 }
 
 // HandleCallTool handles tools/call requests
-func (m *ToolManager) HandleCallTool(ctx context.Context, req *schema.Request, session *transport.Session) (*schema.Response, error) {
+func (m *ToolManager) HandleCallTool(ctx context.Context, req *mcp.JSONRPCRequest, session *transport.Session) (mcp.JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "parameters are empty", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "parameters are empty", nil), nil
+	}
+
+	// Convert params to map for easier access
+	paramsMap, ok := req.Params.(map[string]interface{})
+	if !ok {
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
 	}
 
 	// Get tool name
-	toolName, ok := req.Params["name"].(string)
+	toolName, ok := paramsMap["name"].(string)
 	if !ok || toolName == "" {
-		return schema.NewErrorResponse(req.ID, schema.ErrInvalidParams, "missing tool name", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "missing tool name", nil), nil
 	}
 
 	// Get tool
 	tool, ok := m.GetTool(toolName)
 	if !ok {
-		return schema.NewErrorResponse(req.ID, schema.ErrMethodNotFound, fmt.Sprintf("tool %s not found", toolName), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("tool %s not found", toolName), nil), nil
 	}
 
-	// Create tool call request according to specification
-	toolReq := &schema.CallToolRequest{
-		Method: "tools/call",
-		Params: schema.CallToolParams{
-			Name: toolName,
-		},
+	// Create tool call request
+	toolReq := &mcp.CallToolRequest{}
+	toolReq.Method = "tools/call" // Set method manually
+
+	// Set up CallToolParams
+	params := mcp.CallToolParams{
+		Name: toolName,
 	}
 
 	// Get tool arguments
-	if args, ok := req.Params["arguments"]; ok && args != nil {
+	if args, ok := paramsMap["arguments"]; ok && args != nil {
 		if argsMap, ok := args.(map[string]interface{}); ok {
-			toolReq.Params.Arguments = argsMap
+			params.Arguments = argsMap
 		}
 	}
 
+	toolReq.Params = params
+
 	// Progress notification token (if any)
-	if progressToken, ok := req.Params["progressToken"]; ok {
-		// Note: Current version of CallToolRequest doesn't fully implement Meta field
-		// Future implementation should add toolReq.Meta = ... code
-		// meta := &schema.RequestMeta{
-		//	ProgressToken: progressToken,
-		// }
-		_ = progressToken // Ignore progress token for now
+	if meta, ok := paramsMap["_meta"].(map[string]interface{}); ok {
+		if progressToken, exists := meta["progressToken"]; exists {
+			// Note: Current version of CallToolRequest doesn't fully implement Meta field
+			// Future implementation should add toolReq.Meta = ... code
+			_ = progressToken // Ignore progress token for now
+		}
 	}
 
 	// Before calling the tool, inject server instance into context if server provider exists
@@ -142,9 +160,8 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *schema.Request, s
 	// Execute tool
 	result, err := tool.ExecuteFunc(ctx, toolReq)
 	if err != nil {
-		return schema.NewErrorResponse(req.ID, schema.ErrInternal, fmt.Sprintf("failed to execute tool %s: %v", toolName, err), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInternal, fmt.Sprintf("failed to execute tool %s: %v", toolName, err), nil), nil
 	}
 
-	// Create response using the dedicated tool result response function
-	return schema.NewToolResultResponse(req.ID, result), nil
+	return result, nil
 }

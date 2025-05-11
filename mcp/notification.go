@@ -1,4 +1,4 @@
-package schema
+package mcp
 
 import (
 	"context"
@@ -29,6 +29,8 @@ type NotificationSender interface {
 
 	// SendCustomNotification sends a custom notification
 	SendCustomNotification(method string, params map[string]interface{}) error
+
+	SendNotification(notification *Notification) error
 }
 
 // WithNotificationSender adds a notification sender to the context
@@ -40,4 +42,28 @@ func WithNotificationSender(ctx context.Context, sender NotificationSender) cont
 func GetNotificationSender(ctx context.Context) (NotificationSender, bool) {
 	sender, ok := ctx.Value(notificationSenderKey).(NotificationSender)
 	return sender, ok
+}
+
+func NewNotification(method string, params map[string]interface{}) *Notification {
+	notificationParams := NotificationParams{
+		AdditionalFields: make(map[string]interface{}),
+	}
+
+	// Extract meta-field if present
+	if meta, ok := params["_meta"]; ok {
+		if metaMap, ok := meta.(map[string]interface{}); ok {
+			notificationParams.Meta = metaMap
+		}
+		delete(params, "_meta")
+	}
+
+	// Add remaining fields to AdditionalFields
+	for k, v := range params {
+		notificationParams.AdditionalFields[k] = v
+	}
+
+	return &Notification{
+		Method: method,
+		Params: notificationParams,
+	}
 }

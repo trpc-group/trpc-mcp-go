@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/e2e"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

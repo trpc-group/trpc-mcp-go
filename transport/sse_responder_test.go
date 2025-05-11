@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // MockFlusher is a mock implementation of the http.Flusher interface
@@ -27,7 +27,7 @@ func TestSSEResponder_Respond(t *testing.T) {
 	responder := NewSSEResponder()
 
 	// Create test response
-	testResponse := schema.NewResponse("test-id", map[string]interface{}{
+	testResponse := mcp.NewJSONRPCResponse("test-id", map[string]interface{}{
 		"result": "test-result",
 	})
 
@@ -54,7 +54,7 @@ func TestSSEResponder_SendNotification(t *testing.T) {
 	responder := NewSSEResponder()
 
 	// Create test notification
-	testNotification := schema.NewNotification("test-method", map[string]interface{}{
+	testNotification := mcp.NewJSONRPCNotificationFromMap("test-method", map[string]interface{}{
 		"param1": "value1",
 	})
 
@@ -83,7 +83,7 @@ func TestSSEResponder_SendNotification_WithResponse(t *testing.T) {
 	responder := NewSSEResponder()
 
 	// Create test response to pass to SendNotification
-	testResponse := schema.NewResponse("test-id", map[string]interface{}{
+	testResponse := mcp.NewJSONRPCResponse("test-id", map[string]interface{}{
 		"result": "test-result",
 	})
 
@@ -118,7 +118,7 @@ func TestSSEResponder_ComprehensiveTest(t *testing.T) {
 	responder := NewSSEResponder()
 
 	// Test sending response
-	testResponse := schema.NewResponse("resp-id", map[string]interface{}{
+	testResponse := mcp.NewJSONRPCResponse("resp-id", map[string]interface{}{
 		"result": "success",
 	})
 	err := responder.Respond(context.Background(), w, nil, testResponse, nil)
@@ -130,7 +130,7 @@ func TestSSEResponder_ComprehensiveTest(t *testing.T) {
 	flusher := &MockFlusher{}
 
 	// Test sending notification
-	testNotification := schema.NewNotification("progress", map[string]interface{}{
+	testNotification := mcp.NewJSONRPCNotificationFromMap("progress", map[string]interface{}{
 		"percent": 50,
 		"message": "halfway done",
 	})

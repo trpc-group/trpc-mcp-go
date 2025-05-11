@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/e2e"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // TestBasicWorkflow tests the basic client-server workflow.
@@ -37,7 +37,7 @@ func TestBasicWorkflow(t *testing.T) {
 		require.Len(t, content, 1, "Should have only one content")
 
 		// Type assert to TextContent.
-		textContent, ok := content[0].(schema.TextContent)
+		textContent, ok := content[0].(mcp.TextContent)
 		assert.True(t, ok, "Content should be of type TextContent")
 		assert.Equal(t, "text", textContent.Type, "Content type should be text")
 		assert.Contains(t, textContent.Text, "Hello, e2e-test", "Greet content should contain username")
@@ -104,7 +104,7 @@ func TestMultipleCalls(t *testing.T) {
 			require.Len(t, content, 1, "Should have only one content")
 
 			// Type assert to TextContent.
-			textContent, ok := content[0].(schema.TextContent)
+			textContent, ok := content[0].(mcp.TextContent)
 			assert.True(t, ok, "Content should be of type TextContent")
 			assert.Equal(t, "text", textContent.Type, "Content type should be text")
 			assert.Contains(t, textContent.Text, "Hello, "+name, "Greet content should contain username")

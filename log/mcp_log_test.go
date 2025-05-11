@@ -4,21 +4,21 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 func TestLogLevelConversion(t *testing.T) {
 	testCases := []struct {
 		internalLevel log.Level
-		mcpLevel      schema.LoggingLevel
+		mcpLevel      mcp.LoggingLevel
 	}{
-		{log.DebugLevel, schema.LoggingLevelDebug},
-		{log.InfoLevel, schema.LoggingLevelInfo},
-		{log.NoticeLevel, schema.LoggingLevelNotice},
-		{log.WarningLevel, schema.LoggingLevelWarning},
-		{log.ErrorLevel, schema.LoggingLevelError},
-		{log.FatalLevel, schema.LoggingLevelCritical},
+		{log.DebugLevel, mcp.LoggingLevelDebug},
+		{log.InfoLevel, mcp.LoggingLevelInfo},
+		{log.NoticeLevel, mcp.LoggingLevelNotice},
+		{log.WarningLevel, mcp.LoggingLevelWarning},
+		{log.ErrorLevel, mcp.LoggingLevelError},
+		{log.FatalLevel, mcp.LoggingLevelCritical},
 	}
 
 	for _, tc := range testCases {
@@ -28,17 +28,17 @@ func TestLogLevelConversion(t *testing.T) {
 	}
 
 	mcpTestCases := []struct {
-		mcpLevel      schema.LoggingLevel
+		mcpLevel      mcp.LoggingLevel
 		internalLevel log.Level
 	}{
-		{schema.LoggingLevelDebug, log.DebugLevel},
-		{schema.LoggingLevelInfo, log.InfoLevel},
-		{schema.LoggingLevelNotice, log.NoticeLevel},
-		{schema.LoggingLevelWarning, log.WarningLevel},
-		{schema.LoggingLevelError, log.ErrorLevel},
-		{schema.LoggingLevelCritical, log.FatalLevel},
-		{schema.LoggingLevelAlert, log.FatalLevel},
-		{schema.LoggingLevelEmergency, log.FatalLevel},
+		{mcp.LoggingLevelDebug, log.DebugLevel},
+		{mcp.LoggingLevelInfo, log.InfoLevel},
+		{mcp.LoggingLevelNotice, log.NoticeLevel},
+		{mcp.LoggingLevelWarning, log.WarningLevel},
+		{mcp.LoggingLevelError, log.ErrorLevel},
+		{mcp.LoggingLevelCritical, log.FatalLevel},
+		{mcp.LoggingLevelAlert, log.FatalLevel},
+		{mcp.LoggingLevelEmergency, log.FatalLevel},
 	}
 
 	for _, tc := range mcpTestCases {
@@ -55,7 +55,7 @@ func TestCreateLogNotification(t *testing.T) {
 		t.Errorf("Expected method to be 'notifications/message', got %s", notification.Method)
 	}
 
-	if notification.Params.Level != schema.LoggingLevelInfo {
+	if notification.Params.Level != mcp.LoggingLevelInfo {
 		t.Errorf("Expected level to be Info, got %s", notification.Params.Level)
 	}
 
@@ -76,7 +76,7 @@ func TestLogNotificationJSON(t *testing.T) {
 		t.Fatalf("Failed to marshal log notification: %v", err)
 	}
 
-	var decoded schema.LoggingMessageNotification
+	var decoded mcp.LoggingMessageNotification
 	err = json.Unmarshal(jsonData, &decoded)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal log notification: %v", err)

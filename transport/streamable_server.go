@@ -8,17 +8,17 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // RequestHandler interface defines a component that handles requests
 type RequestHandler interface {
 	// Handle a request
-	HandleRequest(ctx context.Context, req *schema.Request, session *Session) (*schema.Response, error)
+	HandleRequest(ctx context.Context, req *mcp.JSONRPCRequest, session *Session) (mcp.JSONRPCMessage, error)
 
 	// Handle a notification
-	HandleNotification(ctx context.Context, notification *schema.Notification, session *Session) error
+	HandleNotification(ctx context.Context, notification *mcp.JSONRPCNotification, session *Session) error
 }
 
 // HTTPServerHandler implements an HTTP server handler
@@ -191,14 +191,14 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	var session *Session
 
 	// Try to parse request/notification
-	var req schema.Request
-	var notification schema.Notification
+	var req mcp.JSONRPCRequest
+	var notification mcp.JSONRPCNotification
 	isInitialize := false
 
 	// First try to parse as request
 	if err := json.Unmarshal(body, &req); err == nil && req.ID != nil {
 		// Check if it's an initialize request
-		if req.Method == schema.MethodInitialize {
+		if req.Method == mcp.MethodInitialize {
 			isInitialize = true
 		}
 	}
@@ -257,7 +257,7 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 				sessionID = session.ID
 			}
 			notificationSender := NewSSENotificationSender(w, flusher, sessionID)
-			reqCtx := schema.WithNotificationSender(ctx, notificationSender)
+			reqCtx := mcp.WithNotificationSender(ctx, notificationSender)
 
 			// Add session to context
 			if session != nil {
@@ -268,7 +268,7 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 			resp, err := h.requestHandler.HandleRequest(reqCtx, &req, session)
 			if err != nil {
 				log.Infof("Request processing failed: %v", err)
-				errorResp := schema.NewErrorResponse(req.ID, schema.ErrInternal, "Internal server error", nil)
+				errorResp := mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInternal, "Internal server error", nil)
 				// Send error response
 				err = sseResponder.Respond(ctx, w, r, errorResp, session)
 				if err != nil {
@@ -276,7 +276,12 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 				}
 			} else {
 				// Send final response
-				err = sseResponder.Respond(ctx, w, r, resp, session)
+				jsonrpcResponse := mcp.JSONRPCResponse{
+					JSONRPC: mcp.JSONRPCVersion,
+					ID:      req.ID,
+					Result:  resp,
+				}
+				err = sseResponder.Respond(ctx, w, r, jsonrpcResponse, session)
 				if err != nil {
 					log.Infof("Failed to send SSE final response: %v", err)
 				}
@@ -288,7 +293,7 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		// Use normal JSON response mode
 		// Create a NoOp notification sender for JSON mode
 		noopSender := &NoopNotificationSender{}
-		reqCtx := schema.WithNotificationSender(ctx, noopSender)
+		reqCtx := mcp.WithNotificationSender(ctx, noopSender)
 
 		// Add session to context
 		if session != nil {
@@ -298,19 +303,25 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		resp, err := h.requestHandler.HandleRequest(reqCtx, &req, session)
 		if err != nil {
 			log.Infof("Request processing failed: %v", err)
-			errorResp := schema.NewErrorResponse(req.ID, schema.ErrInternal, "Internal server error", nil)
+			errorResp := mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInternal, "Internal server error", nil)
 			responder.Respond(respCtx, w, r, errorResp, session)
 			return
 		}
 
-		responder.Respond(respCtx, w, r, resp, session)
+		jsonrpcResponse := mcp.JSONRPCResponse{
+			JSONRPC: mcp.JSONRPCVersion,
+			ID:      req.ID,
+			Result:  resp,
+		}
+
+		responder.Respond(respCtx, w, r, jsonrpcResponse, session)
 		return
 	}
 
 	// Try to parse as notification
 	if err := json.Unmarshal(body, &notification); err == nil && notification.Method != "" {
 		// Handle special case for initialize request
-		if notification.Method == schema.MethodNotificationsInitialized {
+		if notification.Method == mcp.MethodNotificationsInitialized {
 			// This is initialized notification, if it's the first request, we need to create a session
 			if h.enableSession && session == nil {
 				log.Info("Warning: Received initialized notification but no active session")
@@ -460,7 +471,7 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 }
 
 // Send notification through GET SSE
-func (h *HTTPServerHandler) sendNotificationToGetSSE(sessionID string, notification *schema.Notification) error {
+func (h *HTTPServerHandler) sendNotificationToGetSSE(sessionID string, notification *mcp.JSONRPCNotification) error {
 	h.getSSEConnectionsLock.RLock()
 	conn, exists := h.getSSEConnections[sessionID]
 	h.getSSEConnectionsLock.RUnlock()
@@ -502,18 +513,29 @@ func (h *HTTPServerHandler) handleStreamResumption(ctx context.Context, conn *Ge
 	// This needs to be handled according to the server's storage/cache mechanism
 	log.Infof("Resuming session %s GET SSE stream, event ID: %s", sessionID, conn.lastEventID)
 
+	// Create params for the notification
+	params := map[string]interface{}{
+		"resumedFrom": conn.lastEventID,
+	}
+
+	// Create NotificationParams struct
+	notification := mcp.Notification{
+		Method: "stream/resumed",
+		Params: mcp.NotificationParams{
+			AdditionalFields: params,
+		},
+	}
+
 	// Create strictly conforming JSON-RPC 2.0 notification object
 	// Use core.NewNotification to ensure jsonrpc field is set to "2.0"
-	notification := schema.NewNotification("stream/resumed", map[string]interface{}{
-		"resumedFrom": conn.lastEventID,
-	})
+	jsonNotification := mcp.NewJSONRPCNotification(notification)
 
 	// Validate notification object format before sending
 	notifBytes, _ := json.Marshal(notification)
 	log.Infof("Preparing to send stream resumption notification: %s", string(notifBytes))
 
 	// Send notification
-	err := h.sendNotificationToGetSSE(sessionID, notification)
+	err := h.sendNotificationToGetSSE(sessionID, jsonNotification)
 	if err != nil {
 		log.Infof("Failed to send stream resumption notification: %v", err)
 	}
@@ -546,7 +568,7 @@ type SessionEventNotifier interface {
 }
 
 // SendNotification sends notification to GET SSE connection
-func (h *HTTPServerHandler) SendNotification(sessionID string, notification *schema.Notification) error {
+func (h *HTTPServerHandler) SendNotification(sessionID string, notification *mcp.JSONRPCNotification) error {
 	// Directly send notification through GET SSE, without distinguishing notification type
 	return h.sendNotificationToGetSSE(sessionID, notification)
 }

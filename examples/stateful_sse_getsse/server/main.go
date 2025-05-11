@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // ChatRoom represents a chat room.
@@ -121,14 +121,14 @@ func (cr *ChatRoom) GetUserCount() int {
 var globalChatRoom = NewChatRoom("Global Chat Room", 100)
 
 // handleGreet processes the greeting tool request.
-func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		// Unable to get session, return a simple greeting
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Hello! This is a greeting from the complete MCP server (but unable to get session information)."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Hello! This is a greeting from the complete MCP server (but unable to get session information)."),
 			},
 		}, nil
 	}
@@ -142,22 +142,22 @@ func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.Call
 	}
 
 	// Build greeting message
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the complete MCP server. Your session ID is: %s",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the complete MCP server. Your session ID is: %s",
 				name, session.ID[:8]+"...")),
 		},
 	}, nil
 }
 
 // handleCounter processes the counter tool request.
-func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
 			},
 		}, fmt.Errorf("unable to get session from context")
 	}
@@ -181,32 +181,32 @@ func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.Ca
 	session.SetData("counter", count)
 
 	// Return result
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
 				count, session.ID[:8]+"...")),
 		},
 	}, nil
 }
 
 // handleDelayedResponse processes the delayed response tool request.
-func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
 			},
 		}, fmt.Errorf("unable to get session from context")
 	}
 
 	// Get notification sender from context
-	notificationSender, ok := schema.GetNotificationSender(ctx)
+	notificationSender, ok := mcp.GetNotificationSender(ctx)
 	if !ok {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get notification sender. This feature requires SSE streaming response support."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get notification sender. This feature requires SSE streaming response support."),
 			},
 		}, fmt.Errorf("unable to get notification sender from context")
 	}
@@ -239,9 +239,9 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 		// Check if context is cancelled
 		select {
 		case <-ctx.Done():
-			return &schema.CallToolResult{
-				Content: []schema.ToolContent{
-					schema.NewTextContent(fmt.Sprintf("Processing cancelled at step %d", i)),
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(fmt.Sprintf("Processing cancelled at step %d", i)),
 				},
 			}, ctx.Err()
 		default:
@@ -274,9 +274,9 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 	}
 
 	// Return result
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf(
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf(
 				"Processing completed! Executed %d steps, each step delay %d milliseconds. (Session ID: %s)",
 				steps, delayMs, session.ID[:8]+"...")),
 		},
@@ -284,13 +284,13 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 }
 
 // handleNotification processes the notification tool request.
-func handleNotification(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
 			},
 		}, fmt.Errorf("unable to get session from context")
 	}
@@ -311,9 +311,9 @@ func handleNotification(ctx context.Context, req *schema.CallToolRequest) (*sche
 	}
 
 	// Immediately return confirmation message
-	result := &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf(
+	result := &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent in %d seconds. (Session ID: %s)",
 				delaySeconds, session.ID[:8]+"...")),
 		},
@@ -344,13 +344,13 @@ func handleNotification(ctx context.Context, req *schema.CallToolRequest) (*sche
 }
 
 // handleChatJoin processes the chat join tool request.
-func handleChatJoin(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
 			},
 		}, fmt.Errorf("unable to get session from context")
 	}
@@ -389,21 +389,21 @@ func handleChatJoin(ctx context.Context, req *schema.CallToolRequest) (*schema.C
 	session.SetData("chatUserName", userName)
 
 	// Return result
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(messageText),
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(messageText),
 		},
 	}, nil
 }
 
 // handleChatSend processes the chat send tool request.
-func handleChatSend(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
 			},
 		}, fmt.Errorf("unable to get session from context")
 	}
@@ -424,9 +424,9 @@ func handleChatSend(ctx context.Context, req *schema.CallToolRequest) (*schema.C
 
 	// If still no username, please join the chat room first
 	if userName == "" {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Please use chatJoin tool to join the chat room first."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Please use chatJoin tool to join the chat room first."),
 			},
 		}, nil
 	}
@@ -441,9 +441,9 @@ func handleChatSend(ctx context.Context, req *schema.CallToolRequest) (*schema.C
 
 	// Validate message is not empty
 	if message == "" {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Message cannot be empty."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Message cannot be empty."),
 			},
 		}, nil
 	}
@@ -455,9 +455,9 @@ func handleChatSend(ctx context.Context, req *schema.CallToolRequest) (*schema.C
 	broadcastChatMessage(userName, message)
 
 	// Return result
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Message sent: %s", message)),
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Message sent: %s", message)),
 		},
 	}, nil
 }
@@ -509,7 +509,7 @@ func main() {
 	log.Info("Starting Stateful SSE mode MCP server (supports GET SSE)...")
 
 	// Create server information
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateful-SSE-GETSSE-Server",
 		Version: "1.0.0",
 	}
@@ -532,9 +532,9 @@ func main() {
 	)
 
 	// Register a greeting tool
-	greetTool := schema.NewTool("greet", handleGreet,
-		schema.WithDescription("A simple greeting tool"),
-		schema.WithString("name", schema.Description("Name to greet")))
+	greetTool := mcp.NewTool("greet", handleGreet,
+		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithString("name", mcp.Description("Name to greet")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Register tool failed: %v", err)
@@ -542,11 +542,11 @@ func main() {
 	log.Infof("Registered greeting tool: greet")
 
 	// Register counter tool
-	counterTool := schema.NewTool("counter", handleCounter,
-		schema.WithDescription("A session counter tool, demonstrating stateful session"),
-		schema.WithNumber("increment",
-			schema.Description("Counter increment"),
-			schema.Default(1)))
+	counterTool := mcp.NewTool("counter", handleCounter,
+		mcp.WithDescription("A session counter tool, demonstrating stateful session"),
+		mcp.WithNumber("increment",
+			mcp.Description("Counter increment"),
+			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("Register counter tool failed: %v", err)
@@ -554,14 +554,14 @@ func main() {
 	log.Infof("Registered counter tool: counter")
 
 	// Register delayed response tool
-	delayedTool := schema.NewTool("delayedResponse", handleDelayedResponse,
-		schema.WithDescription("A delayed response tool, demonstrating SSE streaming response advantage"),
-		schema.WithNumber("steps",
-			schema.Description("Processing steps"),
-			schema.Default(5)),
-		schema.WithNumber("delayMs",
-			schema.Description("Milliseconds per step"),
-			schema.Default(500)))
+	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
+		mcp.WithDescription("A delayed response tool, demonstrating SSE streaming response advantage"),
+		mcp.WithNumber("steps",
+			mcp.Description("Processing steps"),
+			mcp.Default(5)),
+		mcp.WithNumber("delayMs",
+			mcp.Description("Milliseconds per step"),
+			mcp.Default(500)))
 
 	if err := mcpServer.RegisterTool(delayedTool); err != nil {
 		log.Fatalf("Register delayed response tool failed: %v", err)
@@ -569,14 +569,14 @@ func main() {
 	log.Infof("Registered delayed response tool: delayedResponse")
 
 	// Register notification demo tool
-	notifyTool := schema.NewTool("sendNotification", handleNotification,
-		schema.WithDescription("A notification demo tool, sending asynchronous notification message"),
-		schema.WithString("message",
-			schema.Description("Notification message to send"),
-			schema.Default("This is a test notification message")),
-		schema.WithNumber("delay",
-			schema.Description("Delay seconds before sending notification"),
-			schema.Default(2)))
+	notifyTool := mcp.NewTool("sendNotification", handleNotification,
+		mcp.WithDescription("A notification demo tool, sending asynchronous notification message"),
+		mcp.WithString("message",
+			mcp.Description("Notification message to send"),
+			mcp.Default("This is a test notification message")),
+		mcp.WithNumber("delay",
+			mcp.Description("Delay seconds before sending notification"),
+			mcp.Default(2)))
 
 	if err := mcpServer.RegisterTool(notifyTool); err != nil {
 		log.Fatalf("Register notification tool failed: %v", err)
@@ -584,10 +584,10 @@ func main() {
 	log.Infof("Registered notification tool: sendNotification")
 
 	// Register chat room tool
-	chatJoinTool := schema.NewTool("chatJoin", handleChatJoin,
-		schema.WithDescription("Join chat room"),
-		schema.WithString("userName",
-			schema.Description("Chat room username")))
+	chatJoinTool := mcp.NewTool("chatJoin", handleChatJoin,
+		mcp.WithDescription("Join chat room"),
+		mcp.WithString("userName",
+			mcp.Description("Chat room username")))
 
 	if err := mcpServer.RegisterTool(chatJoinTool); err != nil {
 		log.Fatalf("Register chat join tool failed: %v", err)
@@ -595,10 +595,10 @@ func main() {
 	log.Infof("Registered chat join tool: chatJoin")
 
 	// Register send chat message tool
-	chatSendTool := schema.NewTool("chatSend", handleChatSend,
-		schema.WithDescription("Send chat message"),
-		schema.WithString("message",
-			schema.Description("Chat message content")))
+	chatSendTool := mcp.NewTool("chatSend", handleChatSend,
+		mcp.WithDescription("Send chat message"),
+		mcp.WithString("message",
+			mcp.Description("Chat message content")))
 
 	if err := mcpServer.RegisterTool(chatSendTool); err != nil {
 		log.Fatalf("Register chat send tool failed: %v", err)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
 )
 
 // testLogger 实现 Logger 接口用于测试

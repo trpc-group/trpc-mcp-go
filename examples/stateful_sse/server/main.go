@@ -9,20 +9,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // Callback function for handling the greet tool.
-func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Warning: Session info not found, but you may continue."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Warning: Session info not found, but you may continue."),
 			},
 		}, nil
 	}
@@ -36,22 +36,22 @@ func handleGreet(ctx context.Context, req *schema.CallToolRequest) (*schema.Call
 	}
 
 	// Return greeting message.
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Hello, %s! (Session ID: %s)",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Hello, %s! (Session ID: %s)",
 				name, session.ID[:8]+"...")),
 		},
 	}, nil
 }
 
 // Counter tool, used to demonstrate session state keeping.
-func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
 		}, fmt.Errorf("failed to get session from context")
 	}
@@ -76,32 +76,32 @@ func handleCounter(ctx context.Context, req *schema.CallToolRequest) (*schema.Ca
 	session.SetData("counter", count)
 
 	// Return result.
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
 				count, session.ID[:8]+"...")),
 		},
 	}, nil
 }
 
 // Delayed response tool, demonstrates the advantage of SSE streaming response.
-func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
 		}, fmt.Errorf("failed to get session from context")
 	}
 
 	// Get notification sender.
-	notifSender, ok := schema.GetNotificationSender(ctx)
+	notifSender, ok := mcp.GetNotificationSender(ctx)
 	if !ok {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Could not get notification sender. This feature requires SSE streaming response support."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Could not get notification sender. This feature requires SSE streaming response support."),
 			},
 		}, fmt.Errorf("failed to get notification sender from context")
 	}
@@ -118,7 +118,7 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 	}
 
 	// Send initial response.
-	initialNotification := schema.NewNotification("notifications/message", map[string]interface{}{
+	paramsMap := map[string]interface{}{
 		"level": "info",
 		"data": map[string]interface{}{
 			"type":    "process_started",
@@ -126,8 +126,11 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 			"steps":   steps,
 			"delayMs": delayMs,
 		},
-	})
-	if err := notifSender.SendCustomNotification(initialNotification.Method, initialNotification.Params); err != nil {
+	}
+	//initialNotification := mcp.NewJSONRPCNotificationFromMap("notifications/message", paramsMap)
+	initialNotification := mcp.NewNotification("notifications/message", paramsMap)
+
+	if err := notifSender.SendCustomNotification(initialNotification.Method, paramsMap); err != nil {
 		log.Infof("Failed to send initial notification: %v", err)
 	}
 
@@ -137,7 +140,7 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 		time.Sleep(time.Duration(delayMs) * time.Millisecond)
 
 		// Send progress notification.
-		progressNotification := schema.NewNotification("notifications/message", map[string]interface{}{
+		progressParamsMap := map[string]interface{}{
 			"level": "info",
 			"data": map[string]interface{}{
 				"type":     "process_progress",
@@ -146,16 +149,23 @@ func handleDelayedResponse(ctx context.Context, req *schema.CallToolRequest) (*s
 				"progress": float64(i) / float64(steps) * 100,
 				"message":  fmt.Sprintf("Processing step %d/%d...", i, steps),
 			},
-		})
-		if err := notifSender.SendCustomNotification(progressNotification.Method, progressNotification.Params); err != nil {
+		}
+
+		progressNotification := mcp.NewNotification("notifications/message", progressParamsMap)
+		if err := notifSender.SendNotification(progressNotification); err != nil {
 			log.Infof("Failed to send progress notification: %v", err)
 		}
+
+		//progressNotification := mcp.NewJSONRPCNotificationFromMap("notifications/message", progressParamsMap)
+		//if err := notifSender.SendCustomNotification(progressNotification.Method, progressParamsMap); err != nil {
+		//	log.Infof("Failed to send progress notification: %v", err)
+		//}
 	}
 
 	// Final return result.
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)",
 				steps, delayMs, session.ID[:8]+"...")),
 		},
 	}, nil
@@ -167,7 +177,7 @@ func main() {
 	log.Info("Starting Stateful SSE No GET SSE mode MCP server...")
 
 	// Create server info.
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateful-SSE-No-GETSSE-Server",
 		Version: "1.0.0",
 	}
@@ -182,7 +192,7 @@ func main() {
 	mcpServer := server.NewServer(
 		":3005", // Server address and port
 		serverInfo,
-		server.WithPathPrefix("/mcp"), // Set API path
+		server.WithPathPrefix("/mcp"),             // Set API path
 		server.WithSessionManager(sessionManager), // Use session manager (stateful)
 		server.WithSSEEnabled(true),               // Enable SSE
 		server.WithGetSSEEnabled(false),           // Disable GET SSE
@@ -190,9 +200,9 @@ func main() {
 	)
 
 	// Register a greeting tool.
-	greetTool := schema.NewTool("greet", handleGreet,
-		schema.WithDescription("A simple greeting tool"),
-		schema.WithString("name", schema.Description("Name to greet")))
+	greetTool := mcp.NewTool("greet", handleGreet,
+		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithString("name", mcp.Description("Name to greet")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
@@ -200,11 +210,11 @@ func main() {
 	log.Info("Registered greeting tool: greet")
 
 	// 注册计数器工具
-	counterTool := schema.NewTool("counter", handleCounter,
-		schema.WithDescription("一个会话计数器工具，演示有状态会话"),
-		schema.WithNumber("increment",
-			schema.Description("计数增量"),
-			schema.Default(1)))
+	counterTool := mcp.NewTool("counter", handleCounter,
+		mcp.WithDescription("一个会话计数器工具，演示有状态会话"),
+		mcp.WithNumber("increment",
+			mcp.Description("计数增量"),
+			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("注册计数器工具失败: %v", err)
@@ -212,14 +222,14 @@ func main() {
 	log.Info("已注册计数器工具：counter")
 
 	// 注册延迟响应工具
-	delayedTool := schema.NewTool("delayedResponse", handleDelayedResponse,
-		schema.WithDescription("一个延迟响应工具，展示 SSE 流式响应的优势"),
-		schema.WithNumber("steps",
-			schema.Description("处理步骤数"),
-			schema.Default(5)),
-		schema.WithNumber("delayMs",
-			schema.Description("每步延迟的毫秒数"),
-			schema.Default(500)))
+	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
+		mcp.WithDescription("一个延迟响应工具，展示 SSE 流式响应的优势"),
+		mcp.WithNumber("steps",
+			mcp.Description("处理步骤数"),
+			mcp.Default(5)),
+		mcp.WithNumber("delayMs",
+			mcp.Description("每步延迟的毫秒数"),
+			mcp.Default(500)))
 
 	if err := mcpServer.RegisterTool(delayedTool); err != nil {
 		log.Fatalf("注册延迟响应工具失败: %v", err)

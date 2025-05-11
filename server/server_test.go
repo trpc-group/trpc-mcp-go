@@ -6,24 +6,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
 	"github.com/stretchr/testify/assert"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // NewMockTool creates a new mock tool for testing
-func NewMockTool() *schema.Tool {
-	return schema.NewTool("mock-tool",
-		func(ctx context.Context, req *schema.CallToolRequest) (*schema.CallToolResult, error) {
-			return schema.NewTextResult("Mock Response"), nil
+func NewMockTool() *mcp.Tool {
+	return mcp.NewTool("mock-tool",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewTextResult("Mock Response"), nil
 		},
-		schema.WithDescription("Mock Tool"),
+		mcp.WithDescription("Mock Tool"),
 	)
 }
 
 // Create test server
 func createTestServer() (*Server, *httptest.Server) {
 	// Create MCP server
-	mcpServer := NewServer(":3000", schema.Implementation{
+	mcpServer := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}, WithPathPrefix("/mcp"))
@@ -36,7 +36,7 @@ func createTestServer() (*Server, *httptest.Server) {
 
 func TestNewServer(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", schema.Implementation{
+	server := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	})
@@ -52,7 +52,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_WithPathPrefix(t *testing.T) {
 	// Create server with custom path prefix
-	server := NewServer(":3000", schema.Implementation{
+	server := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}, WithPathPrefix("/custom-api"))
@@ -63,7 +63,7 @@ func TestServer_WithPathPrefix(t *testing.T) {
 
 func TestServer_WithoutSession(t *testing.T) {
 	// Create server with sessions disabled
-	server := NewServer(":3000", schema.Implementation{
+	server := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	}, WithoutSession())
@@ -75,7 +75,7 @@ func TestServer_WithoutSession(t *testing.T) {
 
 func TestServer_RegisterTool(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", schema.Implementation{
+	server := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	})
@@ -108,7 +108,7 @@ func TestServer_HTTPHandler(t *testing.T) {
 
 func TestServer_MCPHandler(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", schema.Implementation{
+	server := NewServer(":3000", mcp.Implementation{
 		Name:    "Test-Server",
 		Version: "1.0.0",
 	})

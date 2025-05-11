@@ -7,103 +7,104 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/client"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/client"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
-// ClientOption 定义客户端选项函数
+// ClientOption defines a client option function.
 type ClientOption func(*client.Client)
 
-// WithProtocolVersion 选项：设置协议版本
+// WithProtocolVersion option: set protocol version.
 func WithProtocolVersion(version string) ClientOption {
 	return func(c *client.Client) {
-		// 在客户端创建时已应用，这里只是占位
+		// Already applied at client creation, this is just a placeholder.
 	}
 }
 
-// WithGetSSEEnabled 选项：启用 GET SSE 连接
+// WithGetSSEEnabled option: enable GET SSE connection.
 func WithGetSSEEnabled() ClientOption {
 	return func(c *client.Client) {
-		// 使用 client 包中已有的 WithGetSSEEnabled
+		// Use WithGetSSEEnabled from the client package.
 		client.WithGetSSEEnabled(true)(c)
 	}
 }
 
-// WithLastEventID 选项：设置 Last-Event-ID 用于流恢复
-// 注意：这只是在测试辅助函数中保存 eventID，实际使用时需要在调用时通过 StreamOptions 传递
+// WithLastEventID option: set Last-Event-ID for stream recovery.
+// Note: This only saves eventID in test helpers, actual usage requires passing via StreamOptions.
 func WithLastEventID(eventID string) ClientOption {
 	return func(c *client.Client) {
-		// 不需要在这里设置，将在 ExecuteSSETestTool 等方法中使用
+		// No need to set here, will be used in ExecuteSSETestTool and similar methods.
 	}
 }
 
-// CreateTestClient 创建连接到给定 URL 的测试客户端
+// CreateTestClient creates a test client connected to the given URL.
 func CreateTestClient(t *testing.T, url string, opts ...ClientOption) *client.Client {
 	t.Helper()
 
-	// 创建客户端
-	c, err := client.NewClient(url, schema.Implementation{
+	// Create client.
+	c, err := client.NewClient(url, mcp.Implementation{
 		Name:    "E2E-Test-Client",
 		Version: "1.0.0",
 	})
-	require.NoError(t, err, "创建客户端失败")
-	require.NotNil(t, c, "客户端不应为 nil")
+	require.NoError(t, err, "failed to create client")
+	require.NotNil(t, c, "client should not be nil")
 
-	// 应用选项
+	// Apply options.
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	t.Logf("创建测试客户端 URL: %s", url)
+	t.Logf("Created test client URL: %s", url)
 
 	return c
 }
 
-// InitializeClient 初始化客户端并验证成功
+// InitializeClient initializes the client and verifies success.
 func InitializeClient(t *testing.T, c *client.Client) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 初始化客户端
+	// Initialize client.
 	resp, err := c.Initialize(ctx)
-	require.NoError(t, err, "初始化客户端失败")
-	require.NotNil(t, resp, "初始化响应不应为 nil")
+	require.NoError(t, err, "failed to initialize client")
+	require.NotNil(t, resp, "init response should not be nil")
 
-	// 验证关键字段
-	assert.NotEmpty(t, resp.ServerInfo.Name, "服务器名称不应为空")
-	assert.NotEmpty(t, resp.ServerInfo.Version, "服务器版本不应为空")
-	assert.NotEmpty(t, resp.ProtocolVersion, "协议版本不应为空")
+	// Verify key fields.
+	assert.NotEmpty(t, resp.ServerInfo.Name, "server name should not be empty")
+	assert.NotEmpty(t, resp.ServerInfo.Version, "server version should not be empty")
+	assert.NotEmpty(t, resp.ProtocolVersion, "protocol version should not be empty")
 
-	// 验证会话 ID
+	// Verify session ID.
 	sessionID := c.GetSessionID()
-	assert.NotEmpty(t, sessionID, "会话 ID 不应为空")
+	assert.NotEmpty(t, sessionID, "session ID should not be empty")
 
-	t.Logf("客户端初始化成功，服务器: %s %s, 会话ID: %s",
+	t.Logf("Client initialized successfully, server: %s %s, sessionID: %s",
 		resp.ServerInfo.Name, resp.ServerInfo.Version, sessionID)
 }
 
-// ExecuteTestTool 执行测试工具并验证结果
-func ExecuteTestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}) []schema.ToolContent {
+// ExecuteTestTool executes a test tool and verifies the result.
+func ExecuteTestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}) []mcp.Content {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 调用工具
-	content, err := c.CallTool(ctx, toolName, args)
-	require.NoError(t, err, "调用工具 %s 失败", toolName)
+	// Call tool.
+	result, err := c.CallTool(ctx, toolName, args)
+	require.NoError(t, err, "failed to call tool %s", toolName)
+	require.NotNil(t, result, "tool call result should not be nil")
 
-	t.Logf("工具 %s 调用成功，结果内容数量: %d", toolName, len(content))
+	t.Logf("Tool %s called successfully, result content count: %d", toolName, len(result.Content))
 
-	return content
+	return result.Content
 }
 
-// CleanupClient 清理客户端资源
+// CleanupClient cleans up client resources.
 func CleanupClient(t *testing.T, c *client.Client) {
 	t.Helper()
 
@@ -111,7 +112,7 @@ func CleanupClient(t *testing.T, c *client.Client) {
 		return
 	}
 
-	// 尝试终止会话
+	// Try to terminate session.
 	sessionID := c.GetSessionID()
 	if sessionID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -119,94 +120,95 @@ func CleanupClient(t *testing.T, c *client.Client) {
 
 		err := c.TerminateSession(ctx)
 		if err != nil {
-			t.Logf("终止会话 %s 失败: %v", sessionID, err)
+			t.Logf("failed to terminate session %s: %v", sessionID, err)
 		} else {
-			t.Logf("会话 %s 已终止", sessionID)
+			t.Logf("session %s terminated", sessionID)
 		}
 	}
 
-	// 关闭客户端
+	// Close client.
 	c.Close()
-	t.Log("客户端资源已清理")
+	t.Log("client resources cleaned up")
 }
 
-// CreateSSETestClient 创建配置为使用 SSE 的测试客户端
+// CreateSSETestClient creates a test client configured to use SSE.
 func CreateSSETestClient(t *testing.T, url string, opts ...ClientOption) *client.Client {
 	t.Helper()
 
-	// 创建客户端
-	c, err := client.NewClient(url, schema.Implementation{
+	// Create client.
+	c, err := client.NewClient(url, mcp.Implementation{
 		Name:    "E2E-SSE-Test-Client",
 		Version: "1.0.0",
 	})
-	require.NoError(t, err, "创建 SSE 客户端失败")
-	require.NotNil(t, c, "SSE 客户端不应为 nil")
+	require.NoError(t, err, "failed to create SSE client")
+	require.NotNil(t, c, "SSE client should not be nil")
 
-	// 应用选项
+	// Apply options.
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	t.Logf("创建 SSE 测试客户端 URL: %s", url)
+	t.Logf("Created SSE test client URL: %s", url)
 
 	return c
 }
 
-// ExecuteSSETestTool 执行测试工具并支持收集通知
-func ExecuteSSETestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}, collector *NotificationCollector) []schema.ToolContent {
+// ExecuteSSETestTool executes a test tool and supports collecting notifications.
+func ExecuteSSETestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}, collector *NotificationCollector) []mcp.Content {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 创建 streamOptions
+	// Create streamOptions.
 	streamOpts := &transport.StreamOptions{
 		NotificationHandlers: collector.GetHandlers(),
 	}
 
-	// 调用工具，使用带流的方法
-	content, err := c.CallToolWithStream(ctx, toolName, args, streamOpts)
-	require.NoError(t, err, "调用工具 %s 失败", toolName)
+	// Call tool with streaming method.
+	result, err := c.CallToolWithStream(ctx, toolName, args, streamOpts)
+	require.NoError(t, err, "failed to call tool %s", toolName)
+	require.NotNil(t, result, "tool call stream result should not be nil")
 
-	t.Logf("工具 %s 调用成功，结果内容数量: %d，收到通知数量: %d",
-		toolName, len(content), collector.Count())
+	t.Logf("Tool %s called successfully, result content count: %d, notification count: %d",
+		toolName, len(result.Content), collector.Count())
 
-	return content
+	return result.Content
 }
 
-// NotificationCollector 用于收集和验证通知
+// NotificationCollector is used for collecting and validating notifications.
 type NotificationCollector struct {
-	// 通知收集通道
-	notifications chan *schema.Notification
-	// 锁，保护计数器
+	// Channel for collecting notifications.
+	notifications chan *mcp.JSONRPCNotification
+	// Mutex to protect counter.
 	mu sync.Mutex
-	// 通知计数器
+	// Notification counter.
 	count int
-	// 通知映射
-	notificationsByMethod map[string][]*schema.Notification
+	// Notification map by method.
+	notificationsByMethod map[string][]*mcp.JSONRPCNotification
 }
 
-// NewNotificationCollector 创建新的通知收集器
+// NewNotificationCollector creates a new notification collector.
 func NewNotificationCollector() *NotificationCollector {
 	return &NotificationCollector{
-		notifications:         make(chan *schema.Notification, 50),
-		notificationsByMethod: make(map[string][]*schema.Notification),
+		notifications:         make(chan *mcp.JSONRPCNotification, 50),
+		notificationsByMethod: make(map[string][]*mcp.JSONRPCNotification),
 	}
 }
 
-// GetHandlers 返回通知处理器映射
+// GetHandlers returns the notification handler map.
 func (nc *NotificationCollector) GetHandlers() map[string]transport.NotificationHandler {
-	// 创建处理器映射
+	// Create handler map.
 	handlers := make(map[string]transport.NotificationHandler)
 
 	// 进度通知处理器
-	handlers["notifications/progress"] = func(n *schema.Notification) error {
+	handlers["notifications/progress"] = func(n *mcp.JSONRPCNotification) error {
 		nc.addNotification(n)
 		return nil
 	}
 
 	// 日志通知处理器
-	handlers["notifications/message"] = func(n *schema.Notification) error {
+	handlers["notifications/message"] = func(n *mcp.JSONRPCNotification) error {
 		nc.addNotification(n)
 		return nil
 	}
@@ -214,83 +216,80 @@ func (nc *NotificationCollector) GetHandlers() map[string]transport.Notification
 	return handlers
 }
 
-// addNotification 添加通知
-func (nc *NotificationCollector) addNotification(n *schema.Notification) {
+// addNotification
+func (nc *NotificationCollector) addNotification(n *mcp.JSONRPCNotification) {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
-	// 增加计数
+	// increase
 	nc.count++
 
-	// 添加到通道
 	select {
 	case nc.notifications <- n:
-		// 通知已发送到通道
+		// Notification sent to channel
 	default:
-		// 通道已满，跳过
+		// Channel is full, skip
 	}
 
-	// 按方法分类
+	// Group by method
 	nc.notificationsByMethod[n.Method] = append(nc.notificationsByMethod[n.Method], n)
 }
 
-// Count 返回收到的通知总数
+// Count returns the total number of received notifications.
 func (nc *NotificationCollector) Count() int {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 	return nc.count
 }
 
-// GetNotifications 返回指定方法的通知列表
-func (nc *NotificationCollector) GetNotifications(method string) []*schema.Notification {
+// GetNotifications returns the notification list for the specified method.
+func (nc *NotificationCollector) GetNotifications(method string) []*mcp.JSONRPCNotification {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 	return nc.notificationsByMethod[method]
 }
 
-// GetProgressNotifications 返回进度通知列表
-func (nc *NotificationCollector) GetProgressNotifications() []*schema.Notification {
+// GetProgressNotifications returns the progress notification list.
+func (nc *NotificationCollector) GetProgressNotifications() []*mcp.JSONRPCNotification {
 	return nc.GetNotifications("notifications/progress")
 }
 
-// GetLogNotifications 返回日志通知列表
-func (nc *NotificationCollector) GetLogNotifications() []*schema.Notification {
+// GetLogNotifications returns the log notification list.
+func (nc *NotificationCollector) GetLogNotifications() []*mcp.JSONRPCNotification {
 	return nc.GetNotifications("notifications/message")
 }
 
-// AssertNotificationCount 断言指定方法的通知数量
+// AssertNotificationCount asserts the notification count for the specified method.
 func (nc *NotificationCollector) AssertNotificationCount(t *testing.T, method string, expectedCount int) {
 	notifications := nc.GetNotifications(method)
 	assert.Equal(t, expectedCount, len(notifications),
-		"方法 %s 的通知数量应为 %d，实际为 %d", method, expectedCount, len(notifications))
+		"Method %s notification count should be %d, actual %d", method, expectedCount, len(notifications))
 }
 
-// GetUnderlyingTransport 从客户端获取底层传输对象
-// 注意：这是测试环境的简化实现，无法直接访问客户端的底层传输对象
-// 返回 nil 并报告失败
+// GetUnderlyingTransport gets the underlying transport object from the client.
+// Note: This is a simplified implementation for test environment, cannot access underlying client transport directly. Returns nil and reports failure.
 func GetUnderlyingTransport(c *client.Client) (interface{}, bool) {
-	// 客户端没有公开访问底层传输的方法
+	// Client does not expose underlying transport object
 	return nil, false
 }
 
-// CreateClient 创建客户端连接
+// CreateClient creates a client connection.
 func CreateClient(url string, enableGetSSE bool) (*client.Client, error) {
-	// 创建客户端
-	c, err := client.NewClient(url, schema.Implementation{
+	// Create client
+	c, err := client.NewClient(url, mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
 	}, client.WithGetSSEEnabled(enableGetSSE))
 	if err != nil {
-		return nil, fmt.Errorf("创建 MCP 客户端失败: %v", err)
+		return nil, fmt.Errorf("Failed to create MCP client: %v", err)
 	}
 
 	return c, nil
 }
 
-// CreateClientWithRequestMode 创建带有请求模式的客户端连接
+// CreateClientWithRequestMode creates a client connection with request mode.
 func CreateClientWithRequestMode(url string, mode string, enableGetSSE bool) (*client.Client, error) {
-	// 创建客户端
-	c, err := client.NewClient(url, schema.Implementation{
+	c, err := client.NewClient(url, mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
 	}, client.WithGetSSEEnabled(enableGetSSE))

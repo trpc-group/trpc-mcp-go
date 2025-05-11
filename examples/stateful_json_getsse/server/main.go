@@ -9,14 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/modelcontextprotocol/streamable-mcp/log"
-	"github.com/modelcontextprotocol/streamable-mcp/schema"
-	"github.com/modelcontextprotocol/streamable-mcp/server"
-	"github.com/modelcontextprotocol/streamable-mcp/transport"
+	"trpc.group/trpc-go/trpc-mcp-go/log"
+	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
 // Simple greeting tool handler function.
-func handleGreet(ctx context.Context, request *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleGreet(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context (if any).
 	session, ok := transport.GetSessionFromContext(ctx)
 
@@ -29,29 +29,29 @@ func handleGreet(ctx context.Context, request *schema.CallToolRequest) (*schema.
 	}
 
 	// Create response content, customize message if session exists.
-	content := []schema.ToolContent{}
+	content := []mcp.Content{}
 
 	if ok && session != nil {
-		content = append(content, schema.NewTextContent(fmt.Sprintf(
+		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server. Your session ID is: %s",
 			name, session.ID[:8]+"...")))
 	} else {
-		content = append(content, schema.NewTextContent(fmt.Sprintf(
+		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server, but session info could not be obtained.",
 			name)))
 	}
 
-	return &schema.CallToolResult{Content: content}, nil
+	return &mcp.CallToolResult{Content: content}, nil
 }
 
 // Counter tool, used to demonstrate session state management.
-func handleCounter(ctx context.Context, request *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
 		}, fmt.Errorf("Failed to get session from context")
 	}
@@ -74,22 +74,22 @@ func handleCounter(ctx context.Context, request *schema.CallToolRequest) (*schem
 	session.SetData("counter", count)
 
 	// Return result.
-	return &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
 				count, session.ID[:8]+"...")),
 		},
 	}, nil
 }
 
 // Notification demo tool, used to send asynchronous notifications.
-func handleNotification(ctx context.Context, request *schema.CallToolRequest) (*schema.CallToolResult, error) {
+func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
 	session, ok := transport.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &schema.CallToolResult{
-			Content: []schema.ToolContent{
-				schema.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
 		}, fmt.Errorf("Failed to get session from context")
 	}
@@ -110,9 +110,9 @@ func handleNotification(ctx context.Context, request *schema.CallToolRequest) (*
 	}
 
 	// Immediately return confirmation message.
-	result := &schema.CallToolResult{
-		Content: []schema.ToolContent{
-			schema.NewTextContent(fmt.Sprintf(
+	result := &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent after %d seconds. Please make sure to subscribe to notifications with GET SSE connection. (Session ID: %s)",
 				delaySeconds, session.ID[:8]+"...")),
 		},
@@ -163,7 +163,7 @@ func main() {
 	log.Info("Starting Stateful JSON Yes GET SSE mode MCP server...")
 
 	// Create server info.
-	serverInfo := schema.Implementation{
+	serverInfo := mcp.Implementation{
 		Name:    "Stateful-JSON-Yes-GETSSE-Server",
 		Version: "1.0.0",
 	}
@@ -186,9 +186,9 @@ func main() {
 	)
 
 	// Register a greeting tool.
-	greetTool := schema.NewTool("greet", handleGreet,
-		schema.WithDescription("A simple greeting tool"),
-		schema.WithString("name", schema.Description("Name to greet")))
+	greetTool := mcp.NewTool("greet", handleGreet,
+		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithString("name", mcp.Description("Name to greet")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
@@ -196,11 +196,11 @@ func main() {
 	log.Infof("Registered greeting tool: greet")
 
 	// Register counter tool.
-	counterTool := schema.NewTool("counter", handleCounter,
-		schema.WithDescription("A session counter tool to demonstrate stateful sessions"),
-		schema.WithNumber("increment",
-			schema.Description("计数增量"),
-			schema.Default(1)))
+	counterTool := mcp.NewTool("counter", handleCounter,
+		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
+		mcp.WithNumber("increment",
+			mcp.Description("计数增量"),
+			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("注册计数器工具失败: %v", err)
@@ -208,14 +208,14 @@ func main() {
 	log.Infof("已注册计数器工具：counter")
 
 	// 注册通知演示工具
-	notifyTool := schema.NewTool("sendNotification", handleNotification,
-		schema.WithDescription("一个通知演示工具，发送异步通知消息"),
-		schema.WithString("message",
-			schema.Description("要发送的通知消息"),
-			schema.Default("这是一条测试通知消息")),
-		schema.WithNumber("delay",
-			schema.Description("发送通知前的延迟秒数"),
-			schema.Default(2)))
+	notifyTool := mcp.NewTool("sendNotification", handleNotification,
+		mcp.WithDescription("一个通知演示工具，发送异步通知消息"),
+		mcp.WithString("message",
+			mcp.Description("要发送的通知消息"),
+			mcp.Default("这是一条测试通知消息")),
+		mcp.WithNumber("delay",
+			mcp.Description("发送通知前的延迟秒数"),
+			mcp.Default(2)))
 
 	if err := mcpServer.RegisterTool(notifyTool); err != nil {
 		log.Fatalf("注册通知工具失败: %v", err)
