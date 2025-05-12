@@ -108,7 +108,7 @@ type ResourceTemplate struct {
 	// MIME type (optional)
 	MimeType string `json:"mimeType,omitempty"`
 
-	// 使用 Annotated 嵌入结构
+	// Embed Annotated struct
 	Annotated
 }
 
@@ -205,7 +205,7 @@ func parseResourceItem(item interface{}) (Resource, error) {
 
 	// Extract annotations (if present)
 	if annotationsMap, ok := resourceMap["annotations"].(map[string]interface{}); ok {
-		// 创建一个新的 annotations 结构
+		// Create a new annotations struct
 		annotations := &struct {
 			Audience []Role  `json:"audience,omitempty"`
 			Priority float64 `json:"priority,omitempty"`
@@ -227,7 +227,7 @@ func parseResourceItem(item interface{}) (Resource, error) {
 			annotations.Audience = audience
 		}
 
-		// 设置到 resource 的 Annotations 字段
+		// Set to the Annotations field of the resource
 		resource.Annotations = annotations
 	}
 
@@ -294,8 +294,8 @@ func ParseReadResourceResult(result interface{}) (*ReadResourceResponse, error) 
 				blobContent.MIMEType = mimeType
 			}
 
-			// 由于 BlobResourceContents.Blob 是 string 类型的
-			// 我们直接存储 base64 编码的字符串
+			// Since BlobResourceContents.Blob is of type string
+			// We directly store the base64 encoded string
 			blobContent.Blob = blobStr
 			contents = append(contents, blobContent)
 		}

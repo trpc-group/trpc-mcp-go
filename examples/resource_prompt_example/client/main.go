@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"time"
-
 	"trpc.group/trpc-go/trpc-mcp-go/client"
 	"trpc.group/trpc-go/trpc-mcp-go/log"
 	"trpc.group/trpc-go/trpc-mcp-go/mcp"
@@ -13,11 +11,6 @@ import (
 func main() {
 	// Initialize log.
 	log.Info("Starting example client...")
-
-	// Wait for the server to start.
-	log.Info("Waiting for server to start...")
-	time.Sleep(2 * time.Second)
-
 	// Basic settings.
 	serverURL := "http://localhost:3000/mcp"
 	clientInfo := mcp.Implementation{
@@ -153,6 +146,23 @@ func main() {
 		log.Infof("Found %d tools:", len(tools.Tools))
 		for _, tool := range tools.Tools {
 			log.Infof("- %s: %s", tool.Name, tool.Description)
+		}
+	}
+
+	callToolResult, err := newClient.CallTool(ctx, "greet", map[string]interface{}{
+		"name": "MCP User",
+	})
+	if err != nil {
+		log.Errorf("Call tool error: %v", err)
+	} else {
+		log.Infof("Successfully called tool, message count: %d", len(callToolResult.Content))
+		for i, content := range callToolResult.Content {
+			switch c := content.(type) {
+			case mcp.TextContent:
+				log.Infof("[%d] Text content: %s", i, truncateString(c.Text, 50))
+			default:
+				log.Infof("[%d] Unknown content type", i)
+			}
 		}
 	}
 

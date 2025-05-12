@@ -172,13 +172,6 @@ func Default(value interface{}) PropertyOption {
 	}
 }
 
-// Result creation helper functions
-//func NewCallToolResult(content []Content) *CallToolResult {
-//	return &CallToolResult{
-//		Content: content,
-//	}
-//}
-
 func NewTextResult(text string) *CallToolResult {
 	return &CallToolResult{
 		Content: []Content{NewTextContent(text)},
@@ -197,7 +190,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 	// Type assertion to map
 	resultMap, ok := result.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid tool list response format")
+		return nil, ErrInvalidToolListFormat
 	}
 
 	// Create result object
@@ -211,7 +204,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 	// Parse tool list
 	toolsArray, ok := resultMap["tools"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("missing tool list in response")
+		return nil, fmt.Errorf("%w: tools field not found or invalid type", ErrInvalidToolListFormat)
 	}
 
 	// Create a slice of Tool (not *Tool)
@@ -219,21 +212,22 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 	for _, item := range toolsArray {
 		tool, err := parseToolItem(item)
 		if err != nil {
-			continue // or return error
+			return nil, fmt.Errorf("failed to parse tool item: %w", err)
 		}
-		// Dereference the pointer to add a copy to the slice
 		tools = append(tools, *tool)
 	}
-	toolsResult.Tools = tools
 
-	return toolsResult, nil
+	// Create result
+	return &ListToolsResult{
+		Tools: tools,
+	}, nil
 }
 
 // parseToolItem parses a single tool item
 func parseToolItem(item interface{}) (*Tool, error) {
 	toolMap, ok := item.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid tool format")
+		return nil, ErrInvalidToolFormat
 	}
 
 	// Create tool object
@@ -303,13 +297,13 @@ func ParseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 	}
 
 	for _, content := range contentArr {
-		// Extract content
+		// Extract content.
 		contentMap, ok := content.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("content is not an object")
 		}
 
-		// Process content
+		// Process content.
 		content, err := ParseContent(contentMap)
 		if err != nil {
 			return nil, err

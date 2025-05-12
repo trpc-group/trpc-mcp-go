@@ -1,6 +1,6 @@
-# Trpc MCP Go: Model Context Protocol Implementation with Streaming HTTP Support
+# tRPC MCP Go: Model Context Protocol Implementation with Streaming HTTP Support
 
-A Go implementation of the [Model Context Protocol (MCP)](https://github.com/model-context-protocol/model-context-protocol) with comprehensive streaming support via Server-Sent Events (SSE). This library enables efficient communication between client applications and tools/resources.
+A Go implementation of the [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/modelcontextprotocol) with comprehensive streaming HTTP support. This library enables efficient communication between client applications and tools/resources.
 
 ## Features
 

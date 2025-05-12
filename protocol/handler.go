@@ -2,10 +2,36 @@ package protocol
 
 import (
 	"context"
+	"errors"
 
 	"trpc.group/trpc-go/trpc-mcp-go/log"
 	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 	"trpc.group/trpc-go/trpc-mcp-go/transport"
+)
+
+// Common errors
+var (
+	// Tool manager errors
+	ErrEmptyToolName         = errors.New("tool name cannot be empty")
+	ErrToolAlreadyRegistered = errors.New("tool already registered")
+	ErrToolNotFound          = errors.New("tool not found")
+	ErrToolExecutionFailed   = errors.New("tool execution failed")
+
+	// Resource manager errors
+	ErrEmptyResourceURI = errors.New("resource URI cannot be empty")
+	ErrResourceNotFound = errors.New("resource not found")
+
+	// Prompt manager errors
+	ErrEmptyPromptName = errors.New("prompt name cannot be empty")
+	ErrPromptNotFound  = errors.New("prompt not found")
+
+	// Lifecycle manager errors
+	ErrAlreadyInitialized = errors.New("session already initialized")
+	ErrNotInitialized     = errors.New("session not initialized")
+
+	// Parameter errors
+	ErrInvalidParams = errors.New("invalid parameters")
+	ErrMissingParams = errors.New("missing required parameters")
 )
 
 // Handler interface defines the MCP protocol handler

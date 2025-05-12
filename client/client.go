@@ -1,21 +1,39 @@
+// Package client implements the MCP client.
 package client
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
+	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 	"trpc.group/trpc-go/trpc-mcp-go/transport"
 )
 
+// Common errors
+var (
+	ErrAlreadyInitialized = errors.New("client already initialized")
+	ErrNotInitialized     = errors.New("client not initialized")
+	ErrInvalidServerURL   = errors.New("invalid server URL")
+)
+
+// State represents the client state.
+type State string
+
 // Client state constants.
 const (
-	StateDisconnected = "disconnected"
-	StateConnected    = "connected"
-	StateInitialized  = "initialized"
+	StateDisconnected State = "disconnected"
+	StateConnected    State = "connected"
+	StateInitialized  State = "initialized"
 )
+
+// String returns the string representation of the state.
+func (s State) String() string {
+	return string(s)
+}
 
 // Client represents an MCP client.
 type Client struct {
@@ -31,11 +49,13 @@ type Client struct {
 	// Whether the client is initialized.
 	initialized bool
 
+	requestID atomic.Int64 // Atomic counter for request IDs.
+
 	// Capabilities.
 	capabilities map[string]interface{}
 
 	// State.
-	state string
+	state State
 }
 
 // ClientOption client option function
@@ -46,7 +66,7 @@ func NewClient(serverURL string, clientInfo mcp.Implementation, options ...Clien
 	// Parse the server URL.
 	parsedURL, err := url.Parse(serverURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid server URL: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrInvalidServerURL, err)
 	}
 
 	// Create client
@@ -95,32 +115,58 @@ func WithGetSSEEnabled(enabled bool) ClientOption {
 	}
 }
 
+// WithHTTPReqHandler sets a custom HTTP request handler for the client
+func WithHTTPReqHandler(handler transport.HTTPReqHandler) ClientOption {
+	return func(c *Client) {
+		if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
+			transport.WithHTTPReqHandler(handler)(httpTransport)
+		}
+	}
+}
+
+// GetState returns the current client state.
+func (c *Client) GetState() State {
+	return c.state
+}
+
+// setState sets the client state.
+func (c *Client) setState(state State) {
+	c.state = state
+}
+
 // Initialize initializes the client connection.
 func (c *Client) Initialize(ctx context.Context) (*mcp.InitializeResult, error) {
 	// Check if already initialized.
 	if c.initialized {
-		return nil, fmt.Errorf("client already initialized")
+		return nil, ErrAlreadyInitialized
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("initialize", mcp.MethodInitialize, map[string]interface{}{
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodInitialize, map[string]interface{}{
 		"protocolVersion": c.protocolVersion,
 		"clientInfo":      c.clientInfo,
 		"capabilities":    c.capabilities,
 	})
 
-	// Fallback to old method (for cases that don't support StreamableHTTPClientTransport)
+	// Send request and wait for response
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("initialization request failed: %v", err)
+		c.setState(StateDisconnected)
+		return nil, fmt.Errorf("initialization request failed: %w", err)
 	}
+
+	// Connection is established successfully at this point
+	c.setState(StateConnected)
 
 	// Check for error response
 	if mcp.IsErrorResponse(rawResp) {
 		errResp, err := mcp.ParseRawMessageToError(rawResp)
 		if err != nil {
+			c.setState(StateDisconnected)
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
+		c.setState(StateDisconnected)
 		return nil, fmt.Errorf("initialization error: %s (code: %d)",
 			errResp.Error.Message, errResp.Error.Code)
 	}
@@ -128,15 +174,20 @@ func (c *Client) Initialize(ctx context.Context) (*mcp.InitializeResult, error) 
 	// Parse the response using our specialized parser
 	initResult, err := mcp.ParseInitializeResultFromJSON(rawResp)
 	if err != nil {
+		c.setState(StateDisconnected)
 		return nil, fmt.Errorf("failed to parse initialization response: %v", err)
 	}
 
 	// Send initialized notification.
 	if err := c.SendInitialized(ctx); err != nil {
+		c.setState(StateDisconnected)
 		return nil, fmt.Errorf("failed to send initialized notification: %v", err)
 	}
 
+	// Update state and initialized flag
 	c.initialized = true
+	c.setState(StateInitialized)
+
 	return initResult, nil
 }
 
@@ -150,27 +201,13 @@ func (c *Client) SendInitialized(ctx context.Context) error {
 func (c *Client) ListTools(ctx context.Context) (*mcp.ListToolsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, ErrNotInitialized
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("tools-list", mcp.MethodToolsList, nil)
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodToolsList, nil)
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list tools: %v", err)
-		}
-
-		// Type assert.
-		if toolsResult, ok := result.(*mcp.ListToolsResult); ok {
-			return toolsResult, nil
-		}
-		return nil, fmt.Errorf("failed to parse list tools result: type assertion error")
-	}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %v", err)
@@ -194,33 +231,19 @@ func (c *Client) ListTools(ctx context.Context) (*mcp.ListToolsResult, error) {
 func (c *Client) CallTool(ctx context.Context, name string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, ErrNotInitialized
 	}
 
 	// Create request
-	req := mcp.NewJSONRPCRequest("tool-call", mcp.MethodToolsCall, map[string]interface{}{
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodToolsCall, map[string]interface{}{
 		"name":      name,
 		"arguments": args,
 	})
 
-	//// Send request and parse response.
-	//if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-	//	result, err := httpTransport.SendRequestAndParse(ctx, req)
-	//	if err != nil {
-	//		return nil, fmt.Errorf("tool call failed: %v", err)
-	//	}
-	//
-	//	// Type assert.
-	//	if toolResult, ok := result.(*mcp.CallToolResult); ok {
-	//		return toolResult, nil
-	//	}
-	//	return nil, fmt.Errorf("failed to parse tool call result: type assertion error")
-	//}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("tool call request failed: %v", err)
+		return nil, fmt.Errorf("tool call request failed: %w", err)
 	}
 
 	// Check for error response
@@ -234,21 +257,17 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]inte
 	}
 
 	return mcp.ParseCallToolResult(rawResp)
-
-	//// Parse response as success response
-	//var resp struct {
-	//	Result mcp.CallToolResult `json:"result"`
-	//}
-	//if err := json.Unmarshal(*rawResp, &resp); err != nil {
-	//	return nil, fmt.Errorf("failed to unmarshal tool call response: %w", err)
-	//}
-	//
-	//return &resp.Result, nil
 }
 
-// Close closes the client connection.
+// Close closes the client connection and cleans up resources.
 func (c *Client) Close() error {
-	return c.transport.Close()
+	if c.transport != nil {
+		err := c.transport.Close()
+		c.setState(StateDisconnected)
+		c.initialized = false
+		return err
+	}
+	return nil
 }
 
 // GetSessionID gets the session ID.
@@ -279,7 +298,7 @@ func (c *Client) UnregisterNotificationHandler(method string) {
 func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[string]interface{}, streamOpts *transport.StreamOptions) (*mcp.CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, ErrNotInitialized
 	}
 
 	// Create request.
@@ -292,22 +311,28 @@ func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[s
 	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
 		// If no streaming options, try using unified parsing method.
 		if streamOpts == nil {
-			result, err := httpTransport.SendRequestAndParse(ctx, req)
+			rawResp, err := c.transport.SendRequest(ctx, req)
 			if err != nil {
-				return nil, fmt.Errorf("tool call failed: %v", err)
+				return nil, fmt.Errorf("tool call request failed: %w", err)
 			}
 
-			// Type assert.
-			if toolResult, ok := result.(*mcp.CallToolResult); ok {
-				return toolResult, nil
+			// Check for error response
+			if mcp.IsErrorResponse(rawResp) {
+				errResp, err := mcp.ParseRawMessageToError(rawResp)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse error response: %w", err)
+				}
+				return nil, fmt.Errorf("tool call error: %s (code: %d)",
+					errResp.Error.Message, errResp.Error.Code)
 			}
-			return nil, fmt.Errorf("failed to parse tool call result: type assertion error")
+
+			return mcp.ParseCallToolResult(rawResp)
 		}
 
 		// Use streaming request if streaming options are provided
 		rawResp, err := httpTransport.SendRequestWithStream(ctx, req, streamOpts)
 		if err != nil {
-			return nil, fmt.Errorf("tool call request failed: %v", err)
+			return nil, fmt.Errorf("tool call request failed: %w", err)
 		}
 
 		// Check for error response
@@ -339,30 +364,16 @@ func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[s
 func (c *Client) ListPrompts(ctx context.Context) (*mcp.ListPromptsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, ErrNotInitialized
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("prompts-list", mcp.MethodPromptsList, nil)
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodPromptsList, nil)
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list prompts: %v", err)
-		}
-
-		// Type assert.
-		if promptsResult, ok := result.(*mcp.ListPromptsResult); ok {
-			return promptsResult, nil
-		}
-		return nil, fmt.Errorf("failed to parse list prompts result: type assertion error")
-	}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("list prompts request failed: %v", err)
+		return nil, fmt.Errorf("list prompts request failed: %w", err)
 	}
 
 	// Check for error response
@@ -383,7 +394,7 @@ func (c *Client) ListPrompts(ctx context.Context) (*mcp.ListPromptsResult, error
 func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) (*mcp.GetPromptResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, ErrNotInitialized
 	}
 
 	// Prepare parameters.
@@ -397,23 +408,9 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("prompt-get", mcp.MethodPromptsGet, params)
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodPromptsGet, params)
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get prompt: %v", err)
-		}
-
-		// Type assert.
-		if promptResult, ok := result.(*mcp.GetPromptResult); ok {
-			return promptResult, nil
-		}
-		return nil, fmt.Errorf("failed to parse get prompt result: type assertion error")
-	}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt request failed: %v", err)
@@ -441,23 +438,9 @@ func (c *Client) ListResources(ctx context.Context) (*mcp.ListResourcesResult, e
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("resources-list", mcp.MethodResourcesList, nil)
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodResourcesList, nil)
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list resources: %v", err)
-		}
-
-		// Type assert.
-		if resourcesResult, ok := result.(*mcp.ListResourcesResult); ok {
-			return resourcesResult, nil
-		}
-		return nil, fmt.Errorf("failed to parse list resources result: type assertion error")
-	}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list resources request failed: %v", err)
@@ -485,25 +468,11 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*mcp.ReadResourc
 	}
 
 	// Create request.
-	req := mcp.NewJSONRPCRequest("resource-read", mcp.MethodResourcesRead, map[string]interface{}{
+	requestID := c.requestID.Add(1)
+	req := mcp.NewJSONRPCRequest(requestID, mcp.MethodResourcesRead, map[string]interface{}{
 		"uri": uri,
 	})
 
-	// Send request and parse response.
-	if httpTransport, ok := c.transport.(*transport.StreamableHTTPClientTransport); ok {
-		result, err := httpTransport.SendRequestAndParse(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read resource: %v", err)
-		}
-
-		// Type assert.
-		if resourceContent, ok := result.(*mcp.ReadResourceResult); ok {
-			return resourceContent, nil
-		}
-		return nil, fmt.Errorf("failed to parse read resource result: type assertion error")
-	}
-
-	// Fallback to old method
 	rawResp, err := c.transport.SendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("read resource request failed: %v", err)

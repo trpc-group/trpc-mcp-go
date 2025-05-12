@@ -4,8 +4,6 @@ import "encoding/json"
 
 // MCP protcol Layer
 
-type JSONRPCMessage interface{}
-
 // Request is the base request struct for all MCP requests.
 type Request struct {
 	Method string `json:"method"`

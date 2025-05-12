@@ -21,17 +21,15 @@ const (
 	// MCP custom error code range: -32000 to -32099
 )
 
-// JSONRPCBase contains the common fields for all JSON-RPC messages
-type JSONRPCBase struct {
-	JSONRPC string    `json:"jsonrpc"`
-	ID      RequestId `json:"id,omitempty"`
-}
+// JSONRPCMessage represents a JSON-RPC message.
+type JSONRPCMessage interface{}
 
 // JSONRPCRequest represents a JSON-RPC request
 // Conforms to the JSONRPCRequest definition in schema.json
 type JSONRPCRequest struct {
-	JSONRPCBase
-	Params interface{} `json:"params,omitempty"`
+	JSONRPC string      `json:"jsonrpc"`
+	ID      RequestId   `json:"id,omitempty"`
+	Params  interface{} `json:"params,omitempty"`
 	Request
 }
 
@@ -46,8 +44,9 @@ type JSONRPCResponse struct {
 // JSONRPCError represents a JSON-RPC error response
 // Conforms to the JSONRPCError definition in schema.json
 type JSONRPCError struct {
-	JSONRPCBase
-	Error struct {
+	JSONRPC string    `json:"jsonrpc"`
+	ID      RequestId `json:"id,omitempty"`
+	Error   struct {
 		Code    int         `json:"code"`
 		Message string      `json:"message"`
 		Data    interface{} `json:"data,omitempty"`
@@ -64,20 +63,12 @@ type JSONRPCNotification struct {
 // NewJSONRPCRequest creates a new JSON-RPC request
 func NewJSONRPCRequest(id interface{}, method string, params map[string]interface{}) *JSONRPCRequest {
 	req := &JSONRPCRequest{
-		JSONRPCBase: JSONRPCBase{
-			JSONRPC: JSONRPCVersion,
-			ID:      id,
-		},
+		JSONRPC: JSONRPCVersion,
+		ID:      id,
 		Request: Request{
 			Method: method,
 		},
-	}
-
-	// 如果 params 非空，需要单独处理
-	if params != nil {
-		// 将 params 直接赋值到 Params 字段，假设 Request 的 json tag 会正确处理
-		b, _ := json.Marshal(params)
-		json.Unmarshal(b, &req.Params)
+		Params: params,
 	}
 
 	return req
@@ -95,10 +86,8 @@ func NewJSONRPCResponse(id interface{}, result interface{}) *JSONRPCResponse {
 // NewJSONRPCErrorResponse creates a new JSON-RPC error response
 func NewJSONRPCErrorResponse(id interface{}, code int, message string, data interface{}) *JSONRPCError {
 	errResp := &JSONRPCError{
-		JSONRPCBase: JSONRPCBase{
-			JSONRPC: JSONRPCVersion,
-			ID:      id,
-		},
+		JSONRPC: JSONRPCVersion,
+		ID:      id,
 	}
 	errResp.Error.Code = code
 	errResp.Error.Message = message
@@ -161,7 +150,12 @@ func ParseJSONRPCMessageType(data []byte) (JSONRPCMessageType, error) {
 	// First try to parse as a generic map to determine message type
 	var message map[string]interface{}
 	if err := json.Unmarshal(data, &message); err != nil {
-		return JSONRPCMessageTypeUnknown, fmt.Errorf("failed to parse JSON-RPC message: %w", err)
+		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: %v", ErrParseJSONRPC, err)
+	}
+
+	// Check JSON-RPC version
+	if version, ok := message["jsonrpc"].(string); !ok || version != JSONRPCVersion {
+		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: invalid or missing jsonrpc version", ErrInvalidJSONRPCFormat)
 	}
 
 	// Determine message type
@@ -176,7 +170,7 @@ func ParseJSONRPCMessageType(data []byte) (JSONRPCMessageType, error) {
 		return JSONRPCMessageTypeNotification, nil
 	}
 
-	return JSONRPCMessageTypeUnknown, nil
+	return JSONRPCMessageTypeUnknown, ErrInvalidJSONRPCFormat
 }
 
 // ParseJSONRPCMessage parses any type of JSON-RPC message
@@ -192,33 +186,33 @@ func ParseJSONRPCMessage(data []byte) (interface{}, JSONRPCMessageType, error) {
 	case JSONRPCMessageTypeResponse:
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(data, &resp); err != nil {
-			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC response: %w", err)
+			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCResponse, err)
 		}
 		return &resp, msgType, nil
 
 	case JSONRPCMessageTypeError:
 		var errResp JSONRPCError
 		if err := json.Unmarshal(data, &errResp); err != nil {
-			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC error response: %w", err)
+			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCResponse, err)
 		}
 		return &errResp, msgType, nil
 
 	case JSONRPCMessageTypeNotification:
 		var notification JSONRPCNotification
 		if err := json.Unmarshal(data, &notification); err != nil {
-			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC notification: %w", err)
+			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCFormat, err)
 		}
 		return &notification, msgType, nil
 
 	case JSONRPCMessageTypeRequest:
-		var request JSONRPCRequest
-		if err := json.Unmarshal(data, &request); err != nil {
-			return nil, msgType, fmt.Errorf("failed to parse JSON-RPC request: %w", err)
+		var req JSONRPCRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCRequest, err)
 		}
-		return &request, msgType, nil
+		return &req, msgType, nil
 
 	default:
-		return nil, JSONRPCMessageTypeUnknown, fmt.Errorf("unknown JSON-RPC message type")
+		return nil, msgType, ErrInvalidJSONRPCFormat
 	}
 }
 

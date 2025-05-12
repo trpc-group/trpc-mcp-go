@@ -192,7 +192,7 @@ func main() {
 	mcpServer := server.NewServer(
 		":3005", // Server address and port
 		serverInfo,
-		server.WithPathPrefix("/mcp"),             // Set API path
+		server.WithPathPrefix("/mcp"), // Set API path
 		server.WithSessionManager(sessionManager), // Use session manager (stateful)
 		server.WithSSEEnabled(true),               // Enable SSE
 		server.WithGetSSEEnabled(false),           // Disable GET SSE
@@ -209,71 +209,71 @@ func main() {
 	}
 	log.Info("Registered greeting tool: greet")
 
-	// 注册计数器工具
+	// Register counter tool
 	counterTool := mcp.NewTool("counter", handleCounter,
-		mcp.WithDescription("一个会话计数器工具，演示有状态会话"),
+		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
 		mcp.WithNumber("increment",
-			mcp.Description("计数增量"),
+			mcp.Description("Counter increment"),
 			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
-		log.Fatalf("注册计数器工具失败: %v", err)
+		log.Fatalf("Failed to register counter tool: %v", err)
 	}
-	log.Info("已注册计数器工具：counter")
+	log.Info("Registered counter tool: counter")
 
-	// 注册延迟响应工具
+	// Register delayed response tool
 	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
-		mcp.WithDescription("一个延迟响应工具，展示 SSE 流式响应的优势"),
+		mcp.WithDescription("A delayed response tool to demonstrate the advantages of SSE streaming responses"),
 		mcp.WithNumber("steps",
-			mcp.Description("处理步骤数"),
+			mcp.Description("Number of processing steps"),
 			mcp.Default(5)),
 		mcp.WithNumber("delayMs",
-			mcp.Description("每步延迟的毫秒数"),
+			mcp.Description("Delay in milliseconds per step"),
 			mcp.Default(500)))
 
 	if err := mcpServer.RegisterTool(delayedTool); err != nil {
-		log.Fatalf("注册延迟响应工具失败: %v", err)
+		log.Fatalf("Failed to register delayed response tool: %v", err)
 	}
-	log.Info("已注册延迟响应工具：delayedResponse")
+	log.Info("Registered delayed response tool: delayedResponse")
 
-	// 设置一个简单的健康检查路由
+	// Set up a simple health check route
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("服务器运行正常"))
+		w.Write([]byte("Server is running normally"))
 	})
 
-	// 注册会话管理路由，允许查看活动会话
+	// Register session management route to allow viewing active sessions
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
-			// 在这里我们无法直接获取所有活动会话，因为 SessionManager 没有提供这样的方法
-			// 但我们可以提供一个会话监控页面
+			// We cannot directly get all active sessions here because SessionManager does not provide such a method
+			// But we can provide a session monitoring page
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintf(w, "会话管理器状态：活动\n")
-			fmt.Fprintf(w, "会话过期时间：%d秒\n", 3600)
-			fmt.Fprintf(w, "SSE 模式：启用\n")
-			fmt.Fprintf(w, "GET SSE 支持：禁用\n")
-			fmt.Fprintf(w, "注意：会话管理器不提供列出所有活动会话的功能。\n")
-			fmt.Fprintf(w, "在真实服务器中，建议实现会话监控功能。\n")
+			fmt.Fprintf(w, "Session manager status: Active\n")
+			fmt.Fprintf(w, "Session expiration time: %d seconds\n", 3600)
+			fmt.Fprintf(w, "SSE mode: Enabled\n")
+			fmt.Fprintf(w, "GET SSE support: Disabled\n")
+			fmt.Fprintf(w, "Note: The session manager does not provide the function to list all active sessions.\n")
+			fmt.Fprintf(w, "In a real server, it is recommended to implement session monitoring functionality.\n")
 		} else {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprintf(w, "不支持的方法: %s", r.Method)
+			fmt.Fprintf(w, "Unsupported method: %s", r.Method)
 		}
 	})
 
-	// 处理优雅退出
+	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("收到信号 %v，正在退出...", sig)
+		log.Infof("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
-	// 启动服务器
-	log.Infof("MCP 服务器启动于 :3005，访问路径为 /mcp")
-	log.Infof("这是一个有状态、SSE 流式响应的服务器 - 会分配会话 ID，使用 SSE，不支持 GET SSE")
-	log.Infof("可以通过 http://localhost:3005/sessions 查看会话管理器状态")
+	// Start the server
+	log.Infof("MCP server started on :3005, access path /mcp")
+	log.Infof("This is a stateful, SSE streaming response server - it assigns session IDs, uses SSE, and does not support GET SSE")
+	log.Infof("You can view the session manager status at http://localhost:3005/sessions")
 	if err := mcpServer.Start(); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		log.Fatalf("Server startup failed: %v", err)
 	}
 }

@@ -182,7 +182,7 @@ func generateSessionID() string {
 	bytes := make([]byte, 16)
 	_, err := rand.Read(bytes)
 	if err != nil {
-		panic(fmt.Sprintf("failed to generate random session ID: %v", err))
+		panic(fmt.Errorf("failed to generate random session ID: %w", err))
 	}
 	return hex.EncodeToString(bytes)
 }

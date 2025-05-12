@@ -79,7 +79,7 @@ func (s *SSENotificationSender) SendCustomNotification(method string, params map
 	// Serialize jsonNotification
 	data, err := json.Marshal(jsonNotification)
 	if err != nil {
-		return fmt.Errorf("failed to serialize jsonNotification: %w", err)
+		return fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
 	// Send SSE event
@@ -97,7 +97,7 @@ func (s *SSENotificationSender) SendNotification(notification *mcp.Notification)
 	// Serialize notifications
 	data, err := json.Marshal(jsonNotification)
 	if err != nil {
-		return fmt.Errorf("failed to serialize notification: %w", err)
+		return fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
 	// Send SSE event

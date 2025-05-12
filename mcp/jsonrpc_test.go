@@ -21,10 +21,8 @@ func TestNewJSONRPCRequest(t *testing.T) {
 			method: "test.method",
 			params: nil,
 			expected: &JSONRPCRequest{
-				JSONRPCBase: JSONRPCBase{
-					JSONRPC: JSONRPCVersion,
-					ID:      1,
-				},
+				JSONRPC: JSONRPCVersion,
+				ID:      1,
 				Request: Request{
 					Method: "test.method",
 				},
@@ -40,10 +38,8 @@ func TestNewJSONRPCRequest(t *testing.T) {
 				"arguments": map[string]interface{}{"param1": "value1"},
 			},
 			expected: &JSONRPCRequest{
-				JSONRPCBase: JSONRPCBase{
-					JSONRPC: JSONRPCVersion,
-					ID:      "request-1",
-				},
+				JSONRPC: JSONRPCVersion,
+				ID:      "request-1",
 				Request: Request{
 					Method: "tools/call",
 				},
@@ -131,10 +127,8 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 			message: "Invalid request",
 			data:    nil,
 			expected: &JSONRPCError{
-				JSONRPCBase: JSONRPCBase{
-					JSONRPC: JSONRPCVersion,
-					ID:      1,
-				},
+				JSONRPC: JSONRPCVersion,
+				ID:      1,
 				Error: struct {
 					Code    int         `json:"code"`
 					Message string      `json:"message"`
@@ -153,10 +147,8 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 			message: "Method not found",
 			data:    "Requested method not found",
 			expected: &JSONRPCError{
-				JSONRPCBase: JSONRPCBase{
-					JSONRPC: JSONRPCVersion,
-					ID:      "error-1",
-				},
+				JSONRPC: JSONRPCVersion,
+				ID:      "error-1",
 				Error: struct {
 					Code    int         `json:"code"`
 					Message string      `json:"message"`

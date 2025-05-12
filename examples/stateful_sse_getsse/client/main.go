@@ -17,7 +17,7 @@ import (
 
 // handleNotification processes server notifications.
 func handleNotification(notification *mcp.JSONRPCNotification) error {
-	// 使用 AdditionalFields 访问参数
+	// Access parameters using AdditionalFields
 	paramsMap := notification.Params.AdditionalFields
 	level, _ := paramsMap["level"].(string)
 
@@ -77,7 +77,7 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 
 // handleProgressNotification processes progress notifications.
 func handleProgressNotification(notification *mcp.JSONRPCNotification) error {
-	// 使用 AdditionalFields 访问参数
+	// Access parameters using AdditionalFields
 	paramsMap := notification.Params.AdditionalFields
 
 	// Extract progress value and message

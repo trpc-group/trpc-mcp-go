@@ -199,30 +199,30 @@ func main() {
 	counterTool := mcp.NewTool("counter", handleCounter,
 		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
 		mcp.WithNumber("increment",
-			mcp.Description("计数增量"),
+			mcp.Description("Counter increment"),
 			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
-		log.Fatalf("注册计数器工具失败: %v", err)
+		log.Fatalf("Failed to register counter tool: %v", err)
 	}
-	log.Infof("已注册计数器工具：counter")
+	log.Infof("Registered counter tool: counter")
 
-	// 注册通知演示工具
+	// Register notification demo tool
 	notifyTool := mcp.NewTool("sendNotification", handleNotification,
-		mcp.WithDescription("一个通知演示工具，发送异步通知消息"),
+		mcp.WithDescription("A notification demo tool that sends asynchronous notification messages"),
 		mcp.WithString("message",
-			mcp.Description("要发送的通知消息"),
-			mcp.Default("这是一条测试通知消息")),
+			mcp.Description("Notification message to send"),
+			mcp.Default("This is a test notification message")),
 		mcp.WithNumber("delay",
-			mcp.Description("发送通知前的延迟秒数"),
+			mcp.Description("Delay in seconds before sending notification"),
 			mcp.Default(2)))
 
 	if err := mcpServer.RegisterTool(notifyTool); err != nil {
-		log.Fatalf("注册通知工具失败: %v", err)
+		log.Fatalf("Failed to register notification tool: %v", err)
 	}
-	log.Infof("已注册通知工具：sendNotification")
+	log.Infof("Registered notification tool: sendNotification")
 
-	// 示例：定期广播系统状态通知
+	// Example: Periodically broadcast system status notifications
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -230,7 +230,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				// 广播系统状态通知给所有会话
+				// Broadcast system status notification to all sessions
 				failedCount, err := mcpServer.BroadcastNotification(
 					"notifications/message",
 					map[string]interface{}{
@@ -240,62 +240,62 @@ func main() {
 							"memory":    fmt.Sprintf("%.1f%%", float64(50+time.Now().Second()%30)),
 							"cpu":       fmt.Sprintf("%.1f%%", float64(30+time.Now().Second()%40)),
 							"timestamp": time.Now().Format(time.RFC3339),
-							"message":   "系统正常运行中",
+							"message":   "System is running normally",
 						},
 					},
 				)
 
 				if err != nil {
-					log.Infof("广播系统状态通知失败: %v (失败会话数: %d)", err, failedCount)
+					log.Infof("Failed to broadcast system status notification: %v (failed sessions: %d)", err, failedCount)
 				} else {
-					log.Infof("已广播系统状态通知给所有会话")
+					log.Infof("System status notification broadcast to all sessions")
 				}
 			}
 		}
 	}()
 
-	// 设置一个简单的健康检查路由
+	// Set up a simple health check route
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("服务器运行正常"))
+		w.Write([]byte("Server is running normally"))
 	})
 
-	// 注册会话管理路由，允许查看活动会话
+	// Register session management route to allow viewing active sessions
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
-			// 使用新的 API 获取活动会话列表
+			// Use the new API to get the list of active sessions
 			sessions := mcpServer.HTTPHandler().(*transport.HTTPServerHandler).GetActiveSessions()
 
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintf(w, "会话管理器状态：活动\n")
-			fmt.Fprintf(w, "会话过期时间：%d秒\n", 3600)
-			fmt.Fprintf(w, "GET SSE 支持：启用\n")
-			fmt.Fprintf(w, "活动会话数：%d\n\n", len(sessions))
+			fmt.Fprintf(w, "Session manager status: Active\n")
+			fmt.Fprintf(w, "Session expiration time: %d seconds\n", 3600)
+			fmt.Fprintf(w, "GET SSE support: Enabled\n")
+			fmt.Fprintf(w, "Number of active sessions: %d\n\n", len(sessions))
 
-			// 显示所有活动会话
+			// Display all active sessions
 			for i, sessionID := range sessions {
 				fmt.Fprintf(w, "%d) %s\n", i+1, sessionID)
 			}
 		} else {
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprintf(w, "不支持的方法: %s", r.Method)
+			fmt.Fprintf(w, "Unsupported method: %s", r.Method)
 		}
 	})
 
-	// 处理优雅退出
+	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("收到信号 %v，正在退出...", sig)
+		log.Infof("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
-	// 启动服务器
-	log.Infof("MCP 服务器启动于 :3004，访问路径为 /mcp")
-	log.Infof("这是一个有状态、纯 JSON 响应的服务器 - 会分配会话 ID，不使用 SSE 响应但支持 GET SSE")
-	log.Infof("可以通过 http://localhost:3004/sessions 查看会话管理器状态")
+	// Start the server
+	log.Infof("MCP server started on :3004, access path /mcp")
+	log.Infof("This is a stateful, JSON-only response server - it assigns session IDs, does not use SSE responses, but supports GET SSE")
+	log.Infof("You can view the session manager status at http://localhost:3004/sessions")
 	if err := mcpServer.Start(); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		log.Fatalf("Server startup failed: %v", err)
 	}
 }

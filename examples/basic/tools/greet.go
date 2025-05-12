@@ -136,18 +136,18 @@ func FancyGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRes
 	}
 
 	// Create greeting message.
-	// 创建问候消息
+	// Create greeting message
 	var greeting string
 	switch strings.ToLower(format) {
 	case "fancy":
-		greeting = fmt.Sprintf("✨ 欢迎，尊敬的 %s! ✨\n这是一个*华丽*的问候。", name)
+		greeting = fmt.Sprintf("✨ Welcome, dear %s! ✨\nThis is a *gorgeous* greeting.", name)
 	case "minimal":
 		greeting = fmt.Sprintf("Hi %s", name)
 	default:
-		greeting = fmt.Sprintf("你好，%s！这是一个标准问候。", name)
+		greeting = fmt.Sprintf("Hello, %s! This is a standard greeting.", name)
 	}
 
-	// 返回结果
+	// Return result
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.NewTextContent(greeting),

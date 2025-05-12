@@ -2,12 +2,20 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 	"trpc.group/trpc-go/trpc-mcp-go/protocol"
 	"trpc.group/trpc-go/trpc-mcp-go/transport"
+)
+
+// Common errors
+var (
+	ErrStatelessMode              = errors.New("cannot get active sessions in stateless mode")
+	ErrBroadcastFailed            = errors.New("failed to broadcast notification")
+	ErrFilteredNotificationFailed = errors.New("failed to send filtered notification")
 )
 
 // ServerConfig stores all server configuration options
@@ -50,6 +58,9 @@ type Server struct {
 
 	// Prompt manager
 	promptManager *protocol.PromptManager
+
+	// Custom HTTP server
+	customServer *http.Server
 }
 
 // ServerOption server option function
@@ -240,7 +251,7 @@ func (s *Server) BroadcastNotification(method string, params map[string]interfac
 	// Get active sessions
 	sessions, err := s.getActiveSessions()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to get active sessions: %w", err)
 	}
 
 	var failedCount int
@@ -256,7 +267,7 @@ func (s *Server) BroadcastNotification(method string, params map[string]interfac
 
 	// If all sends failed, return the last error
 	if failedCount == len(sessions) && lastError != nil {
-		return 0, fmt.Errorf("failed to broadcast notification: %v", lastError)
+		return 0, fmt.Errorf("%w: %w", ErrBroadcastFailed, lastError)
 	}
 
 	// Return the number of successful sends
@@ -267,7 +278,7 @@ func (s *Server) BroadcastNotification(method string, params map[string]interfac
 func (s *Server) getActiveSessions() ([]string, error) {
 	// Check if in stateless mode
 	if s.config.IsStateless {
-		return nil, fmt.Errorf("cannot get active sessions in stateless mode")
+		return nil, ErrStatelessMode
 	}
 
 	// Use the API provided by HTTPServerHandler to get active sessions
@@ -285,7 +296,7 @@ func (s *Server) SendFilteredNotification(
 	// Get active sessions
 	sessions, err := s.getActiveSessions()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("failed to get active sessions: %w", err)
 	}
 
 	var successCount, failedCount int
@@ -309,23 +320,33 @@ func (s *Server) SendFilteredNotification(
 
 	// If all sends failed and we attempted at least one send, return the last error
 	if failedCount > 0 && successCount == 0 && lastError != nil {
-		return 0, failedCount, fmt.Errorf("failed to send filtered notification: %v", lastError)
+		return 0, failedCount, fmt.Errorf("%w: %w", ErrFilteredNotificationFailed, lastError)
 	}
 
 	// Return the count of successful and failed sends
 	return successCount, failedCount, nil
 }
 
+// Handler returns the http.Handler for the server.
+// This can be used to integrate the MCP server into existing HTTP servers.
+func (s *Server) Handler() http.Handler {
+	return s.httpHandler
+}
+
+// WithCustomServer sets a custom HTTP server
+func WithCustomServer(srv *http.Server) ServerOption {
+	return func(s *Server) {
+		s.customServer = srv
+	}
+}
+
 // Start starts the server
 func (s *Server) Start() error {
-	// Create HTTP server
-	server := &http.Server{
-		Addr:    s.config.Addr,
-		Handler: s.httpHandler,
+	if s.customServer != nil {
+		s.customServer.Handler = s.Handler()
+		return s.customServer.ListenAndServe()
 	}
-
-	// Start server
-	return server.ListenAndServe()
+	return http.ListenAndServe(s.config.Addr, s.Handler())
 }
 
 // MCPHandler returns the MCP handler

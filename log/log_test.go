@@ -10,16 +10,16 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/log"
 )
 
-// testLogger 实现 Logger 接口用于测试
+// testLogger implements the Logger interface for testing.
 type testLogger struct {
 	buffer *bytes.Buffer
 	level  log.Level
 }
 
-// 确保 testLogger 实现了 Logger 接口
+// Ensure testLogger implements the Logger interface.
 var _ log.Logger = (*testLogger)(nil)
 
-// 创建新的测试日志器
+// Create a new test logger.
 func newTestLogger() *testLogger {
 	return &testLogger{
 		buffer: &bytes.Buffer{},
@@ -27,7 +27,7 @@ func newTestLogger() *testLogger {
 	}
 }
 
-// 实现 Logger 接口的所有方法
+// Implement all methods of the Logger interface.
 func (t *testLogger) Debug(args ...interface{}) { t.write("DEBUG", args...) }
 func (t *testLogger) Debugf(format string, args ...interface{}) {
 	t.write("DEBUG", fmt.Sprintf(format, args...))
@@ -53,13 +53,13 @@ func (t *testLogger) Fatalf(format string, args ...interface{}) {
 	t.write("FATAL", fmt.Sprintf(format, args...))
 }
 
-// 将消息写入缓冲区
+// Write message to buffer.
 func (t *testLogger) write(level string, args ...interface{}) {
 	msg := fmt.Sprint(args...)
 	t.buffer.WriteString(level + ": " + msg + "\n")
 }
 
-// 实现 WithFields 方法
+// Implement WithFields method.
 func (t *testLogger) WithFields(fields map[string]interface{}) log.Logger {
 	newLogger := &testLogger{
 		buffer: t.buffer,
@@ -78,7 +78,7 @@ func (t *testLogger) WithFields(fields map[string]interface{}) log.Logger {
 	return newLogger
 }
 
-// 实现设置和获取级别的方法
+// Implement methods for setting and getting levels.
 func (t *testLogger) SetLevel(level log.Level) {
 	t.level = level
 }
@@ -87,40 +87,40 @@ func (t *testLogger) GetLevel() log.Level {
 	return t.level
 }
 
-// 获取缓冲区内容
+// Get buffer content.
 func (t *testLogger) String() string {
 	return t.buffer.String()
 }
 
-// 测试 NullLogger
+// Test NullLogger.
 func TestNullLogger(t *testing.T) {
 	logger := log.NewNullLogger()
 
-	// 这些调用不应该导致任何错误
+	// These calls should not cause any errors.
 	logger.Debug("debug message")
 	logger.Info("info message")
 	logger.Warning("warning message")
 	logger.Error("error message")
 	logger.Fatal("fatal message")
 
-	// 测试级别设置和获取
+	// Test level setting and getting.
 	logger.SetLevel(log.WarningLevel)
 	if logger.GetLevel() != log.WarningLevel {
 		t.Errorf("Expected warning level, got %v", logger.GetLevel())
 	}
 
-	// 测试 WithFields
+	// Test WithFields.
 	fieldLogger := logger.WithFields(map[string]interface{}{
 		"key": "value",
 	})
 
-	// 应该返回实现 Logger 接口的对象
+	// Should return an object that implements the Logger interface.
 	if _, ok := fieldLogger.(log.Logger); !ok {
 		t.Error("WithFields did not return a Logger")
 	}
 }
 
-// 测试日志级别 String 方法
+// Test log level String method.
 func TestLevelString(t *testing.T) {
 	testCases := []struct {
 		level    log.Level
@@ -142,17 +142,17 @@ func TestLevelString(t *testing.T) {
 	}
 }
 
-// 测试全局日志函数
+// Test global log functions.
 func TestGlobalLogFunctions(t *testing.T) {
-	// 保存原始 logger 以便测试后恢复
+	// Save original logger to restore after test.
 	originalLogger := log.GetLogger()
 	defer log.SetLogger(originalLogger)
 
-	// 设置一个测试 logger
+	// Set a test logger.
 	testLog := newTestLogger()
 	log.SetLogger(testLog)
 
-	// 测试全局函数
+	// Test global functions.
 	log.Debug("test debug message")
 	log.Info("test info message")
 	log.Warning("test warning message")
@@ -181,7 +181,7 @@ func TestGlobalLogFunctions(t *testing.T) {
 		t.Error("Global Fatal function failed")
 	}
 
-	// 测试格式化函数
+	// Test formatting functions.
 	log.Debugf("formatted %s", "debug")
 	log.Infof("formatted %s", "info")
 	log.Warningf("formatted %s", "warning")
@@ -205,13 +205,13 @@ func TestGlobalLogFunctions(t *testing.T) {
 		t.Error("Global Fatalf function failed")
 	}
 
-	// 测试全局级别设置和获取
+	// Test global level setting and getting.
 	log.SetLevel(log.ErrorLevel)
 	if log.GetLevel() != log.ErrorLevel {
 		t.Errorf("Global level not set correctly, expected %v, got %v", log.ErrorLevel, log.GetLevel())
 	}
 
-	// 测试全局 WithFields
+	// Test global WithFields.
 	fieldLogger := log.WithFields(map[string]interface{}{
 		"request_id": "123",
 		"user":       "admin",
@@ -226,9 +226,9 @@ func TestGlobalLogFunctions(t *testing.T) {
 	}
 }
 
-// 测试 ZapLogger 的工厂方法
+// Test ZapLogger's factory method.
 func TestNewZapLogger(t *testing.T) {
-	// 测试通过环境变量设置日志级别
+	// Test setting log level via environment variable.
 	os.Setenv("LOG_LEVEL", "error")
 	defer os.Unsetenv("LOG_LEVEL")
 

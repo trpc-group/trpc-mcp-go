@@ -59,7 +59,7 @@ func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *
 	// Check if streaming is supported
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		return fmt.Errorf("streaming is not supported by the underlying HTTP implementation")
+		return ErrStreamingNotSupported
 	}
 
 	// Set SSE response headers
@@ -81,7 +81,7 @@ func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *
 	// Serialize response
 	respBytes, err := json.Marshal(resp)
 	if err != nil {
-		return fmt.Errorf("failed to serialize response: %w", err)
+		return fmt.Errorf("%w: %v", ErrResponseSerialization, err)
 	}
 
 	// Send SSE event
@@ -113,7 +113,7 @@ func (r *SSEResponder) ContainsRequest(body []byte) bool {
 func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
 	// Check if it's a response type, which should be sent using the Respond method
 	if _, ok := notification.(*mcp.JSONRPCResponse); ok {
-		return "", fmt.Errorf("response types should be sent using the Respond method")
+		return "", ErrInvalidResponseType
 	}
 
 	// Generate event ID
@@ -139,7 +139,7 @@ func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flus
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("failed to serialize notification: %w", err)
+		return "", fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
 	// Send event

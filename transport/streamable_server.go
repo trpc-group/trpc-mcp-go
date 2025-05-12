@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 
@@ -174,12 +173,17 @@ func (h *HTTPServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type baseMessage struct {
+	JSONRPC string      `json:"jsonrpc"`
+	Method  string      `json:"method"`
+	ID      interface{} `json:"id"`
+}
+
 // handlePost handles POST requests
 func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	// Read request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	var rawMessage json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
+		http.Error(w, ErrInvalidRequestBody.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -187,49 +191,57 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	respCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Get session
-	var session *Session
+	var isInitialize bool
+	var base baseMessage
 
-	// Try to parse request/notification
-	var req mcp.JSONRPCRequest
-	var notification mcp.JSONRPCNotification
-	isInitialize := false
-
-	// First try to parse as request
-	if err := json.Unmarshal(body, &req); err == nil && req.ID != nil {
-		// Check if it's an initialize request
-		if req.Method == mcp.MethodInitialize {
-			isInitialize = true
-		}
+	if err := json.Unmarshal(rawMessage, &base); err != nil {
+		http.Error(w, ErrInvalidRequestBody.Error(), http.StatusBadRequest)
+		return
 	}
 
+	// First try to parse as request
+	// Check if it's an initialize request
+	if base.ID != nil && base.Method == mcp.MethodInitialize {
+		isInitialize = true
+	}
+
+	// Get session
+	var session *Session
 	if h.isStateless {
-		// Stateless mode: create a temporary session for each request
+		// Stateless mode: create a temporary session for each request.
 		session = NewSession()
 	} else if h.enableSession {
 		// Stateful mode
-		sessionID := r.Header.Get(SessionIDHeader)
-		if sessionID != "" {
+		sessionIDHeader := r.Header.Get(SessionIDHeader)
+		if sessionIDHeader != "" {
 			var ok bool
-			session, ok = h.sessionManager.GetSession(sessionID)
+			session, ok = h.sessionManager.GetSession(sessionIDHeader)
 			if !ok {
-				// Session not found
-				http.Error(w, "Session not found", http.StatusNotFound)
+				http.Error(w, "Session not found or expired", http.StatusNotFound) // 404 if session ID provided but not found
 				return
 			}
 		} else if isInitialize {
-			// If it's an initialize request and no session, create a new session
+			// If it's an initialize request and no session ID header, create a new session
 			session = h.sessionManager.CreateSession()
-			log.Infof("Created new session ID: %s", session.ID)
+			log.Infof("Created new session ID: %s for initialize request", session.ID)
+		} else {
+			// Not an initialize request and no session ID header was provided.
+			// According to MCP spec, server SHOULD respond with 400 Bad Request.
+			http.Error(w, "Missing Mcp-Session-Id header for non-initialize request", http.StatusBadRequest)
+			return
 		}
 	}
 
 	// Create response processor
-	responder := h.responderFactory.CreateResponder(r, body)
+	responder := h.responderFactory.CreateResponder(r, rawMessage)
 
-	// Re-try to parse as request (we've already tried once, but to maintain original code structure, we'll try again)
-	if err := json.Unmarshal(body, &req); err == nil && req.ID != nil {
-		// This is a request
+	// This is a request
+	if base.ID != nil && base.Method != "" {
+		var req mcp.JSONRPCRequest
+		if err := json.Unmarshal(rawMessage, &req); err != nil {
+			http.Error(w, "Invalid JSON-RPC request format: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		// Check response processor type
 		if sseResponder, ok := responder.(*SSEResponder); ok {
@@ -274,19 +286,18 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 				if err != nil {
 					log.Infof("Failed to send SSE error response: %v", err)
 				}
-			} else {
-				// Send final response
-				jsonrpcResponse := mcp.JSONRPCResponse{
-					JSONRPC: mcp.JSONRPCVersion,
-					ID:      req.ID,
-					Result:  resp,
-				}
-				err = sseResponder.Respond(ctx, w, r, jsonrpcResponse, session)
-				if err != nil {
-					log.Infof("Failed to send SSE final response: %v", err)
-				}
+				return
 			}
-
+			// Send final response
+			jsonrpcResponse := mcp.JSONRPCResponse{
+				JSONRPC: mcp.JSONRPCVersion,
+				ID:      req.ID,
+				Result:  resp,
+			}
+			err = sseResponder.Respond(ctx, w, r, jsonrpcResponse, session)
+			if err != nil {
+				log.Infof("Failed to send SSE final response: %v", err)
+			}
 			return
 		}
 
@@ -319,7 +330,13 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	}
 
 	// Try to parse as notification
-	if err := json.Unmarshal(body, &notification); err == nil && notification.Method != "" {
+	if base.ID == nil && base.Method != "" {
+		var notification mcp.JSONRPCNotification
+		if err := json.Unmarshal(rawMessage, &notification); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
 		// Handle special case for initialize request
 		if notification.Method == mcp.MethodNotificationsInitialized {
 			// This is initialized notification, if it's the first request, we need to create a session
@@ -473,26 +490,24 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 // Send notification through GET SSE
 func (h *HTTPServerHandler) sendNotificationToGetSSE(sessionID string, notification *mcp.JSONRPCNotification) error {
 	h.getSSEConnectionsLock.RLock()
-	conn, exists := h.getSSEConnections[sessionID]
+	conn, ok := h.getSSEConnections[sessionID]
 	h.getSSEConnectionsLock.RUnlock()
 
-	if !exists || conn == nil {
-		return fmt.Errorf("no GET SSE connection for session %s", sessionID)
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
-	// Get write lock, to prevent concurrent write
 	conn.writeLock.Lock()
 	defer conn.writeLock.Unlock()
 
-	// Send notification, using existing SSEResponder
+	// Use SSE responder to send notification
 	eventID, err := conn.sseResponder.SendNotification(conn.writer, conn.flusher, notification)
 	if err != nil {
-		return fmt.Errorf("failed to send SSE notification: %w", err)
+		return fmt.Errorf("failed to send notification via SSE: %w", err)
 	}
 
 	// Update last event ID
 	conn.lastEventID = eventID
-
 	return nil
 }
 

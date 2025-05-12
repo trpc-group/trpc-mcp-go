@@ -198,7 +198,7 @@ func NewDelayTool() *mcp.Tool {
 	)
 }
 
-// NewSSEProgressTool 创建一个支持发送进度通知的 SSE 测试工具
+// NewSSEProgressTool creates an SSE test tool that supports sending progress notifications.
 func NewSSEProgressTool() *mcp.Tool {
 	return mcp.NewTool("sse-progress-tool",
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

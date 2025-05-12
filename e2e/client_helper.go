@@ -201,13 +201,13 @@ func (nc *NotificationCollector) GetHandlers() map[string]transport.Notification
 	// Create handler map.
 	handlers := make(map[string]transport.NotificationHandler)
 
-	// 进度通知处理器
+	// Progress notification handler
 	handlers["notifications/progress"] = func(n *mcp.JSONRPCNotification) error {
 		nc.addNotification(n)
 		return nil
 	}
 
-	// 日志通知处理器
+	// Log notification handler
 	handlers["notifications/message"] = func(n *mcp.JSONRPCNotification) error {
 		nc.addNotification(n)
 		return nil
@@ -294,7 +294,7 @@ func CreateClientWithRequestMode(url string, mode string, enableGetSSE bool) (*c
 		Version: "1.0.0",
 	}, client.WithGetSSEEnabled(enableGetSSE))
 	if err != nil {
-		return nil, fmt.Errorf("创建 MCP 客户端失败: %v", err)
+		return nil, fmt.Errorf("Failed to create MCP client: %v", err)
 	}
 
 	return c, nil

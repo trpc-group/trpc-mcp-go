@@ -24,6 +24,9 @@ type StreamableHTTPClientTransport struct {
 	// HTTP client
 	httpClient *http.Client
 
+	// HTTP request handler
+	httpReqHandler HTTPReqHandler
+
 	// Session ID
 	sessionID string
 
@@ -74,6 +77,7 @@ func NewStreamableHTTPClientTransport(serverURL *url.URL, options ...func(*Strea
 	transport := &StreamableHTTPClientTransport{
 		serverURL:            serverURL,
 		httpClient:           &http.Client{},
+		httpReqHandler:       NewDefaultHTTPReqHandler(),
 		notificationHandlers: make(map[string]NotificationHandler),
 		enableGetSSE:         true, // Default: GET SSE enabled
 	}
@@ -107,66 +111,18 @@ func WithEnableGetSSE(enabled bool) func(*StreamableHTTPClientTransport) {
 	}
 }
 
+// WithHTTPReqHandler sets the HTTP request handler
+func WithHTTPReqHandler(handler HTTPReqHandler) func(*StreamableHTTPClientTransport) {
+	return func(t *StreamableHTTPClientTransport) {
+		if handler != nil {
+			t.httpReqHandler = handler
+		}
+	}
+}
+
 // SendRequest sends a request and waits for a response
 func (t *StreamableHTTPClientTransport) SendRequest(ctx context.Context, req *mcp.JSONRPCRequest) (*json.RawMessage, error) {
 	return t.sendRequest(ctx, req, nil)
-}
-
-// SendRequestAndParse sends a request and parses the response, returning a result of a specific type
-func (t *StreamableHTTPClientTransport) SendRequestAndParse(ctx context.Context, req *mcp.JSONRPCRequest) (interface{}, error) {
-	// Send request to get raw response
-	rawResp, err := t.SendRequest(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for errors first
-	if mcp.IsErrorResponse(rawResp) {
-		errResp, err := mcp.ParseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("server error: %s (code: %d)", errResp.Error.Message, errResp.Error.Code)
-	}
-
-	// Parse the response based on method
-	var result interface{}
-	var parseErr error
-
-	switch req.Method {
-	case mcp.MethodInitialize:
-		result, parseErr = mcp.ParseInitializeResultFromJSON(rawResp)
-
-	case mcp.MethodToolsList:
-		result, parseErr = mcp.ParseListToolsResultFromJSON(rawResp)
-
-	case mcp.MethodToolsCall:
-		result, parseErr = mcp.ParseCallToolResult(rawResp)
-
-	case mcp.MethodPromptsList:
-		result, parseErr = mcp.ParseListPromptsResultFromJSON(rawResp)
-
-	case mcp.MethodPromptsGet:
-		result, parseErr = mcp.ParseGetPromptResultFromJSON(rawResp)
-
-	case mcp.MethodResourcesList:
-		result, parseErr = mcp.ParseListResourcesResultFromJSON(rawResp)
-
-	case mcp.MethodResourcesRead:
-		result, parseErr = mcp.ParseReadResourceResultFromJSON(rawResp)
-
-	default:
-		// Default fallback for unknown methods - attempt simple unmarshal
-		var genericResult interface{}
-		parseErr = json.Unmarshal(*rawResp, &genericResult)
-		result = genericResult
-	}
-
-	if parseErr != nil {
-		return nil, fmt.Errorf("failed to parse response for method %s: %v", req.Method, parseErr)
-	}
-
-	return result, nil
 }
 
 // sendRequest sends a request and handles the response
@@ -174,13 +130,13 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mc
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrRequestSerialization, err)
 	}
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(reqBytes))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
 	}
 
 	// Set request headers - accept both SSE and JSON responses
@@ -197,10 +153,10 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mc
 		httpReq.Header.Set(LastEventIDHeader, t.lastEventID)
 	}
 
-	// Send request
-	httpResp, err := t.httpClient.Do(httpReq)
+	// Send request using the handler
+	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
 	}
 
 	// Handle session ID
@@ -225,7 +181,7 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mc
 
 	// Check status code
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request failed with status code: %d", httpResp.StatusCode)
+		return nil, fmt.Errorf("%w: status code %d", ErrHTTPRequestFailed, httpResp.StatusCode)
 	}
 
 	// Read response body
@@ -237,7 +193,7 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mc
 	// Parse the response as a JSON-RPC response
 	var jsonResp map[string]interface{}
 	if err := json.Unmarshal(respBytes, &jsonResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrResponseParsing, err)
 	}
 
 	// Check if this is an error response
@@ -250,13 +206,13 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *mc
 	// Extract result part
 	resultData, ok := jsonResp["result"]
 	if !ok {
-		return nil, fmt.Errorf("response missing result field")
+		return nil, ErrMissingResultField
 	}
 
 	// Serialize result to JSON
 	resultBytes, err := json.Marshal(resultData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal result: %v", err)
+		return nil, fmt.Errorf("%w: %v", ErrResponseSerialization, err)
 	}
 
 	rawMessage := json.RawMessage(resultBytes)

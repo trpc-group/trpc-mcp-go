@@ -46,11 +46,11 @@ func (m *ToolManager) RegisterTool(tool *mcp.Tool) error {
 	defer m.mu.Unlock()
 
 	if tool.Name == "" {
-		return fmt.Errorf("tool name cannot be empty")
+		return ErrEmptyToolName
 	}
 
 	if _, exists := m.tools[tool.Name]; exists {
-		return fmt.Errorf("tool %s is already registered", tool.Name)
+		return fmt.Errorf("%w: %s", ErrToolAlreadyRegistered, tool.Name)
 	}
 
 	m.tools[tool.Name] = tool
@@ -104,13 +104,13 @@ func (m *ToolManager) HandleListTools(ctx context.Context, req *mcp.JSONRPCReque
 func (m *ToolManager) HandleCallTool(ctx context.Context, req *mcp.JSONRPCRequest, session *transport.Session) (mcp.JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "parameters are empty", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, ErrMissingParams.Error(), nil), nil
 	}
 
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, "invalid parameters format", nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInvalidParams, ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get tool name
@@ -122,7 +122,7 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *mcp.JSONRPCReques
 	// Get tool
 	tool, ok := m.GetTool(toolName)
 	if !ok {
-		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("tool %s not found", toolName), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrMethodNotFound, fmt.Sprintf("%v: %s", ErrToolNotFound, toolName), nil), nil
 	}
 
 	// Create tool call request
@@ -146,7 +146,7 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *mcp.JSONRPCReques
 	// Progress notification token (if any)
 	if meta, ok := paramsMap["_meta"].(map[string]interface{}); ok {
 		if progressToken, exists := meta["progressToken"]; exists {
-			// Note: Current version of CallToolRequest doesn't fully implement Meta field
+			// Note: The current version of CallToolRequest doesn't fully implement Meta field
 			// Future implementation should add toolReq.Meta = ... code
 			_ = progressToken // Ignore progress token for now
 		}
@@ -160,7 +160,7 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *mcp.JSONRPCReques
 	// Execute tool
 	result, err := tool.ExecuteFunc(ctx, toolReq)
 	if err != nil {
-		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInternal, fmt.Sprintf("failed to execute tool %s: %v", toolName, err), nil), nil
+		return mcp.NewJSONRPCErrorResponse(req.ID, mcp.ErrInternal, fmt.Sprintf("%v: %v", ErrToolExecutionFailed, err), nil), nil
 	}
 
 	return result, nil
