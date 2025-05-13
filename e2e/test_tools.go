@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // RegisterTestTools registers all test tools to the server.
-func RegisterTestTools(s *server.Server) {
+func RegisterTestTools(s *mcp.Server) {
 	// Register the basic greeting tool.
 	if err := s.RegisterTool(NewBasicTool()); err != nil {
 		panic(fmt.Sprintf("Failed to register BasicTool: %v", err))

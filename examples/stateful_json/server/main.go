@@ -3,21 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greeting tool handler function.
 func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context (if any).
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 
 	// Extract name from parameters.
 	name, _ := req.Params.Arguments["name"].(string)
@@ -41,13 +39,13 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	return &mcp.CallToolResult{Content: content}, nil
 }
 
-// Counter tool, used to demonstrate session state management.
+// Counter-tool, used to demonstrate session state management.
 func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return mcp.NewErrorResult("Error: Could not get session info. This tool requires a stateful session."),
-			fmt.Errorf("Failed to get session from context")
+			fmt.Errorf("failed to get session from context")
 	}
 
 	// Get counter from session data.
@@ -73,9 +71,8 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting Stateful JSON No GET SSE mode MCP server...")
+	// Print server start message.
+	log.Printf("Starting Stateful JSON No GET SSE mode MCP server...")
 
 	// Create server info.
 	serverInfo := mcp.Implementation{
@@ -84,20 +81,20 @@ func main() {
 	}
 
 	// Create session manager (valid for 1 hour).
-	sessionManager := transport.NewSessionManager(3600)
+	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
 	// 1. Stateful mode (using SessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. GET SSE is not supported
-	mcpServer := server.NewServer(
+	mcpServer := mcp.NewServer(
 		":3003", // Server address and port
 		serverInfo,
-		server.WithPathPrefix("/mcp"), // Set API path
-		server.WithSessionManager(sessionManager), // Use session manager (stateful)
-		server.WithSSEEnabled(false),              // Disable SSE
-		server.WithGetSSEEnabled(false),           // Disable GET SSE
-		server.WithDefaultResponseMode("json"),    // Set default response mode to JSON
+		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
+		mcp.WithSSEEnabled(false),              // Disable SSE
+		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
+		mcp.WithDefaultResponseMode("json"),    // Set default response mode to JSON
 	)
 
 	// Register a greeting tool.
@@ -108,9 +105,9 @@ func main() {
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
 	}
-	log.Info("Registered greeting tool: greet")
+	log.Printf("Registered greeting tool: greet")
 
-	// Register counter tool.
+	// Register counter-tool.
 	counterTool := mcp.NewTool("counter", handleCounter,
 		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
 		mcp.WithNumber("increment",
@@ -120,7 +117,7 @@ func main() {
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("Failed to register counter tool: %v", err)
 	}
-	log.Info("Registered counter tool: counter")
+	log.Printf("Registered counter tool: counter")
 
 	// Set a simple health check route.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -149,13 +146,13 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("Received signal %v, exiting...", sig)
+		log.Printf("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 	// Start server.
-	log.Infof("MCP server started on :3003, path /mcp")
-	log.Infof("This is a stateful, pure JSON response server - session ID will be assigned, SSE not used")
-	log.Infof("You can check session manager status at http://localhost:3003/sessions")
+	log.Printf("MCP server started on :3003, path /mcp")
+	log.Printf("This is a stateful, pure JSON response server - session ID will be assigned, SSE not used")
+	log.Printf("You can check session manager status at http://localhost:3003/sessions")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}

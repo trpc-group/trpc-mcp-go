@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greet tool handler.
@@ -32,9 +31,8 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting Stateless JSON No GET SSE mode MCP server...")
+	// Print startup message.
+	log.Printf("Starting Stateless JSON No GET SSE mode MCP server...")
 
 	// Create server info.
 	serverInfo := mcp.Implementation{
@@ -46,14 +44,14 @@ func main() {
 	// 1. Stateless mode
 	// 2. Only return JSON responses (no SSE)
 	// 3. Does not support standalone GET SSE
-	mcpServer := server.NewServer(
+	mcpServer := mcp.NewServer(
 		":3001", // Server address and port.
 		serverInfo,
-		server.WithPathPrefix("/mcp"),          // Set API path.
-		server.WithStatelessMode(true),         // Enable stateless mode.
-		server.WithSSEEnabled(false),           // Disable SSE.
-		server.WithGetSSEEnabled(false),        // Disable GET SSE.
-		server.WithDefaultResponseMode("json"), // Set default response mode to JSON.
+		mcp.WithPathPrefix("/mcp"),          // Set API path.
+		mcp.WithStatelessMode(true),         // Enable stateless mode.
+		mcp.WithSSEEnabled(false),           // Disable SSE.
+		mcp.WithGetSSEEnabled(false),        // Disable GET SSE.
+		mcp.WithDefaultResponseMode("json"), // Set default response mode to JSON.
 	)
 
 	// Register a greet tool.
@@ -64,7 +62,7 @@ func main() {
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
 	}
-	log.Info("Registered greet tool: greet")
+	log.Printf("Registered greet tool: greet")
 
 	// Set up a simple health check route.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -77,13 +75,13 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("Received signal %v, exiting...", sig)
+		log.Printf("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
 	// Start server.
-	log.Infof("MCP server started at :3001, path /mcp")
-	log.Infof("This is a stateless, pure JSON response server - no session ID will be returned, SSE is not used.")
+	log.Printf("MCP server started at :3001, path /mcp")
+	log.Printf("This is a stateless, pure JSON response server - no session ID will be returned, SSE is not used.")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

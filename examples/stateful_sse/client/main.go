@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/client"
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Callback function for handling SSE incremental updates.
@@ -17,32 +15,31 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 	level, _ := paramsMap["level"].(string)
 	dataMap, ok := paramsMap["data"].(map[string]interface{})
 	if !ok {
-		log.Infof("Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v", notification.Method, level, paramsMap)
+		log.Printf("Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v", notification.Method, level, paramsMap)
 		return fmt.Errorf("'data' field is invalid or missing")
 	}
 
 	notificationType, _ := dataMap["type"].(string)
-	log.Infof("Received notification [%s] (Level: %s, Type: %s): %+v", notification.Method, level, notificationType, dataMap)
+	log.Printf("Received notification [%s] (Level: %s, Type: %s): %+v", notification.Method, level, notificationType, dataMap)
 
 	switch notificationType {
 	case "process_started":
 		if message, exists := dataMap["message"].(string); exists {
-			log.Infof("  Stream processing started: %s (Steps: %v, Delay: %vms)", message, dataMap["steps"], dataMap["delayMs"])
+			log.Printf("  Stream processing started: %s (Steps: %v, Delay: %vms)", message, dataMap["steps"], dataMap["delayMs"])
 		}
 	case "process_progress":
 		if message, exists := dataMap["message"].(string); exists {
-			log.Infof("  Stream processing progress: %s (Step: %v/%v, Progress: %.2f%%)", message, dataMap["step"], dataMap["total"], dataMap["progress"])
+			log.Printf("  Stream processing progress: %s (Step: %v/%v, Progress: %.2f%%)", message, dataMap["step"], dataMap["total"], dataMap["progress"])
 		}
 	default:
-		log.Infof("  Received other type of notification '%s': %+v", notificationType, dataMap)
+		log.Printf("  Received other type of notification '%s': %+v", notificationType, dataMap)
 	}
 	return nil
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting Stateful SSE No GET SSE mode client...")
+	// Print client start message.
+	log.Printf("Starting Stateful SSE No GET SSE mode client...")
 
 	// Create context.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -55,10 +52,10 @@ func main() {
 	}
 
 	// Create client, connect to server.
-	mcpClient, err := client.NewClient(
+	mcpClient, err := mcp.NewClient(
 		"http://localhost:3005/mcp",
 		clientInfo,
-		client.WithGetSSEEnabled(false), // Disable GET SSE
+		mcp.WithClientGetSSEEnabled(false), // Disable GET SSE
 	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
@@ -66,38 +63,38 @@ func main() {
 	defer mcpClient.Close()
 
 	// Initialize client.
-	log.Info("Initializing client...")
+	log.Printf("Initializing client...")
 	initResp, err := mcpClient.Initialize(ctx)
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 	}
 
-	log.Infof("Initialization succeeded: Server=%s %s, Protocol=%s",
+	log.Printf("Initialization succeeded: Server=%s %s, Protocol=%s",
 		initResp.ServerInfo.Name, initResp.ServerInfo.Version, initResp.ProtocolVersion)
-	log.Infof("Server capabilities: %+v", initResp.Capabilities)
+	log.Printf("Server capabilities: %+v", initResp.Capabilities)
 
 	// Get session info.
 	sessionID := mcpClient.GetSessionID()
 	if sessionID == "" {
-		log.Info("Warning: No session ID received. Server may not be properly configured for stateful mode.")
+		log.Printf("Warning: No session ID received. Server may not be properly configured for stateful mode.")
 	} else {
-		log.Infof("Session established, ID: %s", sessionID)
+		log.Printf("Session established, ID: %s", sessionID)
 	}
 
 	// Get available tools list.
-	log.Info("Listing tools...")
+	log.Printf("Listing tools...")
 	toolsResult, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
 
-	log.Infof("Server provides %d tools", len(toolsResult.Tools))
+	log.Printf("Server provides %d tools", len(toolsResult.Tools))
 	for _, tool := range toolsResult.Tools {
-		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
+		log.Printf("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
 	// Call greet tool.
-	log.Info("Calling greet tool...")
+	log.Printf("Calling greet tool...")
 	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
 		"name": "SSE client user",
 	})
@@ -106,17 +103,17 @@ func main() {
 	}
 
 	// Show call result.
-	log.Info("Call result:")
+	log.Printf("Call result:")
 	for _, content := range callResult.Content {
 		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Infof("- Text: %s", textContent.Text)
+			log.Printf("- Text: %s", textContent.Text)
 		} else {
-			log.Infof("- Other type content: %+v", content)
+			log.Printf("- Other type content: %+v", content)
 		}
 	}
 
 	// Call counter tool, demonstrate session state keeping.
-	log.Info("Calling counter tool first time...")
+	log.Printf("Calling counter tool first time...")
 	counterResult1, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
 		"increment": 1,
 	})
@@ -125,15 +122,15 @@ func main() {
 	}
 
 	// Show counter result.
-	log.Info("Counter result (first time):")
+	log.Printf("Counter result (first time):")
 	for _, content := range counterResult1.Content {
 		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Infof("- Text: %s", textContent.Text)
+			log.Printf("- Text: %s", textContent.Text)
 		}
 	}
 
 	// Call counter tool again, verify state keeping.
-	log.Info("Calling counter tool second time...")
+	log.Printf("Calling counter tool second time...")
 	counterResult2, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
 		"increment": 2,
 	})
@@ -142,19 +139,19 @@ func main() {
 	}
 
 	// Show counter result.
-	log.Info("Counter result (second time):")
+	log.Printf("Counter result (second time):")
 	for _, content := range counterResult2.Content {
 		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Infof("- Text: %s", textContent.Text)
+			log.Printf("- Text: %s", textContent.Text)
 		}
 	}
 
 	// Call delayedResponse tool, demonstrate the advantage of SSE streaming response.
-	log.Info("Calling delayedResponse tool, experience streaming response...")
+	log.Printf("Calling delayedResponse tool, experience streaming response...")
 
 	// Create stream options, set callback for handling incremental content.
-	streamOpts := &transport.StreamOptions{
-		NotificationHandlers: map[string]transport.NotificationHandler{
+	streamOpts := &mcp.StreamOptions{
+		NotificationHandlers: map[string]mcp.NotificationHandler{
 			"notifications/message": handleNotification,
 		},
 	}
@@ -169,14 +166,14 @@ func main() {
 		log.Fatalf("Failed to call delayedResponse tool: %v", err)
 	}
 
-	log.Info("delayedResponse tool streaming call finished")
+	log.Printf("delayedResponse tool streaming call finished")
 
 	// Print session info.
-	log.Infof("\nSession info: ID=%s", mcpClient.GetSessionID())
-	log.Info("Client has not enabled GET SSE connection, cannot receive independent notifications")
-	log.Info("Tip: you can use curl http://localhost:3005/sessions to check server session state")
+	log.Printf("\nSession info: ID=%s", mcpClient.GetSessionID())
+	log.Printf("Client has not enabled GET SSE connection, cannot receive independent notifications")
+	log.Printf("Tip: you can use curl http://localhost:3005/sessions to check server session state")
 
 	// Wait a while for user to see output.
-	log.Info("Client example finished, exiting in 5 seconds...")
+	log.Printf("Client example finished, exiting in 5 seconds...")
 	time.Sleep(5 * time.Second)
 }

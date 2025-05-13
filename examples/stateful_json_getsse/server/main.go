@@ -3,22 +3,20 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greeting tool handler function.
 func handleGreet(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context (if any).
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 
 	// Extract name from parameters.
 	name := "World"
@@ -47,7 +45,7 @@ func handleGreet(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallTo
 // Counter tool, used to demonstrate session state management.
 func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -85,7 +83,7 @@ func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.Call
 // Notification demo tool, used to send asynchronous notifications.
 func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session.
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -123,16 +121,16 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		time.Sleep(time.Duration(delaySeconds) * time.Second)
 
 		// Get server instance from context.
-		serverInstance := transport.GetServerFromContext(ctx)
+		serverInstance := mcp.GetServerFromContext(ctx)
 		if serverInstance == nil {
-			log.Infof("Failed to send notification: could not get server instance from context")
+			log.Printf("Failed to send notification: could not get server instance from context.")
 			return
 		}
 
 		// Type assertion.
-		mcpServer, ok := serverInstance.(*server.Server)
+		mcpServer, ok := serverInstance.(*mcp.Server)
 		if !ok {
-			log.Infof("Failed to send notification: server instance type error in context")
+			log.Printf("Failed to send notification: server instance type error in context.")
 			return
 		}
 
@@ -148,9 +146,9 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		})
 
 		if err != nil {
-			log.Infof("Failed to send notification: %v", err)
+			log.Printf("Failed to send notification: %v.", err)
 		} else {
-			log.Infof("Notification sent to session %s", session.ID)
+			log.Printf("Notification sent to session %s.", session.ID)
 		}
 	}()
 
@@ -158,9 +156,7 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting Stateful JSON Yes GET SSE mode MCP server...")
+	log.Printf("Starting Stateful JSON Yes GET SSE mode MCP server...")
 
 	// Create server info.
 	serverInfo := mcp.Implementation{
@@ -169,20 +165,20 @@ func main() {
 	}
 
 	// Create session manager (valid for 1 hour).
-	sessionManager := transport.NewSessionManager(3600)
+	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
 	// 1. Stateful mode (using SessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. Support GET SSE
-	mcpServer := server.NewServer(
+	mcpServer := mcp.NewServer(
 		":3004", // Server address and port
 		serverInfo,
-		server.WithPathPrefix("/mcp"), // Set API path
-		server.WithSessionManager(sessionManager), // Use session manager (stateful)
-		server.WithSSEEnabled(false),              // Disable SSE
-		server.WithGetSSEEnabled(true),            // Enable GET SSE
-		server.WithDefaultResponseMode("json"),    // Set default response mode to JSON
+		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
+		mcp.WithSSEEnabled(false),              // Disable SSE
+		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
+		mcp.WithDefaultResponseMode("json"),    // Set default response mode to JSON
 	)
 
 	// Register a greeting tool.
@@ -191,9 +187,9 @@ func main() {
 		mcp.WithString("name", mcp.Description("Name to greet")))
 
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
-		log.Fatalf("Failed to register tool: %v", err)
+		log.Fatalf("Failed to register tool: %v.", err)
 	}
-	log.Infof("Registered greeting tool: greet")
+	log.Printf("Registered greeting tool: greet.")
 
 	// Register counter tool.
 	counterTool := mcp.NewTool("counter", handleCounter,
@@ -203,9 +199,9 @@ func main() {
 			mcp.Default(1)))
 
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
-		log.Fatalf("Failed to register counter tool: %v", err)
+		log.Fatalf("Failed to register counter tool: %v.", err)
 	}
-	log.Infof("Registered counter tool: counter")
+	log.Printf("Registered counter tool: counter.")
 
 	// Register notification demo tool
 	notifyTool := mcp.NewTool("sendNotification", handleNotification,
@@ -218,9 +214,9 @@ func main() {
 			mcp.Default(2)))
 
 	if err := mcpServer.RegisterTool(notifyTool); err != nil {
-		log.Fatalf("Failed to register notification tool: %v", err)
+		log.Fatalf("Failed to register notification tool: %v.", err)
 	}
-	log.Infof("Registered notification tool: sendNotification")
+	log.Printf("Registered notification tool: sendNotification.")
 
 	// Example: Periodically broadcast system status notifications
 	go func() {
@@ -246,9 +242,9 @@ func main() {
 				)
 
 				if err != nil {
-					log.Infof("Failed to broadcast system status notification: %v (failed sessions: %d)", err, failedCount)
+					log.Printf("Failed to broadcast system status notification: %v (failed sessions: %d)", err, failedCount)
 				} else {
-					log.Infof("System status notification broadcast to all sessions")
+					log.Printf("System status notification broadcast to all sessions")
 				}
 			}
 		}
@@ -263,7 +259,7 @@ func main() {
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			// Use the new API to get the list of active sessions
-			sessions := mcpServer.HTTPHandler().(*transport.HTTPServerHandler).GetActiveSessions()
+			sessions := mcpServer.HTTPHandler().(*mcp.HTTPServerHandler).GetActiveSessions()
 
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Session manager status: Active\n")
@@ -287,14 +283,14 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("Received signal %v, exiting...", sig)
+		log.Printf("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
 	// Start the server
-	log.Infof("MCP server started on :3004, access path /mcp")
-	log.Infof("This is a stateful, JSON-only response server - it assigns session IDs, does not use SSE responses, but supports GET SSE")
-	log.Infof("You can view the session manager status at http://localhost:3004/sessions")
+	log.Printf("MCP server started on :3004, access path /mcp")
+	log.Printf("This is a stateful, JSON-only response server - it assigns session IDs, does not use SSE responses, but supports GET SSE")
+	log.Printf("You can view the session manager status at http://localhost:3004/sessions")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Server startup failed: %v", err)
 	}

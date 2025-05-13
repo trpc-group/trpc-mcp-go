@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,10 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // ChatRoom represents a chat room.
@@ -123,7 +121,7 @@ var globalChatRoom = NewChatRoom("Global Chat Room", 100)
 // handleGreet processes the greeting tool request.
 func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		// Unable to get session, return a simple greeting
 		return &mcp.CallToolResult{
@@ -153,7 +151,7 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 // handleCounter processes the counter tool request.
 func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -192,7 +190,7 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 // handleDelayedResponse processes the delayed response tool request.
 func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -231,7 +229,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		"Start processing request, will execute %d steps, each step delay %d milliseconds",
 		steps, delayMs))
 	if err != nil {
-		log.Infof("Send notification failed: %v", err)
+		log.Printf("Send notification failed: %v", err)
 	}
 
 	// Send progress notification
@@ -252,7 +250,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		progress := float64(i) / float64(steps)
 		err := notificationSender.SendProgress(progress, fmt.Sprintf("Step %d/%d", i, steps))
 		if err != nil {
-			log.Infof("Send progress notification failed: %v", err)
+			log.Printf("Send progress notification failed: %v", err)
 		}
 
 		// Send detailed log
@@ -260,7 +258,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 			"Executing step %d/%d (progress: %.0f%%)",
 			i, steps, progress*100))
 		if err != nil {
-			log.Infof("Send log notification failed: %v", err)
+			log.Printf("Send log notification failed: %v", err)
 		}
 
 		// Delay for a while
@@ -270,7 +268,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	// Send completion notification
 	err = notificationSender.SendLogMessage("info", "Processing completed")
 	if err != nil {
-		log.Infof("Send completion notification failed: %v", err)
+		log.Printf("Send completion notification failed: %v", err)
 	}
 
 	// Return result
@@ -286,7 +284,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 // handleNotification processes the notification tool request.
 func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -334,9 +332,9 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		})
 
 		if err != nil {
-			log.Infof("Send notification failed: %v", err)
+			log.Printf("Send notification failed: %v", err)
 		} else {
-			log.Infof("Notification sent to session %s", session.ID)
+			log.Printf("Notification sent to session %s", session.ID)
 		}
 	}()
 
@@ -346,7 +344,7 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 // handleChatJoin processes the chat join tool request.
 func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -399,7 +397,7 @@ func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 // handleChatSend processes the chat send tool request.
 func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Get session from context
-	session, ok := transport.GetSessionFromContext(ctx)
+	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -476,9 +474,9 @@ func broadcastChatMessage(userName, message string) {
 	})
 
 	if err != nil {
-		log.Infof("Broadcast chat message failed (failed session count: %d): %v", failedCount, err)
+		log.Printf("Broadcast chat message failed (failed session count: %d): %v", failedCount, err)
 	} else {
-		log.Infof("Broadcast chat message: %s: %s", userName, message)
+		log.Printf("Broadcast chat message: %s: %s", userName, message)
 	}
 }
 
@@ -495,18 +493,17 @@ func broadcastSystemMessage(message string) {
 	})
 
 	if err != nil {
-		log.Infof("Broadcast system message failed (failed session count: %d): %v", failedCount, err)
+		log.Printf("Broadcast system message failed (failed session count: %d): %v", failedCount, err)
 	} else {
-		log.Infof("Broadcast system message: %s", message)
+		log.Printf("Broadcast system message: %s", message)
 	}
 }
 
-// Global MCP server instance
-var mcpServer *server.Server
+var mcpServer *mcp.Server
 
 func main() {
-	// Set log
-	log.Info("Starting Stateful SSE mode MCP server (supports GET SSE)...")
+	// Print server start message.
+	log.Printf("Starting Stateful SSE+GET SSE mode MCP server...")
 
 	// Create server information
 	serverInfo := mcp.Implementation{
@@ -515,20 +512,20 @@ func main() {
 	}
 
 	// Create session manager (valid for 1 hour)
-	sessionManager := transport.NewSessionManager(3600)
+	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
 	// 1. Stateful mode (Stateful, using SessionManager)
 	// 2. Use SSE response (streaming)
 	// 3. Support independent GET SSE
-	mcpServer = server.NewServer(
+	mcpServer = mcp.NewServer(
 		":3006", // Server address and port
 		serverInfo,
-		server.WithPathPrefix("/mcp"), // Set API path
-		server.WithSessionManager(sessionManager), // Use session manager (stateful)
-		server.WithSSEEnabled(true),               // Enable SSE
-		server.WithGetSSEEnabled(true),            // Enable GET SSE
-		server.WithDefaultResponseMode("sse"),     // Set default response mode to SSE
+		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
+		mcp.WithSSEEnabled(true),               // Enable SSE
+		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
+		mcp.WithDefaultResponseMode("sse"),     // Set default response mode to SSE
 	)
 
 	// Register a greeting tool
@@ -539,7 +536,7 @@ func main() {
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Register tool failed: %v", err)
 	}
-	log.Infof("Registered greeting tool: greet")
+	log.Printf("Registered greeting tool: greet")
 
 	// Register counter tool
 	counterTool := mcp.NewTool("counter", handleCounter,
@@ -551,7 +548,7 @@ func main() {
 	if err := mcpServer.RegisterTool(counterTool); err != nil {
 		log.Fatalf("Register counter tool failed: %v", err)
 	}
-	log.Infof("Registered counter tool: counter")
+	log.Printf("Registered counter tool: counter")
 
 	// Register delayed response tool
 	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
@@ -566,7 +563,7 @@ func main() {
 	if err := mcpServer.RegisterTool(delayedTool); err != nil {
 		log.Fatalf("Register delayed response tool failed: %v", err)
 	}
-	log.Infof("Registered delayed response tool: delayedResponse")
+	log.Printf("Registered delayed response tool: delayedResponse")
 
 	// Register notification demo tool
 	notifyTool := mcp.NewTool("sendNotification", handleNotification,
@@ -581,7 +578,7 @@ func main() {
 	if err := mcpServer.RegisterTool(notifyTool); err != nil {
 		log.Fatalf("Register notification tool failed: %v", err)
 	}
-	log.Infof("Registered notification tool: sendNotification")
+	log.Printf("Registered notification tool: sendNotification")
 
 	// Register chat room tool
 	chatJoinTool := mcp.NewTool("chatJoin", handleChatJoin,
@@ -592,7 +589,7 @@ func main() {
 	if err := mcpServer.RegisterTool(chatJoinTool); err != nil {
 		log.Fatalf("Register chat join tool failed: %v", err)
 	}
-	log.Infof("Registered chat join tool: chatJoin")
+	log.Printf("Registered chat join tool: chatJoin")
 
 	// Register send chat message tool
 	chatSendTool := mcp.NewTool("chatSend", handleChatSend,
@@ -603,7 +600,7 @@ func main() {
 	if err := mcpServer.RegisterTool(chatSendTool); err != nil {
 		log.Fatalf("Register chat send tool failed: %v", err)
 	}
-	log.Infof("Registered chat send tool: chatSend")
+	log.Printf("Registered chat send tool: chatSend")
 
 	// Set a simple health check route
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -614,7 +611,7 @@ func main() {
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			// Use new API to get active session list
-			sessions := mcpServer.HTTPHandler().(*transport.HTTPServerHandler).GetActiveSessions()
+			sessions := mcpServer.HTTPHandler().(*mcp.HTTPServerHandler).GetActiveSessions()
 
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Session manager status: active\n")
@@ -645,15 +642,15 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("Received signal %v, exiting...", sig)
+		log.Printf("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
 	// Start server
-	log.Infof("MCP server started at :3006, access path is /mcp")
-	log.Infof("This is a fully featured server - Stateful, SSE streaming response, supports GET SSE")
-	log.Infof("You can view session manager status at http://localhost:3006/sessions")
-	log.Infof("Chat room initialized, supports multi-user chat")
+	log.Printf("MCP server started at :3006, access path is /mcp")
+	log.Printf("This is a fully featured server - Stateful, SSE streaming response, supports GET SSE")
+	log.Printf("You can view session manager status at http://localhost:3006/sessions")
+	log.Printf("Chat room initialized, supports multi-user chat")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Server start failed: %v", err)
 	}

@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"os"
-	"trpc.group/trpc-go/trpc-mcp-go/client"
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+
+	"log"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
 	// Initialize log.
-	log.Info("Starting example client...")
+	log.Printf("Starting example client...")
 	// Basic settings.
 	serverURL := "http://localhost:3000/mcp"
 	clientInfo := mcp.Implementation{
@@ -19,52 +19,52 @@ func main() {
 	}
 
 	// Create MCP client.
-	log.Info("===== Create client =====")
-	newClient, err := client.NewClient(serverURL, clientInfo)
+	log.Printf("===== Create client =====")
+	newClient, err := mcp.NewClient(serverURL, clientInfo)
 	if err != nil {
-		log.Errorf("Error creating client: %v", err)
+		log.Printf("Error creating client: %v", err)
 		os.Exit(1)
 	}
 
 	// Initialize client.
-	log.Info("===== Initialize client =====")
+	log.Printf("===== Initialize client =====")
 	ctx := context.Background()
 	initResult, err := newClient.Initialize(ctx)
 	if err != nil {
-		log.Errorf("Initialization error: %v", err)
+		log.Printf("Initialization error: %v", err)
 		os.Exit(1)
 	}
-	log.Infof("Connected to server: %s %s", initResult.ServerInfo.Name, initResult.ServerInfo.Version)
+	log.Printf("Connected to server: %s %s", initResult.ServerInfo.Name, initResult.ServerInfo.Version)
 
 	// List resources.
-	log.Info("===== List resources =====")
+	log.Printf("===== List resources =====")
 	resources, err := newClient.ListResources(ctx)
 	if err != nil {
-		log.Errorf("List resources error: %v", err)
+		log.Printf("List resources error: %v", err)
 	} else {
-		log.Infof("Found %d resources:", len(resources.Resources))
+		log.Printf("Found %d resources:", len(resources.Resources))
 		for _, resource := range resources.Resources {
-			log.Infof("- %s: %s (%s)", resource.Name, resource.Description, resource.URI)
+			log.Printf("- %s: %s (%s)", resource.Name, resource.Description, resource.URI)
 		}
 
 		// Read the first resource (if any).
 		if len(resources.Resources) > 0 {
-			log.Infof("===== Read resource: %s =====", resources.Resources[0].Name)
+			log.Printf("===== Read resource: %s =====", resources.Resources[0].Name)
 			resourceContent, err := newClient.ReadResource(ctx, resources.Resources[0].URI)
 			if err != nil {
-				log.Errorf("Read resource error: %v", err)
+				log.Printf("Read resource error: %v", err)
 			} else {
-				log.Infof("Successfully read resource, content item count: %d", len(resourceContent.Contents))
+				log.Printf("Successfully read resource, content item count: %d", len(resourceContent.Contents))
 				for i, content := range resourceContent.Contents {
 					switch c := content.(type) {
 					case mcp.TextResourceContents:
-						log.Infof("[%d] Text resource: %s (first 50 chars: %s...)",
+						log.Printf("[%d] Text resource: %s (first 50 chars: %s...)",
 							i, c.URI, truncateString(c.Text, 50))
 					case mcp.BlobResourceContents:
-						log.Infof("[%d] Binary resource: %s (size: %d bytes)",
+						log.Printf("[%d] Binary resource: %s (size: %d bytes)",
 							i, c.URI, len(c.Blob))
 					default:
-						log.Infof("[%d] Unknown resource type", i)
+						log.Printf("[%d] Unknown resource type", i)
 					}
 				}
 			}
@@ -72,22 +72,22 @@ func main() {
 	}
 
 	// List prompts.
-	log.Info("===== List prompts =====")
+	log.Printf("===== List prompts =====")
 	prompts, err := newClient.ListPrompts(ctx)
 	if err != nil {
-		log.Errorf("List prompts error: %v", err)
+		log.Printf("List prompts error: %v", err)
 	} else {
-		log.Infof("Found %d prompts:", len(prompts.Prompts))
+		log.Printf("Found %d prompts:", len(prompts.Prompts))
 		for _, prompt := range prompts.Prompts {
-			log.Infof("- %s: %s", prompt.Name, prompt.Description)
+			log.Printf("- %s: %s", prompt.Name, prompt.Description)
 			if len(prompt.Arguments) > 0 {
-				log.Info("  Arguments:")
+				log.Printf("  Arguments:")
 				for _, arg := range prompt.Arguments {
 					required := ""
 					if arg.Required {
 						required = " (required)"
 					}
-					log.Infof("  - %s: %s%s", arg.Name, arg.Description, required)
+					log.Printf("  - %s: %s%s", arg.Name, arg.Description, required)
 				}
 			}
 		}
@@ -103,24 +103,24 @@ func main() {
 				}
 			}
 
-			log.Infof("===== Get prompt: %s =====", prompts.Prompts[0].Name)
+			log.Printf("===== Get prompt: %s =====", prompts.Prompts[0].Name)
 			promptContent, err := newClient.GetPrompt(ctx, prompts.Prompts[0].Name, arguments)
 			if err != nil {
-				log.Errorf("Get prompt error: %v", err)
+				log.Printf("Get prompt error: %v", err)
 			} else {
-				log.Infof("Successfully got prompt, message count: %d", len(promptContent.Messages))
+				log.Printf("Successfully got prompt, message count: %d", len(promptContent.Messages))
 				if promptContent.Description != "" {
-					log.Infof("Prompt description: %s", promptContent.Description)
+					log.Printf("Prompt description: %s", promptContent.Description)
 				}
 
 				for i, msg := range promptContent.Messages {
 					switch c := msg.Content.(type) {
 					case mcp.TextContent:
-						log.Infof("[%d] %s message (Text): %s", i, msg.Role, truncateString(c.Text, 50))
+						log.Printf("[%d] %s message (Text): %s", i, msg.Role, truncateString(c.Text, 50))
 					case mcp.ImageContent:
-						log.Infof("[%d] %s message (Image): MIME=%s, DataLen=%d", i, msg.Role, c.MimeType, len(c.Data))
+						log.Printf("[%d] %s message (Image): MIME=%s, DataLen=%d", i, msg.Role, c.MimeType, len(c.Data))
 					case mcp.AudioContent:
-						log.Infof("[%d] %s message (Audio): MIME=%s, DataLen=%d", i, msg.Role, c.MimeType, len(c.Data))
+						log.Printf("[%d] %s message (Audio): MIME=%s, DataLen=%d", i, msg.Role, c.MimeType, len(c.Data))
 					case mcp.EmbeddedResource:
 						var resourceURI string
 						if textResource, ok := c.Resource.(mcp.TextResourceContents); ok {
@@ -128,9 +128,9 @@ func main() {
 						} else if blobResource, ok := c.Resource.(mcp.BlobResourceContents); ok {
 							resourceURI = blobResource.URI
 						}
-						log.Infof("[%d] %s message (Resource): URI=%s", i, msg.Role, resourceURI)
+						log.Printf("[%d] %s message (Resource): URI=%s", i, msg.Role, resourceURI)
 					default:
-						log.Infof("[%d] %s message (unknown content type: %T)", i, msg.Role, c)
+						log.Printf("[%d] %s message (unknown content type: %T)", i, msg.Role, c)
 					}
 				}
 			}
@@ -138,14 +138,14 @@ func main() {
 	}
 
 	// List tools.
-	log.Info("===== List tools =====")
+	log.Printf("===== List tools =====")
 	tools, err := newClient.ListTools(ctx)
 	if err != nil {
-		log.Errorf("List tools error: %v", err)
+		log.Printf("List tools error: %v", err)
 	} else {
-		log.Infof("Found %d tools:", len(tools.Tools))
+		log.Printf("Found %d tools:", len(tools.Tools))
 		for _, tool := range tools.Tools {
-			log.Infof("- %s: %s", tool.Name, tool.Description)
+			log.Printf("- %s: %s", tool.Name, tool.Description)
 		}
 	}
 
@@ -153,25 +153,25 @@ func main() {
 		"name": "MCP User",
 	})
 	if err != nil {
-		log.Errorf("Call tool error: %v", err)
+		log.Printf("Call tool error: %v", err)
 	} else {
-		log.Infof("Successfully called tool, message count: %d", len(callToolResult.Content))
+		log.Printf("Successfully called tool, message count: %d", len(callToolResult.Content))
 		for i, content := range callToolResult.Content {
 			switch c := content.(type) {
 			case mcp.TextContent:
-				log.Infof("[%d] Text content: %s", i, truncateString(c.Text, 50))
+				log.Printf("[%d] Text content: %s", i, truncateString(c.Text, 50))
 			default:
-				log.Infof("[%d] Unknown content type", i)
+				log.Printf("[%d] Unknown content type", i)
 			}
 		}
 	}
 
 	// Close client (cleanup resources).
 	if err := newClient.Close(); err != nil {
-		log.Errorf("Close client error: %v", err)
+		log.Printf("Close client error: %v", err)
 	}
 
-	log.Info("Test finished!")
+	log.Printf("Test finished!")
 }
 
 // truncateString truncates a string and adds ellipsis.

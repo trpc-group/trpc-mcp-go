@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 	"trpc.group/trpc-go/trpc-mcp-go/e2e"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
 )
 
 // TestStreamingContent tests streaming content transmission from server to client.

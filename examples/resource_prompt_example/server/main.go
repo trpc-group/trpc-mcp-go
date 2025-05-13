@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/http"
 
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
 	// Create server.
-	mcpServer := server.NewServer(":3000", mcp.Implementation{
+	mcpServer := mcp.NewServer(":3000", mcp.Implementation{
 		Name:    "Resource-Prompt-Example",
 		Version: "0.1.0",
 	})
@@ -26,15 +25,15 @@ func main() {
 	registerExampleTools(mcpServer)
 
 	// Start server.
-	fmt.Println("MCP server started on :3000, path /mcp")
+	log.Printf("MCP server started on :3000, path /mcp")
 	err := mcpServer.Start()
 	if err != nil && err != http.ErrServerClosed {
-		fmt.Printf("Server error: %v\n", err)
+		log.Printf("Server error: %v\n", err)
 	}
 }
 
 // Register example resources.
-func registerExampleResources(s *server.Server) {
+func registerExampleResources(s *mcp.Server) {
 	// Register text resource.
 	textResource := &mcp.Resource{
 		URI:         "resource://example/text",
@@ -44,9 +43,9 @@ func registerExampleResources(s *server.Server) {
 	}
 	err := s.RegisterResource(textResource)
 	if err != nil {
-		fmt.Printf("Error registering text resource: %v\n", err)
+		log.Printf("Error registering text resource: %v\n", err)
 	} else {
-		fmt.Printf("Registered text resource: %s\n", textResource.Name)
+		log.Printf("Registered text resource: %s\n", textResource.Name)
 	}
 
 	// Register image resource.
@@ -58,14 +57,14 @@ func registerExampleResources(s *server.Server) {
 	}
 	err = s.RegisterResource(imageResource)
 	if err != nil {
-		fmt.Printf("Error registering image resource: %v\n", err)
+		log.Printf("Error registering image resource: %v\n", err)
 	} else {
-		fmt.Printf("Registered image resource: %s\n", imageResource.Name)
+		log.Printf("Registered image resource: %s\n", imageResource.Name)
 	}
 }
 
 // Register example prompts.
-func registerExamplePrompts(s *server.Server) {
+func registerExamplePrompts(s *mcp.Server) {
 	// Register basic prompt.
 	basicPrompt := &mcp.Prompt{
 		Name:        "basic-prompt",
@@ -80,9 +79,9 @@ func registerExamplePrompts(s *server.Server) {
 	}
 	err := s.RegisterPrompt(basicPrompt)
 	if err != nil {
-		fmt.Printf("Error registering basic prompt: %v\n", err)
+		log.Printf("Error registering basic prompt: %v\n", err)
 	} else {
-		fmt.Printf("Registered basic prompt: %s\n", basicPrompt.Name)
+		log.Printf("Registered basic prompt: %s\n", basicPrompt.Name)
 	}
 
 	// Register advanced prompt.
@@ -104,14 +103,14 @@ func registerExamplePrompts(s *server.Server) {
 	}
 	err = s.RegisterPrompt(advancedPrompt)
 	if err != nil {
-		fmt.Printf("Error registering advanced prompt: %v\n", err)
+		log.Printf("Error registering advanced prompt: %v\n", err)
 	} else {
-		fmt.Printf("Registered advanced prompt: %s\n", advancedPrompt.Name)
+		log.Printf("Registered advanced prompt: %s\n", advancedPrompt.Name)
 	}
 }
 
 // Register example tools.
-func registerExampleTools(s *server.Server) {
+func registerExampleTools(s *mcp.Server) {
 	// Register a simple greeting tool.
 	greetTool := mcp.NewTool("greet", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Extract name from parameters.
@@ -121,13 +120,14 @@ func registerExampleTools(s *server.Server) {
 		}
 
 		// Create response content.
-		return mcp.NewTextResult(fmt.Sprintf("Hello, %s! Welcome to the resource and prompt example server.", name)), nil
+		greeting := "Hello, " + name + "! Welcome to the resource and prompt example server."
+		return mcp.NewTextResult(greeting), nil
 	}, mcp.WithDescription("Greeting tool"))
 
 	err := s.RegisterTool(greetTool)
 	if err != nil {
-		fmt.Printf("Error registering greeting tool: %v\n", err)
+		log.Printf("Error registering greeting tool: %v\n", err)
 	} else {
-		fmt.Printf("Registered greeting tool: %s\n", greetTool.Name)
+		log.Printf("Registered greeting tool: %s\n", greetTool.Name)
 	}
 }

@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // NewGreetTool creates a simple greeting tool.
 func NewGreetTool() *mcp.Tool {
 	return mcp.NewTool("greet",
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Check if context is cancelled.
+			// Check if the context is cancelled.
 			select {
 			case <-ctx.Done():
 				return mcp.NewErrorResult("Request cancelled"), ctx.Err()
@@ -41,7 +41,7 @@ func NewGreetTool() *mcp.Tool {
 	)
 }
 
-// Add a more advanced tool example.
+// NewAdvancedGreetTool Add a more advanced tool example.
 func NewAdvancedGreetTool() *mcp.Tool {
 	return mcp.NewTool("advanced-greet",
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

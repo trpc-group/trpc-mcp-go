@@ -2,38 +2,36 @@ package main
 
 import (
 	"context"
+	"log"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/client"
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // handleNotifications is a simple notification handler example.
 func handleNotifications(notification *mcp.JSONRPCNotification) error {
-	log.Infof("Client received notification: Method=%s", notification.Method)
+	log.Printf("Client received notification: Method=%s", notification.Method)
 
 	// Handle different types of notifications.
 	switch notification.Method {
 	case "notifications/message":
 		level, _ := notification.Params.AdditionalFields["level"].(string)
 		data, _ := notification.Params.AdditionalFields["data"].(string)
-		log.Infof("Received log message: [%s] %s", level, data)
+		log.Printf("Received log message: [%s] %s", level, data)
 	case "notifications/progress":
 		progress, _ := notification.Params.AdditionalFields["progress"].(float64)
 		message, _ := notification.Params.AdditionalFields["message"].(string)
-		log.Infof("Received progress update: %.0f%% - %s", progress*100, message)
+		log.Printf("Received progress update: %.0f%% - %s", progress*100, message)
 	default:
-		log.Infof("Received other type of notification: %+v", notification.Params.AdditionalFields)
+		log.Printf("Received other type of notification: %+v", notification.Params.AdditionalFields)
 	}
 
 	return nil
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.DebugLevel)
-	log.Info("Starting Stateless SSE No GET SSE mode client...")
+	// Print startup message.
+	log.Printf("Starting Stateless SSE No GET SSE mode client...")
 
 	// Create context.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -46,7 +44,7 @@ func main() {
 	}
 
 	// Create client, connect to server.
-	mcpClient, err := client.NewClient("http://localhost:3002/mcp", clientInfo)
+	mcpClient, err := mcp.NewClient("http://localhost:3002/mcp", clientInfo)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 		return
@@ -54,37 +52,37 @@ func main() {
 	defer mcpClient.Close()
 
 	// Initialize client.
-	log.Info("Initializing client...")
+	log.Printf("Initializing client...")
 	initResp, err := mcpClient.Initialize(ctx)
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 		return
 	}
 
-	log.Infof("Initialization successful: Server=%s %s, Protocol=%s",
+	log.Printf("Initialization successful: Server=%s %s, Protocol=%s",
 		initResp.ServerInfo.Name, initResp.ServerInfo.Version, initResp.ProtocolVersion)
-	log.Infof("Server capabilities: %+v", initResp.Capabilities)
+	log.Printf("Server capabilities: %+v", initResp.Capabilities)
 
 	// Register notification handlers.
-	log.Info("Registering notification handlers...")
+	log.Printf("Registering notification handlers...")
 	mcpClient.RegisterNotificationHandler("notifications/message", handleNotifications)
 	mcpClient.RegisterNotificationHandler("notifications/progress", handleNotifications)
 
 	// Get available tools list.
-	log.Info("Listing tools...")
+	log.Printf("Listing tools...")
 	tools, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 		return
 	}
 
-	log.Infof("Server provides %d tools", len(tools.Tools))
+	log.Printf("Server provides %d tools", len(tools.Tools))
 	for _, tool := range tools.Tools {
-		log.Infof("- Tool: %s (%s)", tool.Name, tool.Description)
+		log.Printf("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
 	// Call simple greet tool first.
-	log.Info("\nCalling greet tool...")
+	log.Printf("\nCalling greet tool...")
 	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
 		"name": "Client user",
 	})
@@ -94,17 +92,17 @@ func main() {
 	}
 
 	// Show call result.
-	log.Info("Call result:")
+	log.Printf("Call result:")
 	for _, content := range callResult.Content {
 		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Infof("- Text: %s", textContent.Text)
+			log.Printf("- Text: %s", textContent.Text)
 		} else {
-			log.Infof("- Other type content: %+v", content)
+			log.Printf("- Other type content: %+v", content)
 		}
 	}
 
 	// Call multi-stage greeting tool (this will send notifications via SSE).
-	log.Info("\nCalling multi-stage-greeting tool...")
+	log.Printf("\nCalling multi-stage-greeting tool...")
 	multiStageResult, err := mcpClient.CallTool(ctx, "multi-stage-greeting", map[string]interface{}{
 		"name":   "SSE client user",
 		"stages": 5,
@@ -115,12 +113,12 @@ func main() {
 	}
 
 	// Show multi-stage call result.
-	log.Info("Multi-stage greeting result:")
+	log.Printf("Multi-stage greeting result:")
 	for _, content := range multiStageResult.Content {
 		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Infof("- Text: %s", textContent.Text)
+			log.Printf("- Text: %s", textContent.Text)
 		} else {
-			log.Infof("- Other type content: %+v", content)
+			log.Printf("- Other type content: %+v", content)
 		}
 	}
 
@@ -128,6 +126,6 @@ func main() {
 	mcpClient.UnregisterNotificationHandler("notifications/message")
 	mcpClient.UnregisterNotificationHandler("notifications/progress")
 
-	log.Info("\nClient example finished, exiting in 3 seconds...")
+	log.Printf("\nClient example finished, exiting in 3 seconds...")
 	time.Sleep(3 * time.Second)
 }

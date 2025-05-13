@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // MockResponder implements the schema.NotificationSender interface for testing.

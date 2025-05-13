@@ -10,9 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 	"trpc.group/trpc-go/trpc-mcp-go/e2e"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
 )
 
 // TestGetSSEBasic tests the basic GET SSE connection and notification functionality.
@@ -24,9 +23,9 @@ func TestGetSSEBasic(t *testing.T) {
 	// Create server that supports GET SSE.
 	serverURL, cleanup := e2e.StartSSETestServer(t,
 		e2e.WithTestTools(),
-		func(s *server.Server) {
+		func(s *mcp.Server) {
 			// Explicitly enable GET SSE.
-			server.WithGetSSEEnabled(true)(s)
+			mcp.WithGetSSEEnabled(true)(s)
 		},
 	)
 	defer cleanup()

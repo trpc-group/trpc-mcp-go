@@ -9,43 +9,41 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"trpc.group/trpc-go/trpc-mcp-go/client"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // ClientOption defines a client option function.
-type ClientOption func(*client.Client)
+type ClientOption func(*mcp.Client)
 
 // WithProtocolVersion option: set protocol version.
 func WithProtocolVersion(version string) ClientOption {
-	return func(c *client.Client) {
+	return func(c *mcp.Client) {
 		// Already applied at client creation, this is just a placeholder.
 	}
 }
 
 // WithGetSSEEnabled option: enable GET SSE connection.
 func WithGetSSEEnabled() ClientOption {
-	return func(c *client.Client) {
+	return func(c *mcp.Client) {
 		// Use WithGetSSEEnabled from the client package.
-		client.WithGetSSEEnabled(true)(c)
+		mcp.WithClientGetSSEEnabled(true)(c)
 	}
 }
 
 // WithLastEventID option: set Last-Event-ID for stream recovery.
 // Note: This only saves eventID in test helpers, actual usage requires passing via StreamOptions.
 func WithLastEventID(eventID string) ClientOption {
-	return func(c *client.Client) {
+	return func(c *mcp.Client) {
 		// No need to set here, will be used in ExecuteSSETestTool and similar methods.
 	}
 }
 
 // CreateTestClient creates a test client connected to the given URL.
-func CreateTestClient(t *testing.T, url string, opts ...ClientOption) *client.Client {
+func CreateTestClient(t *testing.T, url string, opts ...ClientOption) *mcp.Client {
 	t.Helper()
 
 	// Create client.
-	c, err := client.NewClient(url, mcp.Implementation{
+	c, err := mcp.NewClient(url, mcp.Implementation{
 		Name:    "E2E-Test-Client",
 		Version: "1.0.0",
 	})
@@ -63,7 +61,7 @@ func CreateTestClient(t *testing.T, url string, opts ...ClientOption) *client.Cl
 }
 
 // InitializeClient initializes the client and verifies success.
-func InitializeClient(t *testing.T, c *client.Client) {
+func InitializeClient(t *testing.T, c *mcp.Client) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -88,7 +86,7 @@ func InitializeClient(t *testing.T, c *client.Client) {
 }
 
 // ExecuteTestTool executes a test tool and verifies the result.
-func ExecuteTestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}) []mcp.Content {
+func ExecuteTestTool(t *testing.T, c *mcp.Client, toolName string, args map[string]interface{}) []mcp.Content {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -105,7 +103,7 @@ func ExecuteTestTool(t *testing.T, c *client.Client, toolName string, args map[s
 }
 
 // CleanupClient cleans up client resources.
-func CleanupClient(t *testing.T, c *client.Client) {
+func CleanupClient(t *testing.T, c *mcp.Client) {
 	t.Helper()
 
 	if c == nil {
@@ -132,11 +130,11 @@ func CleanupClient(t *testing.T, c *client.Client) {
 }
 
 // CreateSSETestClient creates a test client configured to use SSE.
-func CreateSSETestClient(t *testing.T, url string, opts ...ClientOption) *client.Client {
+func CreateSSETestClient(t *testing.T, url string, opts ...ClientOption) *mcp.Client {
 	t.Helper()
 
 	// Create client.
-	c, err := client.NewClient(url, mcp.Implementation{
+	c, err := mcp.NewClient(url, mcp.Implementation{
 		Name:    "E2E-SSE-Test-Client",
 		Version: "1.0.0",
 	})
@@ -154,14 +152,14 @@ func CreateSSETestClient(t *testing.T, url string, opts ...ClientOption) *client
 }
 
 // ExecuteSSETestTool executes a test tool and supports collecting notifications.
-func ExecuteSSETestTool(t *testing.T, c *client.Client, toolName string, args map[string]interface{}, collector *NotificationCollector) []mcp.Content {
+func ExecuteSSETestTool(t *testing.T, c *mcp.Client, toolName string, args map[string]interface{}, collector *NotificationCollector) []mcp.Content {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Create streamOptions.
-	streamOpts := &transport.StreamOptions{
+	streamOpts := &mcp.StreamOptions{
 		NotificationHandlers: collector.GetHandlers(),
 	}
 
@@ -197,9 +195,9 @@ func NewNotificationCollector() *NotificationCollector {
 }
 
 // GetHandlers returns the notification handler map.
-func (nc *NotificationCollector) GetHandlers() map[string]transport.NotificationHandler {
+func (nc *NotificationCollector) GetHandlers() map[string]mcp.NotificationHandler {
 	// Create handler map.
-	handlers := make(map[string]transport.NotificationHandler)
+	handlers := make(map[string]mcp.NotificationHandler)
 
 	// Progress notification handler
 	handlers["notifications/progress"] = func(n *mcp.JSONRPCNotification) error {
@@ -268,33 +266,33 @@ func (nc *NotificationCollector) AssertNotificationCount(t *testing.T, method st
 
 // GetUnderlyingTransport gets the underlying transport object from the client.
 // Note: This is a simplified implementation for test environment, cannot access underlying client transport directly. Returns nil and reports failure.
-func GetUnderlyingTransport(c *client.Client) (interface{}, bool) {
+func GetUnderlyingTransport(c *mcp.Client) (interface{}, bool) {
 	// Client does not expose underlying transport object
 	return nil, false
 }
 
 // CreateClient creates a client connection.
-func CreateClient(url string, enableGetSSE bool) (*client.Client, error) {
+func CreateClient(url string, enableGetSSE bool) (*mcp.Client, error) {
 	// Create client
-	c, err := client.NewClient(url, mcp.Implementation{
+	c, err := mcp.NewClient(url, mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
-	}, client.WithGetSSEEnabled(enableGetSSE))
+	}, mcp.WithClientGetSSEEnabled(enableGetSSE))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create MCP client: %v", err)
+		return nil, fmt.Errorf("failed to create MCP client: %v", err)
 	}
 
 	return c, nil
 }
 
 // CreateClientWithRequestMode creates a client connection with request mode.
-func CreateClientWithRequestMode(url string, mode string, enableGetSSE bool) (*client.Client, error) {
-	c, err := client.NewClient(url, mcp.Implementation{
+func CreateClientWithRequestMode(url string, mode string, enableGetSSE bool) (*mcp.Client, error) {
+	c, err := mcp.NewClient(url, mcp.Implementation{
 		Name:    "Test-Client",
 		Version: "1.0.0",
-	}, client.WithGetSSEEnabled(enableGetSSE))
+	}, mcp.WithClientGetSSEEnabled(enableGetSSE))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create MCP client: %v", err)
+		return nil, fmt.Errorf("failed to create MCP client: %v", err)
 	}
 
 	return c, nil

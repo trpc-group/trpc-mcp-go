@@ -10,17 +10,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
-	"trpc.group/trpc-go/trpc-mcp-go/transport"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // ServerOption defines a server option function.
-type ServerOption func(*server.Server)
+type ServerOption func(*mcp.Server)
 
 // WithTestTools option: register test tools.
 func WithTestTools() ServerOption {
-	return func(s *server.Server) {
+	return func(s *mcp.Server) {
 		// Register test tools.
 		RegisterTestTools(s)
 	}
@@ -28,14 +26,14 @@ func WithTestTools() ServerOption {
 
 // WithCustomPathPrefix option: set custom path prefix.
 func WithCustomPathPrefix(prefix string) ServerOption {
-	return func(s *server.Server) {
+	return func(s *mcp.Server) {
 		// Already applied at instantiation, this is just a placeholder.
 	}
 }
 
 // WithServerOptions option: set multiple server options.
-func WithServerOptions(opts ...server.ServerOption) ServerOption {
-	return func(s *server.Server) {
+func WithServerOptions(opts ...mcp.ServerOption) ServerOption {
+	return func(s *mcp.Server) {
 		for _, opt := range opts {
 			opt(s)
 		}
@@ -50,10 +48,10 @@ func StartTestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	pathPrefix := "/mcp"
 
 	// Instantiate server.
-	s := server.NewServer("", mcp.Implementation{
+	s := mcp.NewServer("", mcp.Implementation{
 		Name:    "E2E-Test-Server",
 		Version: "1.0.0",
-	}, server.WithPathPrefix(pathPrefix))
+	}, mcp.WithPathPrefix(pathPrefix))
 
 	// Apply options.
 	for _, opt := range opts {
@@ -83,18 +81,18 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	pathPrefix := "/mcp"
 
 	// Create session manager.
-	sessionManager := transport.NewSessionManager(3600)
+	sessionManager := mcp.NewSessionManager(3600)
 
 	// Instantiate server and enable SSE.
-	s := server.NewServer("", mcp.Implementation{
+	s := mcp.NewServer("", mcp.Implementation{
 		Name:    "E2E-SSE-Test-Server",
 		Version: "1.0.0",
 	},
-		server.WithPathPrefix(pathPrefix),
-		server.WithSessionManager(sessionManager),
-		server.WithSSEEnabled(true),           // Enable SSE.
-		server.WithGetSSEEnabled(true),        // Enable GET SSE.
-		server.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
+		mcp.WithPathPrefix(pathPrefix),
+		mcp.WithSessionManager(sessionManager),
+		mcp.WithSSEEnabled(true),           // Enable SSE.
+		mcp.WithGetSSEEnabled(true),        // Enable GET SSE.
+		mcp.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
 	)
 
 	// Apply options.
@@ -103,12 +101,10 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	}
 
 	// Create HTTP handler.
-	httpHandler := transport.NewHTTPServerHandler(
+	httpHandler := mcp.NewHTTPServerHandler(
 		s.MCPHandler(),
-		transport.WithSessionManager(sessionManager),
-		transport.WithServerSSEEnabled(true),
-		transport.WithGetSSEEnabled(true),
-		transport.WithServerDefaultResponseMode("sse"),
+		mcp.WithTransportSessionManager(sessionManager),
+		mcp.WithTransportGetSSEEnabled(true),
 	)
 
 	// Create custom mux for test routes.
@@ -138,7 +134,7 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 }
 
 // handleTestNotify handles the test endpoint for sending notifications.
-func handleTestNotify(w http.ResponseWriter, r *http.Request, httpHandler *transport.HTTPServerHandler) {
+func handleTestNotify(w http.ResponseWriter, r *http.Request, httpHandler *mcp.HTTPServerHandler) {
 	// Get target session ID.
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
@@ -165,14 +161,14 @@ func handleTestNotify(w http.ResponseWriter, r *http.Request, httpHandler *trans
 
 // StartLocalTestServer starts a server on a real port.
 // Suitable for tests that require real network communication.
-func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*server.Server, func()) {
+func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*mcp.Server, func()) {
 	t.Helper()
 
 	// Create server.
-	s := server.NewServer(addr, mcp.Implementation{
+	s := mcp.NewServer(addr, mcp.Implementation{
 		Name:    "E2E-Test-Server",
 		Version: "1.0.0",
-	}, server.WithPathPrefix("/mcp"))
+	}, mcp.WithPathPrefix("/mcp"))
 
 	// Apply options.
 	for _, opt := range opts {

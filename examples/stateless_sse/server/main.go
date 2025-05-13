@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/log"
-	"trpc.group/trpc-go/trpc-mcp-go/mcp"
-	"trpc.group/trpc-go/trpc-mcp-go/server"
+	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // handleMultiStageGreeting handles the multi-stage greeting tool and sends multiple notifications via SSE.
@@ -34,6 +33,7 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 	// Get notification sender from context.
 	notificationSender, hasNotificationSender := mcp.GetNotificationSender(ctx)
 	if !hasNotificationSender {
+		log.Printf("unable to get notification sender from context")
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				mcp.NewTextContent("Error: unable to get notification sender."),
@@ -45,7 +45,7 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 	sendProgress := func(progress float64, message string) {
 		err := notificationSender.SendProgress(progress, message)
 		if err != nil {
-			log.Errorf("Failed to send progress notification: %v", err)
+			log.Printf("Failed to send progress notification: %v", err)
 		}
 	}
 
@@ -53,7 +53,7 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 	sendLogMessage := func(level string, message string) {
 		err := notificationSender.SendLogMessage(level, message)
 		if err != nil {
-			log.Errorf("Failed to send log notification: %v", err)
+			log.Printf("Failed to send log notification: %v", err)
 		}
 	}
 
@@ -94,9 +94,7 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 }
 
 func main() {
-	// Set log level.
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting Stateless SSE No GET SSE mode MCP server...")
+	log.Printf("Starting Stateless SSE No GET SSE mode MCP server...")
 
 	// Create server info.
 	serverInfo := mcp.Implementation{
@@ -108,14 +106,14 @@ func main() {
 	// 1. Stateless mode
 	// 2. SSE enabled
 	// 3. GET SSE not supported
-	mcpServer := server.NewServer(
+	mcpServer := mcp.NewServer(
 		":3002", // Server address and port.
 		serverInfo,
-		server.WithPathPrefix("/mcp"),         // Set API path.
-		server.WithStatelessMode(true),        // Enable stateless mode.
-		server.WithSSEEnabled(true),           // Enable SSE.
-		server.WithGetSSEEnabled(false),       // Disable GET SSE.
-		server.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
+		mcp.WithPathPrefix("/mcp"),         // Set API path.
+		mcp.WithStatelessMode(true),        // Enable stateless mode.
+		mcp.WithSSEEnabled(true),           // Enable SSE.
+		mcp.WithGetSSEEnabled(false),       // Disable GET SSE.
+		mcp.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
 	)
 
 	// Register a simple greeting tool.
@@ -141,7 +139,7 @@ func main() {
 	if err := mcpServer.RegisterTool(greetTool); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
 	}
-	log.Info("Registered greet tool: greet")
+	log.Printf("Registered greet tool: greet")
 
 	// Register a multi-stage greeting tool (sends multiple notifications via SSE).
 	multiStageGreetingTool := mcp.NewTool("multi-stage-greeting",
@@ -157,7 +155,7 @@ func main() {
 	if err := mcpServer.RegisterTool(multiStageGreetingTool); err != nil {
 		log.Fatalf("Failed to register multi-stage greeting tool: %v", err)
 	}
-	log.Info("Registered multi-stage greeting tool: multi-stage-greeting")
+	log.Printf("Registered multi-stage greeting tool: multi-stage-greeting")
 
 	// Set up a simple health check route.
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -170,13 +168,13 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Infof("Received signal %v, exiting...", sig)
+		log.Printf("Received signal %v, exiting...", sig)
 		os.Exit(0)
 	}()
 
 	// Start server.
-	log.Infof("MCP server started at :3002, path /mcp")
-	log.Infof("This is a stateless, SSE response server - no session ID will be returned, SSE is used, GET SSE is not supported.")
+	log.Printf("MCP server started at :3002, path /mcp")
+	log.Printf("This is a stateless, SSE response server - no session ID will be returned, SSE is used, GET SSE is not supported.")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
