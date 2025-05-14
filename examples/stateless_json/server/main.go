@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greet tool handler.
@@ -34,24 +34,18 @@ func main() {
 	// Print startup message.
 	log.Printf("Starting Stateless JSON No GET SSE mode MCP server...")
 
-	// Create server info.
-	serverInfo := mcp.Implementation{
-		Name:    "Stateless-JSON-No-GETSSE-Server",
-		Version: "1.0.0",
-	}
-
 	// Create MCP server with the following configuration:
 	// 1. Stateless mode
 	// 2. Only return JSON responses (no SSE)
 	// 3. Does not support standalone GET SSE
 	mcpServer := mcp.NewServer(
-		":3001", // Server address and port.
-		serverInfo,
-		mcp.WithPathPrefix("/mcp"),          // Set API path.
-		mcp.WithStatelessMode(true),         // Enable stateless mode.
-		mcp.WithSSEEnabled(false),           // Disable SSE.
-		mcp.WithGetSSEEnabled(false),        // Disable GET SSE.
-		mcp.WithDefaultResponseMode("json"), // Set default response mode to JSON.
+		"Stateless-JSON-No-GETSSE-Server", // Server name
+		"1.0.0",                           // Server version
+		mcp.WithServerAddress(":3001"),    // Server address and port
+		mcp.WithPathPrefix("/mcp"),        // Set API path
+		mcp.WithStatelessMode(true),       // Enable stateless mode
+		mcp.WithPostSSEEnabled(false),     // Disable SSE
+		mcp.WithGetSSEEnabled(false),      // Disable GET SSE
 	)
 
 	// Register a greet tool.

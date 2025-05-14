@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 type ListToolsRequest struct {
@@ -190,7 +191,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 	// Type assertion to map
 	resultMap, ok := result.(map[string]interface{})
 	if !ok {
-		return nil, ErrInvalidToolListFormat
+		return nil, errors.ErrInvalidToolListFormat
 	}
 
 	// Create result object
@@ -204,7 +205,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 	// Parse tool list
 	toolsArray, ok := resultMap["tools"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("%w: tools field not found or invalid type", ErrInvalidToolListFormat)
+		return nil, fmt.Errorf("%w: tools field not found or invalid type", errors.ErrInvalidToolListFormat)
 	}
 
 	// Create a slice of Tool (not *Tool)
@@ -227,7 +228,7 @@ func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
 func parseToolItem(item interface{}) (*Tool, error) {
 	toolMap, ok := item.(map[string]interface{})
 	if !ok {
-		return nil, ErrInvalidToolFormat
+		return nil, errors.ErrInvalidToolFormat
 	}
 
 	// Create tool object

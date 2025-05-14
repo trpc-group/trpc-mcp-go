@@ -24,7 +24,6 @@ func main() {
 			Name:    "MCP-Go-Client",
 			Version: "1.0.0",
 		},
-		mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05),
 		mcp.WithClientLogger(mcp.GetDefaultLogger()),
 	) // End of NewClient
 	if err != nil {

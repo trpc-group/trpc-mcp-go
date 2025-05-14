@@ -7,24 +7,25 @@ import (
 	"net/http"
 	"sync"
 
-	// logger is injected, no need to import log package.
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
 // RequestHandler interface defines a component that handles requests
 type RequestHandler interface {
-	// Handle a request
-	HandleRequest(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error)
+	// HandleRequest handle a request
+	HandleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
-	// Handle a notification
-	HandleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
+	// HandleNotification handle a notification
+	HandleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error
 }
 
-// HTTPServerHandler implements an HTTP server handler
-type HTTPServerHandler struct {
+// httpServerHandler implements an HTTP server handler
+type httpServerHandler struct {
 	// Logger for this server handler.
 	logger Logger
 	// Session manager
-	sessionManager *SessionManager
+	sessionManager SessionManager
 
 	// Request handler
 	requestHandler RequestHandler
@@ -41,16 +42,19 @@ type HTTPServerHandler struct {
 	// Notification channel buffer size
 	notificationBufferSize int
 
+	// Whether POST SSE is enabled
+	enablePostSSE bool
+
 	// Whether GET SSE is enabled
 	enableGetSSE bool
 
 	// Session GET SSE connections mapping (each session ID maps to a GET SSE connection)
-	getSSEConnections     map[string]*GetSSEConnection
+	getSSEConnections     map[string]*getSSEConnection
 	getSSEConnectionsLock sync.RWMutex
 }
 
-// GetSSEConnection represents a GET SSE connection
-type GetSSEConnection struct {
+// getSSEConnection represents a GET SSE connection
+type getSSEConnection struct {
 	writer      http.ResponseWriter
 	flusher     http.Flusher
 	ctx         context.Context
@@ -64,17 +68,17 @@ type GetSSEConnection struct {
 	sseResponder *SSEResponder
 }
 
-// NewHTTPServerHandler creates an HTTP server handler
-func NewHTTPServerHandler(handler RequestHandler, options ...func(*HTTPServerHandler)) *HTTPServerHandler {
-	h := &HTTPServerHandler{
+// newHTTPServerHandler creates an HTTP server handler
+func newHTTPServerHandler(handler RequestHandler, options ...func(*httpServerHandler)) *httpServerHandler {
+	h := &httpServerHandler{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		requestHandler:         handler,
-		enableSession:          true,                  // Default: sessions enabled
-		isStateless:            false,                 // Default: stateful mode
-		responderFactory:       NewResponderFactory(), // Default: use JSON responses
-		notificationBufferSize: 10,                    // Default notification buffer size
-		enableGetSSE:           true,                  // Default: GET SSE enabled
-		getSSEConnections:      make(map[string]*GetSSEConnection),
+		enableSession:          true,  // Default: sessions enabled
+		isStateless:            false, // Default: stateful mode
+		notificationBufferSize: 10,    // Default notification buffer size
+		enablePostSSE:          true,  // Default: POST SSE enabled
+		enableGetSSE:           true,  // Default: GET SSE enabled
+		getSSEConnections:      make(map[string]*getSSEConnection),
 	}
 
 	// Apply options
@@ -89,8 +93,7 @@ func NewHTTPServerHandler(handler RequestHandler, options ...func(*HTTPServerHan
 
 	// After applying all options, ensure ResponderFactory uses correct stateless mode setting
 	h.responderFactory = NewResponderFactory(
-		WithResponderSSEEnabled(h.responderFactory.enableSSE),
-		WithResponderDefaultResponseMode(h.responderFactory.defaultMode),
+		WithResponderSSEEnabled(h.enablePostSSE),
 		WithFactoryStatelessMode(h.isStateless),
 	)
 
@@ -102,60 +105,53 @@ func NewHTTPServerHandler(handler RequestHandler, options ...func(*HTTPServerHan
 	return h
 }
 
-// WithTransportSessionManager sets the session manager.
-func WithTransportSessionManager(manager *SessionManager) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+// withTransportSessionManager sets the session manager.
+func withTransportSessionManager(manager SessionManager) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.sessionManager = manager
 	}
 }
 
-// WithServerTransportLogger sets the logger for HTTPServerHandler.
-func WithServerTransportLogger(logger Logger) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+// withServerTransportLogger sets the logger for httpServerHandler.
+func withServerTransportLogger(logger Logger) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.logger = logger
 	}
 }
 
-// WithoutTransportSession disables sessions
-func WithoutTransportSession() func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+// withoutTransportSession disables sessions
+func withoutTransportSession() func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.enableSession = false
 		h.sessionManager = nil
 	}
 }
 
-// WithServerSSEEnabled sets whether SSE responses are enabled
-func WithServerSSEEnabled(enabled bool) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
-		h.responderFactory = NewResponderFactory(WithResponderSSEEnabled(enabled))
+// withServerPOSTSSEEnabled sets whether SSE responses are enabled
+func withServerPOSTSSEEnabled(enabled bool) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.enablePostSSE = enabled
 	}
 }
 
-// WithServerDefaultResponseMode sets the default response mode
-func WithServerDefaultResponseMode(mode string) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
-		h.responderFactory = NewResponderFactory(WithResponderDefaultResponseMode(mode))
-	}
-}
-
-// WithTransportGetSSEEnabled sets whether GET SSE is enabled
-func WithTransportGetSSEEnabled(enabled bool) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+// withTransportGetSSEEnabled sets whether GET SSE is enabled
+func withTransportGetSSEEnabled(enabled bool) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.enableGetSSE = enabled
 	}
 }
 
-// WithNotificationBufferSize sets the notification buffer size
-func WithTransportNotificationBufferSize(size int) func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+// withTransportNotificationBufferSize sets the notification buffer size
+func withTransportNotificationBufferSize(size int) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.notificationBufferSize = size
 	}
 }
 
-// WithStatelessMode sets the server to stateless mode
+// withTransportStatelessMode sets the server to stateless mode
 // In stateless mode, the server does not generate persistent session IDs; each request uses a temporary session
-func WithTransportStatelessMode() func(*HTTPServerHandler) {
-	return func(h *HTTPServerHandler) {
+func withTransportStatelessMode() func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
 		h.isStateless = true
 		// In stateless mode, sessions are still enabled but use temporary sessions
 		h.enableSession = true
@@ -167,7 +163,7 @@ func WithTransportStatelessMode() func(*HTTPServerHandler) {
 }
 
 // ServeHTTP implements the http.Handler interface
-func (h *HTTPServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *httpServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// First check the HTTP method
 	switch r.Method {
 	case http.MethodPost:
@@ -194,7 +190,7 @@ type baseMessage struct {
 }
 
 // handlePost handles POST requests
-func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	var rawMessage json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
 		http.Error(w, ErrInvalidRequestBody.Error(), http.StatusBadRequest)
@@ -220,13 +216,13 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	}
 
 	// Get session
-	var session *Session
+	var session Session
 	if h.isStateless {
 		// Stateless mode: create a temporary session for each request.
 		session = NewSession()
 	} else if h.enableSession {
 		// Stateful mode
-		sessionIDHeader := r.Header.Get(SessionIDHeader)
+		sessionIDHeader := r.Header.Get(httputil.SessionIDHeader)
 		if sessionIDHeader != "" {
 			var ok bool
 			session, ok = h.sessionManager.GetSession(sessionIDHeader)
@@ -237,7 +233,7 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		} else if isInitialize {
 			// If it's an initialize request and no session ID header, create a new session
 			session = h.sessionManager.CreateSession()
-			h.logger.Infof("Created new session ID: %s for initialize request", session.ID)
+			h.logger.Infof("Created new session ID: %s for initialize request", session.GetID())
 		} else {
 			// Not an initialize request and no session ID header was provided.
 			// According to MCP spec, server SHOULD respond with 400 Bad Request.
@@ -268,19 +264,17 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 			}
 
 			// Set SSE response headers
-			w.Header().Set(ContentTypeHeader, ContentTypeSSE)
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Header().Set("Connection", "keep-alive")
+			sseutil.SetStandardHeaders(w)
 
 			// Only send session ID in non-stateless mode
 			if !h.isStateless && session != nil {
-				w.Header().Set(SessionIDHeader, session.ID)
+				w.Header().Set(httputil.SessionIDHeader, session.GetID())
 			}
 
 			// Create SSE notification sender, inject into request context
 			var sessionID string
 			if session != nil {
-				sessionID = session.ID
+				sessionID = session.GetID()
 			}
 			notificationSender := NewSSENotificationSender(w, flusher, sessionID)
 			reqCtx := WithNotificationSender(ctx, notificationSender)
@@ -386,9 +380,9 @@ func (h *HTTPServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 }
 
 // handleDelete handles DELETE requests
-func (h *HTTPServerHandler) handleDelete(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+func (h *httpServerHandler) handleDelete(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// Get session ID from session ID header
-	sessionID := r.Header.Get(SessionIDHeader)
+	sessionID := r.Header.Get(httputil.SessionIDHeader)
 	if sessionID == "" {
 		http.Error(w, "Missing session ID", http.StatusBadRequest)
 		return
@@ -415,7 +409,7 @@ func (h *HTTPServerHandler) handleDelete(ctx context.Context, w http.ResponseWri
 }
 
 // handleGet handles GET requests (for Server-Sent Events)
-func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// Check if GET SSE is enabled
 	if !h.enableGetSSE {
 		w.Header().Set("Allow", "POST, DELETE")
@@ -430,7 +424,7 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	}
 
 	// Check if there's a session ID
-	sessionID := r.Header.Get(SessionIDHeader)
+	sessionID := r.Header.Get(httputil.SessionIDHeader)
 	if sessionID == "" {
 		http.Error(w, "No session ID provided", http.StatusBadRequest)
 		return
@@ -451,10 +445,8 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	}
 
 	// Set SSE response headers
-	w.Header().Set(ContentTypeHeader, ContentTypeSSE)
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set(SessionIDHeader, session.ID)
+	sseutil.SetStandardHeaders(w)
+	w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
@@ -464,15 +456,15 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 
 	// Check if there's already a GET SSE connection
 	h.getSSEConnectionsLock.Lock()
-	existingConn, exists := h.getSSEConnections[session.ID]
+	existingConn, exists := h.getSSEConnections[session.GetID()]
 	if exists {
 		// Cancel existing connection
 		existingConn.cancelFunc()
 	}
 
 	// Create new GET SSE connection
-	lastEventID := r.Header.Get(LastEventIDHeader)
-	conn := &GetSSEConnection{
+	lastEventID := r.Header.Get(httputil.LastEventIDHeader)
+	conn := &getSSEConnection{
 		writer:       w,
 		flusher:      flusher,
 		ctx:          connCtx,
@@ -480,15 +472,15 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 		lastEventID:  lastEventID,
 		sseResponder: NewSSEResponder(),
 	}
-	h.getSSEConnections[session.ID] = conn
+	h.getSSEConnections[session.GetID()] = conn
 	h.getSSEConnectionsLock.Unlock()
 
 	// Record connection information
-	h.logger.Infof("Established GET SSE connection, session ID: %s", session.ID)
+	h.logger.Infof("Established GET SSE connection, session ID: %s", session.GetID())
 
 	// If there's Last-Event-ID, try to resume stream
 	if lastEventID != "" {
-		h.handleStreamResumption(connCtx, conn, session.ID)
+		h.handleStreamResumption(connCtx, conn, session.GetID())
 	}
 
 	// Wait for connection to close
@@ -496,13 +488,13 @@ func (h *HTTPServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 
 	// Clean up connection
 	h.getSSEConnectionsLock.Lock()
-	delete(h.getSSEConnections, session.ID)
+	delete(h.getSSEConnections, session.GetID())
 	h.getSSEConnectionsLock.Unlock()
-	h.logger.Infof("GET SSE connection closed, session ID: %s", session.ID)
+	h.logger.Infof("GET SSE connection closed, session ID: %s", session.GetID())
 }
 
 // Send notification through GET SSE
-func (h *HTTPServerHandler) sendNotificationToGetSSE(sessionID string, notification *JSONRPCNotification) error {
+func (h *httpServerHandler) sendNotificationToGetSSE(sessionID string, notification *JSONRPCNotification) error {
 	h.getSSEConnectionsLock.RLock()
 	conn, ok := h.getSSEConnections[sessionID]
 	h.getSSEConnectionsLock.RUnlock()
@@ -526,7 +518,7 @@ func (h *HTTPServerHandler) sendNotificationToGetSSE(sessionID string, notificat
 }
 
 // Handle SSE stream resumption
-func (h *HTTPServerHandler) handleStreamResumption(ctx context.Context, conn *GetSSEConnection, sessionID string) {
+func (h *httpServerHandler) handleStreamResumption(ctx context.Context, conn *getSSEConnection, sessionID string) {
 	// Get session
 	session, ok := h.sessionManager.GetSession(sessionID)
 	if !ok {
@@ -570,23 +562,19 @@ func (h *HTTPServerHandler) handleStreamResumption(ctx context.Context, conn *Ge
 	}
 }
 
-// sendEmptyResponse sends an empty response (retained for backward compatibility)
-func (h *HTTPServerHandler) sendEmptyResponse(w http.ResponseWriter, statusCode int, session *Session) {
-	// Only send session ID in non-stateless mode
+// sendEmptyResponse sends an empty response with the specified status code
+func (h *httpServerHandler) sendEmptyResponse(w http.ResponseWriter, statusCode int, session Session) {
 	if !h.isStateless && session != nil {
-		w.Header().Set(SessionIDHeader, session.ID)
+		w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	}
-
 	w.WriteHeader(statusCode)
 }
 
-// sendNotificationResponse sends notification response (directly returns 202 status code)
-func (h *HTTPServerHandler) sendNotificationResponse(w http.ResponseWriter, session *Session) {
-	// Only send session ID in non-stateless mode
+// sendNotificationResponse sends a 202 Accepted response for notifications
+func (h *httpServerHandler) sendNotificationResponse(w http.ResponseWriter, session Session) {
 	if !h.isStateless && session != nil {
-		w.Header().Set(SessionIDHeader, session.ID)
+		w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	}
-
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -597,13 +585,13 @@ type SessionEventNotifier interface {
 }
 
 // SendNotification sends notification to GET SSE connection
-func (h *HTTPServerHandler) SendNotification(sessionID string, notification *JSONRPCNotification) error {
+func (h *httpServerHandler) SendNotification(sessionID string, notification *JSONRPCNotification) error {
 	// Directly send notification through GET SSE, without distinguishing notification type
 	return h.sendNotificationToGetSSE(sessionID, notification)
 }
 
 // GetActiveSessions gets all active session IDs
-func (h *HTTPServerHandler) GetActiveSessions() []string {
+func (h *httpServerHandler) GetActiveSessions() []string {
 	if h.sessionManager == nil {
 		return []string{}
 	}
@@ -611,7 +599,7 @@ func (h *HTTPServerHandler) GetActiveSessions() []string {
 }
 
 // Clean up resources when session terminates
-func (h *HTTPServerHandler) cleanupSession(sessionID string) {
+func (h *httpServerHandler) cleanupSession(sessionID string) {
 	// Close GET SSE connection
 	h.getSSEConnectionsLock.Lock()
 	if conn, exists := h.getSSEConnections[sessionID]; exists {

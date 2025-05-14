@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 // ServerProvider interface defines components that can provide server instances
@@ -12,8 +14,8 @@ type ServerProvider interface {
 	WithContext(ctx context.Context) context.Context
 }
 
-// ToolManager is responsible for managing MCP tools
-type ToolManager struct {
+// toolManager is responsible for managing MCP tools
+type toolManager struct {
 	// Registered tools
 	tools map[string]*Tool
 
@@ -24,30 +26,30 @@ type ToolManager struct {
 	serverProvider ServerProvider
 }
 
-// NewToolManager creates a tool manager
-func NewToolManager() *ToolManager {
-	return &ToolManager{
+// newToolManager creates a tool manager
+func newToolManager() *toolManager {
+	return &toolManager{
 		tools: make(map[string]*Tool),
 	}
 }
 
 // WithServerProvider sets the server provider
-func (m *ToolManager) WithServerProvider(provider ServerProvider) *ToolManager {
+func (m *toolManager) WithServerProvider(provider ServerProvider) *toolManager {
 	m.serverProvider = provider
 	return m
 }
 
 // RegisterTool registers a tool
-func (m *ToolManager) RegisterTool(tool *Tool) error {
+func (m *toolManager) RegisterTool(tool *Tool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if tool.Name == "" {
-		return ErrEmptyToolName
+		return errors.ErrEmptyToolName
 	}
 
 	if _, exists := m.tools[tool.Name]; exists {
-		return fmt.Errorf("%w: %s", ErrToolAlreadyRegistered, tool.Name)
+		return fmt.Errorf("%w: %s", errors.ErrToolAlreadyRegistered, tool.Name)
 	}
 
 	m.tools[tool.Name] = tool
@@ -55,7 +57,7 @@ func (m *ToolManager) RegisterTool(tool *Tool) error {
 }
 
 // GetTool retrieves a tool by name
-func (m *ToolManager) GetTool(name string) (*Tool, bool) {
+func (m *toolManager) GetTool(name string) (*Tool, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -64,7 +66,7 @@ func (m *ToolManager) GetTool(name string) (*Tool, bool) {
 }
 
 // GetTools gets all registered tools
-func (m *ToolManager) GetTools(protocolVersion string) []*Tool {
+func (m *toolManager) GetTools(protocolVersion string) []*Tool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -77,7 +79,7 @@ func (m *ToolManager) GetTools(protocolVersion string) []*Tool {
 }
 
 // HandleListTools handles tools/list requests
-func (m *ToolManager) HandleListTools(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error) {
+func (m *toolManager) HandleListTools(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	// Get all tools
 	toolPtrs := m.GetTools("")
 
@@ -98,16 +100,16 @@ func (m *ToolManager) HandleListTools(ctx context.Context, req *JSONRPCRequest, 
 }
 
 // HandleCallTool handles tools/call requests
-func (m *ToolManager) HandleCallTool(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error) {
+func (m *toolManager) HandleCallTool(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, ErrMissingParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, ErrInvalidParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get tool name
@@ -119,7 +121,7 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *JSONRPCRequest, s
 	// Get tool
 	tool, ok := m.GetTool(toolName)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", ErrToolNotFound, toolName), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrToolNotFound, toolName), nil), nil
 	}
 
 	// Create tool call request
@@ -157,7 +159,7 @@ func (m *ToolManager) HandleCallTool(ctx context.Context, req *JSONRPCRequest, s
 	// Execute tool
 	result, err := tool.ExecuteFunc(ctx, toolReq)
 	if err != nil {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, fmt.Sprintf("%v: %v", ErrToolExecutionFailed, err), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, fmt.Sprintf("%v: %v", errors.ErrToolExecutionFailed, err), nil), nil
 	}
 
 	return result, nil

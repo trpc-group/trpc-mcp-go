@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // handleMultiStageGreeting handles the multi-stage greeting tool and sends multiple notifications via SSE.
@@ -96,24 +96,18 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 func main() {
 	log.Printf("Starting Stateless SSE No GET SSE mode MCP server...")
 
-	// Create server info.
-	serverInfo := mcp.Implementation{
-		Name:    "Stateless-SSE-No-GETSSE-Server",
-		Version: "1.0.0",
-	}
-
 	// Create MCP server with the following configuration:
 	// 1. Stateless mode
 	// 2. SSE enabled
 	// 3. GET SSE not supported
 	mcpServer := mcp.NewServer(
-		":3002", // Server address and port.
-		serverInfo,
-		mcp.WithPathPrefix("/mcp"),         // Set API path.
-		mcp.WithStatelessMode(true),        // Enable stateless mode.
-		mcp.WithSSEEnabled(true),           // Enable SSE.
-		mcp.WithGetSSEEnabled(false),       // Disable GET SSE.
-		mcp.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
+		"Stateless-SSE-No-GETSSE-Server", // Server name
+		"1.0.0",                          // Server version
+		mcp.WithServerAddress(":3002"),   // Server address and port
+		mcp.WithPathPrefix("/mcp"),       // Set API path
+		mcp.WithStatelessMode(true),      // Enable stateless mode
+		mcp.WithPostSSEEnabled(true),     // Enable SSE
+		mcp.WithGetSSEEnabled(false),     // Disable GET SSE
 	)
 
 	// Register a simple greeting tool.

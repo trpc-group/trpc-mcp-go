@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
-// ResourceManager manages resources
+// resourceManager manages resources
 //
 // Resource functionality follows these enabling mechanisms:
 // 1. By default, resource functionality is disabled
@@ -16,7 +18,7 @@ import (
 // 4. Clients can determine if the server supports resource functionality through the capabilities field in the initialization response
 //
 // This design simplifies API usage, eliminating the need for explicit configuration parameters to enable or disable resource functionality.
-type ResourceManager struct {
+type resourceManager struct {
 	// Resource mapping table
 	resources map[string]*Resource
 
@@ -33,12 +35,12 @@ type ResourceManager struct {
 	subMu sync.RWMutex
 }
 
-// NewResourceManager creates a new resource manager
+// newResourceManager creates a new resource manager
 //
 // Note: Simply creating a resource manager does not enable resource functionality,
 // it is only enabled when the first resource is added.
-func NewResourceManager() *ResourceManager {
-	return &ResourceManager{
+func newResourceManager() *resourceManager {
+	return &resourceManager{
 		resources:   make(map[string]*Resource),
 		templates:   make(map[string]*ResourceTemplate),
 		subscribers: make(map[string][]chan *JSONRPCNotification),
@@ -46,7 +48,7 @@ func NewResourceManager() *ResourceManager {
 }
 
 // RegisterResource registers a resource
-func (m *ResourceManager) RegisterResource(resource *Resource) error {
+func (m *resourceManager) RegisterResource(resource *Resource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -59,11 +61,11 @@ func (m *ResourceManager) RegisterResource(resource *Resource) error {
 	}
 
 	if resource.URI == "" {
-		return fmt.Errorf("resource URI cannot be empty")
+		return errors.ErrEmptyResourceURI
 	}
 
 	if _, exists := m.resources[resource.URI]; exists {
-		return fmt.Errorf("resource %s already exists", resource.URI)
+		return fmt.Errorf("%w: resource %s already exists", errors.ErrInvalidParams, resource.URI)
 	}
 
 	m.resources[resource.URI] = resource
@@ -71,7 +73,7 @@ func (m *ResourceManager) RegisterResource(resource *Resource) error {
 }
 
 // RegisterTemplate registers a resource template
-func (m *ResourceManager) RegisterTemplate(template *ResourceTemplate) error {
+func (m *resourceManager) RegisterTemplate(template *ResourceTemplate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -96,7 +98,7 @@ func (m *ResourceManager) RegisterTemplate(template *ResourceTemplate) error {
 }
 
 // GetResource retrieves a resource
-func (m *ResourceManager) GetResource(uri string) (*Resource, bool) {
+func (m *resourceManager) GetResource(uri string) (*Resource, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -105,7 +107,7 @@ func (m *ResourceManager) GetResource(uri string) (*Resource, bool) {
 }
 
 // GetResources retrieves all resources
-func (m *ResourceManager) GetResources() []*Resource {
+func (m *resourceManager) GetResources() []*Resource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -117,7 +119,7 @@ func (m *ResourceManager) GetResources() []*Resource {
 }
 
 // GetTemplates retrieves all resource templates
-func (m *ResourceManager) GetTemplates() []*ResourceTemplate {
+func (m *resourceManager) GetTemplates() []*ResourceTemplate {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -129,7 +131,7 @@ func (m *ResourceManager) GetTemplates() []*ResourceTemplate {
 }
 
 // Subscribe subscribes to resource updates
-func (m *ResourceManager) Subscribe(uri string) chan *JSONRPCNotification {
+func (m *resourceManager) Subscribe(uri string) chan *JSONRPCNotification {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -139,7 +141,7 @@ func (m *ResourceManager) Subscribe(uri string) chan *JSONRPCNotification {
 }
 
 // Unsubscribe cancels a subscription
-func (m *ResourceManager) Unsubscribe(uri string, ch chan *JSONRPCNotification) {
+func (m *resourceManager) Unsubscribe(uri string, ch chan *JSONRPCNotification) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -159,7 +161,7 @@ func (m *ResourceManager) Unsubscribe(uri string, ch chan *JSONRPCNotification) 
 }
 
 // NotifyUpdate notifies about resource updates
-func (m *ResourceManager) NotifyUpdate(uri string) {
+func (m *resourceManager) NotifyUpdate(uri string) {
 	m.subMu.RLock()
 	subs := m.subscribers[uri]
 	m.subMu.RUnlock()
@@ -186,7 +188,7 @@ func (m *ResourceManager) NotifyUpdate(uri string) {
 }
 
 // HandleListResources handles listing resources requests
-func (m *ResourceManager) HandleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *resourceManager) HandleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	resources := m.GetResources()
 
 	// Convert []*mcp.Resource to []mcp.Resource for the result
@@ -205,23 +207,23 @@ func (m *ResourceManager) HandleListResources(ctx context.Context, req *JSONRPCR
 }
 
 // HandleReadResource handles reading resource requests
-func (m *ResourceManager) HandleReadResource(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *resourceManager) HandleReadResource(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing resource URI", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Get resource
 	resource, exists := m.GetResource(uri)
 	if !exists {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri), nil), nil
 	}
 
 	// Create a dummy text content for now
@@ -243,7 +245,7 @@ func (m *ResourceManager) HandleReadResource(ctx context.Context, req *JSONRPCRe
 }
 
 // HandleListTemplates handles listing templates requests
-func (m *ResourceManager) HandleListTemplates(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *resourceManager) HandleListTemplates(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	templates := m.GetTemplates()
 
 	// Convert []*mcp.ResourceTemplate to []mcp.ResourceTemplate for the result
@@ -261,17 +263,17 @@ func (m *ResourceManager) HandleListTemplates(ctx context.Context, req *JSONRPCR
 }
 
 // HandleSubscribe handles subscription requests
-func (m *ResourceManager) HandleSubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *resourceManager) HandleSubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing resource URI", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if resource exists
@@ -293,17 +295,17 @@ func (m *ResourceManager) HandleSubscribe(ctx context.Context, req *JSONRPCReque
 }
 
 // HandleUnsubscribe handles unsubscription requests
-func (m *ResourceManager) HandleUnsubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *resourceManager) HandleUnsubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing resource URI", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Unsubscribe from resource updates

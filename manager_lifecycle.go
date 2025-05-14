@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	// logger is injected, no need to import log package.
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
-// LifecycleManager is responsible for managing the MCP protocol lifecycle
-type LifecycleManager struct {
+// lifecycleManager is responsible for managing the MCP protocol lifecycle
+type lifecycleManager struct {
 	// Logger for this lifecycle manager.
 	logger Logger
 	// Server information
@@ -27,25 +27,25 @@ type LifecycleManager struct {
 	sessionStates map[string]bool
 
 	// Tool manager reference
-	toolManager *ToolManager
+	toolManager *toolManager
 
 	// Resource manager reference
-	resourceManager *ResourceManager
+	resourceManager *resourceManager
 
 	// Prompt manager reference
-	promptManager *PromptManager
+	promptManager *promptManager
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
 }
 
-// NewLifecycleManager creates a lifecycle manager
-func NewLifecycleManager(serverInfo Implementation) *LifecycleManager {
-	return &LifecycleManager{
+// newLifecycleManager creates a lifecycle manager
+func newLifecycleManager(serverInfo Implementation) *lifecycleManager {
+	return &lifecycleManager{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		serverInfo:             serverInfo,
-		defaultProtocolVersion: ProtocolVersion_2024_11_05,           // Using 2024-11-05 version, according to MCP protocol specification
-		supportedVersions:      []string{ProtocolVersion_2024_11_05}, // Only supporting 2024-11-05 version
+		defaultProtocolVersion: ProtocolVersion_2025_03_26,
+		supportedVersions:      []string{ProtocolVersion_2024_11_05, ProtocolVersion_2025_03_26},
 		capabilities: map[string]interface{}{
 			"tools": map[string]interface{}{
 				"listChanged": true,
@@ -56,49 +56,49 @@ func NewLifecycleManager(serverInfo Implementation) *LifecycleManager {
 }
 
 // WithProtocolVersion sets the default protocol version
-func (m *LifecycleManager) WithProtocolVersion(version string) *LifecycleManager {
+func (m *lifecycleManager) WithProtocolVersion(version string) *lifecycleManager {
 	m.defaultProtocolVersion = version
 	return m
 }
 
 // WithSupportedVersions sets the supported protocol versions
-func (m *LifecycleManager) WithSupportedVersions(versions []string) *LifecycleManager {
+func (m *lifecycleManager) WithSupportedVersions(versions []string) *lifecycleManager {
 	m.supportedVersions = versions
 	return m
 }
 
 // WithCapabilities sets the capabilities
-func (m *LifecycleManager) WithCapabilities(capabilities map[string]interface{}) *LifecycleManager {
+func (m *lifecycleManager) WithCapabilities(capabilities map[string]interface{}) *lifecycleManager {
 	m.capabilities = capabilities
 	return m
 }
 
 // WithToolManager sets the tool manager
-func (m *LifecycleManager) WithToolManager(toolManager *ToolManager) *LifecycleManager {
+func (m *lifecycleManager) WithToolManager(toolManager *toolManager) *lifecycleManager {
 	m.toolManager = toolManager
 	return m
 }
 
 // WithResourceManager sets the resource manager
-func (m *LifecycleManager) WithResourceManager(resourceManager *ResourceManager) *LifecycleManager {
+func (m *lifecycleManager) WithResourceManager(resourceManager *resourceManager) *lifecycleManager {
 	m.resourceManager = resourceManager
 	return m
 }
 
 // WithPromptManager sets the prompt manager.
-func (m *LifecycleManager) WithPromptManager(promptManager *PromptManager) *LifecycleManager {
+func (m *lifecycleManager) WithPromptManager(promptManager *promptManager) *lifecycleManager {
 	m.promptManager = promptManager
 	return m
 }
 
-// WithClientTransportLogger sets the logger for LifecycleManager.
-func (m *LifecycleManager) WithLogger(logger Logger) *LifecycleManager {
+// WithClientTransportLogger sets the logger for lifecycleManager.
+func (m *lifecycleManager) WithLogger(logger Logger) *lifecycleManager {
 	m.logger = logger
 	return m
 }
 
 // updateCapabilities updates the server capability information
-func (m *LifecycleManager) updateCapabilities() {
+func (m *lifecycleManager) updateCapabilities() {
 	// Use map as an intermediate variable
 	capMap := map[string]interface{}{}
 
@@ -131,22 +131,22 @@ func (m *LifecycleManager) updateCapabilities() {
 }
 
 // HandleInitialize handles initialize requests
-func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error) {
+func (m *lifecycleManager) HandleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "parameters are empty", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get protocol version
 	protocolVersion, ok := paramsMap["protocolVersion"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing protocolVersion", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if protocol version is supported
@@ -173,7 +173,7 @@ func (m *LifecycleManager) HandleInitialize(ctx context.Context, req *JSONRPCReq
 	// If there is a session, mark its initialization state and save protocol version
 	if session != nil {
 		m.mu.Lock()
-		m.sessionStates[session.ID] = false // Initialization started but not completed
+		m.sessionStates[session.GetID()] = false // Initialization started but not completed
 		m.mu.Unlock()
 
 		// Save protocol version to session data
@@ -253,31 +253,36 @@ func convertToServerCapabilities(capMap map[string]interface{}) ServerCapabiliti
 }
 
 // HandleInitialized handles initialized notifications
-func (m *LifecycleManager) HandleInitialized(ctx context.Context, notification *JSONRPCNotification, session *Session) error {
-	// Mark session as initialized
-	if session != nil {
-		m.mu.Lock()
-		m.sessionStates[session.ID] = true
-		m.mu.Unlock()
-		m.logger.Infof("Session %s initialization completed", session.ID)
+func (m *lifecycleManager) HandleInitialized(ctx context.Context, notification *JSONRPCNotification, session Session) error {
+	if session == nil {
+		// Or handle as a global initialized event if applicable
+		return nil
 	}
-
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.sessionStates[session.GetID()]; !exists {
+		// This case should ideally not happen if HandleInitialize was called first for the session
+		return errors.ErrSessionNotInitialized // Session not found in states, wasn't being initialized
+	}
+	if m.sessionStates[session.GetID()] {
+		return errors.ErrSessionAlreadyInitialized
+	}
+	m.sessionStates[session.GetID()] = true
+	m.logger.Infof("Session %s initialized.", session.GetID())
 	return nil
 }
 
 // IsInitialized checks if a session is initialized
-func (m *LifecycleManager) IsInitialized(sessionID string) bool {
+func (m *lifecycleManager) IsInitialized(sessionID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	initialized, exists := m.sessionStates[sessionID]
-	return exists && initialized
+	return m.sessionStates[sessionID]
 }
 
 // OnSessionTerminated handles session termination events
-func (m *LifecycleManager) OnSessionTerminated(sessionID string) {
+func (m *lifecycleManager) OnSessionTerminated(sessionID string) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sessionStates, sessionID)
-	m.mu.Unlock()
-	m.logger.Infof("Session terminated and removed from lifecycle manager: %s", sessionID)
+	m.logger.Infof("Session %s terminated, removed initialization state.", sessionID)
 }

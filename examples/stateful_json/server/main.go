@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greeting tool handler function.
@@ -29,7 +29,7 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	if ok && session != nil {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server. Your session ID is: %s",
-			name, session.ID[:8]+"...")))
+			name, session.GetID()[:8]+"...")))
 	} else {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server, but session info could not be obtained.",
@@ -67,18 +67,12 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 
 	// Return result.
 	return mcp.NewTextResult(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-		count, session.ID[:8]+"...")), nil
+		count, session.GetID()[:8]+"...")), nil
 }
 
 func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful JSON No GET SSE mode MCP server...")
-
-	// Create server info.
-	serverInfo := mcp.Implementation{
-		Name:    "Stateful-JSON-Server",
-		Version: "1.0.0",
-	}
 
 	// Create session manager (valid for 1 hour).
 	sessionManager := mcp.NewSessionManager(3600)
@@ -88,13 +82,13 @@ func main() {
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. GET SSE is not supported
 	mcpServer := mcp.NewServer(
-		":3003", // Server address and port
-		serverInfo,
+		"Stateful-JSON-Server",                 // Server name
+		"1.0.0",                                // Server version
+		mcp.WithServerAddress(":3003"),         // Server address and port
 		mcp.WithPathPrefix("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithSSEEnabled(false),              // Disable SSE
+		mcp.WithPostSSEEnabled(false),          // Disable SSE
 		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
-		mcp.WithDefaultResponseMode("json"),    // Set default response mode to JSON
 	)
 
 	// Register a greeting tool.

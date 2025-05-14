@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
 // StreamableHTTPClientTransport implements an HTTP-based MCP transport
@@ -149,17 +151,17 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 	}
 
 	// Set request headers - accept both SSE and JSON responses
-	httpReq.Header.Set(ContentTypeHeader, ContentTypeJSON)
-	httpReq.Header.Set(AcceptHeader, ContentTypeJSON+", "+ContentTypeSSE)
+	httpReq.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
+	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
 	if t.sessionID != "" && !t.isStatelessMode {
-		httpReq.Header.Set(SessionIDHeader, t.sessionID)
+		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	}
 
 	// If LastEventID is provided, attach it to the request
 	if options != nil && options.LastEventID != "" {
-		httpReq.Header.Set(LastEventIDHeader, options.LastEventID)
+		httpReq.Header.Set(httputil.LastEventIDHeader, options.LastEventID)
 	} else if t.lastEventID != "" {
-		httpReq.Header.Set(LastEventIDHeader, t.lastEventID)
+		httpReq.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
 
 	// Send request using the handler
@@ -169,7 +171,7 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 	}
 
 	// Handle session ID
-	if sessionID := httpResp.Header.Get(SessionIDHeader); sessionID != "" {
+	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); sessionID != "" {
 		t.sessionID = sessionID
 		t.isStatelessMode = false
 	} else if req.Method == MethodInitialize && !t.isStatelessMode {
@@ -179,8 +181,8 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 	}
 
 	// Check content type
-	contentType := httpResp.Header.Get(ContentTypeHeader)
-	if strings.Contains(contentType, ContentTypeSSE) {
+	contentType := httpResp.Header.Get(httputil.ContentTypeHeader)
+	if strings.Contains(contentType, httputil.ContentTypeSSE) {
 		// Handle response as SSE
 		return t.handleSSEResponse(ctx, httpResp, req.ID, options)
 	}
@@ -276,7 +278,6 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 			// Process event ID
 			if strings.HasPrefix(line, "id:") {
 				t.lastEventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-				t.logger.Infof("Received event ID: %s", t.lastEventID)
 				continue
 			}
 
@@ -312,7 +313,6 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 							resultRaw := json.RawMessage(resultBytes)
 							rawResult = &resultRaw
 							resultReceived = true
-							t.logger.Infof("Received matching response for ID: %v", reqID)
 
 							// If there are no other handlers, we can return early
 							if len(handlers) == 0 {
@@ -371,10 +371,10 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 	}
 
 	// Set request headers
-	httpReq.Header.Set(ContentTypeHeader, ContentTypeJSON)
-	httpReq.Header.Set(AcceptHeader, ContentTypeJSON)
+	httpReq.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
+	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON)
 	if t.sessionID != "" {
-		httpReq.Header.Set(SessionIDHeader, t.sessionID)
+		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	}
 
 	// Send request
@@ -385,7 +385,7 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 	defer httpResp.Body.Close()
 
 	// Handle session ID
-	if sessionID := httpResp.Header.Get(SessionIDHeader); sessionID != "" {
+	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); sessionID != "" {
 		t.sessionID = sessionID
 	}
 
@@ -493,10 +493,10 @@ func (t *StreamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	}
 
 	// Set necessary headers
-	req.Header.Set(AcceptHeader, ContentTypeSSE)
-	req.Header.Set(SessionIDHeader, t.sessionID)
+	req.Header.Set(httputil.AcceptHeader, httputil.ContentTypeSSE)
+	req.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	if t.lastEventID != "" {
-		req.Header.Set(LastEventIDHeader, t.lastEventID)
+		req.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
 
 	t.logger.Infof("Attempting to establish GET SSE connection, session ID: %s", t.sessionID)
@@ -621,7 +621,7 @@ func (t *StreamableHTTPClientTransport) TerminateSession(ctx context.Context) er
 
 	// Set session ID header
 	if t.sessionID != "" {
-		httpReq.Header.Set(SessionIDHeader, t.sessionID)
+		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	} else {
 		return fmt.Errorf("no active session")
 	}

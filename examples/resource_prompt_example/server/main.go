@@ -5,15 +5,16 @@ import (
 	"log"
 	"net/http"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
 	// Create server.
-	mcpServer := mcp.NewServer(":3000", mcp.Implementation{
-		Name:    "Resource-Prompt-Example",
-		Version: "0.1.0",
-	})
+	mcpServer := mcp.NewServer(
+		"Resource-Prompt-Example",      // Server name
+		"0.1.0",                        // Server version
+		mcp.WithServerAddress(":3000"), // Server address
+	)
 
 	// Register resources.
 	registerExampleResources(mcpServer)

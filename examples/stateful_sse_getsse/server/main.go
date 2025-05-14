@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // ChatRoom represents a chat room.
@@ -143,7 +143,7 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the complete MCP server. Your session ID is: %s",
-				name, session.ID[:8]+"...")),
+				name, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -182,7 +182,7 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-				count, session.ID[:8]+"...")),
+				count, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -276,7 +276,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Processing completed! Executed %d steps, each step delay %d milliseconds. (Session ID: %s)",
-				steps, delayMs, session.ID[:8]+"...")),
+				steps, delayMs, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -313,7 +313,7 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent in %d seconds. (Session ID: %s)",
-				delaySeconds, session.ID[:8]+"...")),
+				delaySeconds, session.GetID()[:8]+"...")),
 		},
 	}
 
@@ -321,20 +321,20 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	go func() {
 		time.Sleep(time.Duration(delaySeconds) * time.Second)
 
-		err := mcpServer.SendNotification(session.ID, "notifications/message", map[string]interface{}{
+		err := mcpServer.SendNotification(session.GetID(), "notifications/message", map[string]interface{}{
 			"level": "info",
 			"data": map[string]interface{}{
 				"type":      "test_notification",
 				"message":   message,
 				"timestamp": time.Now().Format(time.RFC3339),
-				"sessionId": session.ID,
+				"sessionId": session.GetID(),
 			},
 		})
 
 		if err != nil {
 			log.Printf("Send notification failed: %v", err)
 		} else {
-			log.Printf("Notification sent to session %s", session.ID)
+			log.Printf("Notification sent to session %s", session.GetID())
 		}
 	}()
 
@@ -362,7 +362,7 @@ func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	}
 
 	// Add user to chat room
-	globalChatRoom.AddUser(session.ID, userName)
+	globalChatRoom.AddUser(session.GetID(), userName)
 
 	// Broadcast user join message
 	broadcastSystemMessage(fmt.Sprintf("%s joined the chat room", userName))
@@ -407,7 +407,7 @@ func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	}
 
 	// Get username
-	userName, ok := globalChatRoom.GetUserName(session.ID)
+	userName, ok := globalChatRoom.GetUserName(session.GetID())
 	if !ok {
 		// Try to get username from session
 		userNameData, exists := session.GetData("chatUserName")
@@ -415,7 +415,7 @@ func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 			if userNameStr, ok := userNameData.(string); ok {
 				userName = userNameStr
 				// Re-add to chat room
-				globalChatRoom.AddUser(session.ID, userName)
+				globalChatRoom.AddUser(session.GetID(), userName)
 			}
 		}
 	}
@@ -505,12 +505,6 @@ func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful SSE+GET SSE mode MCP server...")
 
-	// Create server information
-	serverInfo := mcp.Implementation{
-		Name:    "Stateful-SSE-GETSSE-Server",
-		Version: "1.0.0",
-	}
-
 	// Create session manager (valid for 1 hour)
 	sessionManager := mcp.NewSessionManager(3600)
 
@@ -519,13 +513,13 @@ func main() {
 	// 2. Use SSE response (streaming)
 	// 3. Support independent GET SSE
 	mcpServer = mcp.NewServer(
-		":3006", // Server address and port
-		serverInfo,
+		"Stateful-SSE-GETSSE-Server",           // Server name
+		"1.0.0",                                // Server version
+		mcp.WithServerAddress(":3006"),         // Server address and port
 		mcp.WithPathPrefix("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithSSEEnabled(true),               // Enable SSE
+		mcp.WithPostSSEEnabled(true),           // Enable SSE
 		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
-		mcp.WithDefaultResponseMode("sse"),     // Set default response mode to SSE
 	)
 
 	// Register a greeting tool
@@ -611,7 +605,12 @@ func main() {
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			// Use new API to get active session list
-			sessions := mcpServer.HTTPHandler().(*mcp.HTTPServerHandler).GetActiveSessions()
+			sessions, err := mcpServer.GetActiveSessions()
+			if err != nil {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				fmt.Fprintf(w, "Error getting active sessions: %v\n", err)
+				return
+			}
 
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Session manager status: active\n")

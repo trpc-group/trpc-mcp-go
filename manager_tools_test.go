@@ -45,7 +45,7 @@ func NewMockTool(name, description string, toolSchema map[string]interface{}) *T
 
 func TestNewToolManager(t *testing.T) {
 	// Create tool manager
-	manager := NewToolManager()
+	manager := newToolManager()
 
 	// Verify object created successfully
 	assert.NotNil(t, manager)
@@ -54,7 +54,7 @@ func TestNewToolManager(t *testing.T) {
 
 func TestToolManager_RegisterTool(t *testing.T) {
 	// Create tool manager
-	manager := NewToolManager()
+	manager := newToolManager()
 
 	// Create mock tools
 	tool1 := NewMockTool("test-tool-1", "Test Tool 1", map[string]interface{}{
@@ -88,7 +88,7 @@ func TestToolManager_RegisterTool(t *testing.T) {
 
 func TestToolManager_GetTool(t *testing.T) {
 	// Create tool manager
-	manager := NewToolManager()
+	manager := newToolManager()
 
 	// Create and register tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
@@ -109,7 +109,7 @@ func TestToolManager_GetTool(t *testing.T) {
 
 func TestToolManager_GetTools(t *testing.T) {
 	// Create tool manager
-	manager := NewToolManager()
+	manager := newToolManager()
 
 	// Test empty list
 	tools := manager.GetTools("")
@@ -153,7 +153,7 @@ func TestToolManager_GetTools(t *testing.T) {
 
 func TestToolManager_HandleCallTool(t *testing.T) {
 	// Create tool manager
-	manager := NewToolManager()
+	manager := newToolManager()
 
 	// Create and register tool
 	tool := NewMockTool("test-exec-tool", "Test Execution Tool", map[string]interface{}{})

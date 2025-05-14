@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
 // JSONResponder implements the JSON response handler
@@ -35,11 +37,11 @@ func WithJSONStatelessMode(isStateless bool) func(*JSONResponder) {
 }
 
 // Respond implements the Responder interface
-func (r *JSONResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session *Session) error {
+func (r *JSONResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
 	// Set response headers
-	w.Header().Set(ContentTypeHeader, ContentTypeJSON)
+	w.Header().Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
 	if !r.isStateless && session != nil {
-		w.Header().Set(SessionIDHeader, session.ID)
+		w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	}
 
 	// Set status code
@@ -59,7 +61,7 @@ func (r *JSONResponder) Respond(ctx context.Context, w http.ResponseWriter, req 
 
 // SupportsContentType checks if the specified content type is supported
 func (r *JSONResponder) SupportsContentType(accepts []string) bool {
-	return containsContentType(accepts, ContentTypeJSON)
+	return httputil.ContainsContentType(accepts, httputil.ContentTypeJSON)
 }
 
 // ContainsRequest determines if the request might contain a request (not a notification)

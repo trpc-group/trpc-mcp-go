@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Callback function for handling the greet tool.
@@ -34,10 +34,10 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	// Return greeting message.
-	log.Printf("Hello, %s! (Session ID: %s)", name, session.ID[:8]+"...")
+	log.Printf("Hello, %s! (Session ID: %s)", name, session.GetID()[:8]+"...")
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Hello, %s! (Session ID: %s)", name, session.ID[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf("Hello, %s! (Session ID: %s)", name, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -74,10 +74,10 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	session.SetData("counter", count)
 
 	// Return result.
-	log.Printf("Counter current value: %d (Session ID: %s)", count, session.ID[:8]+"...")
+	log.Printf("Counter current value: %d (Session ID: %s)", count, session.GetID()[:8]+"...")
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)", count, session.ID[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)", count, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -156,10 +156,10 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	}
 
 	// Final return result.
-	log.Printf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.ID[:8]+"...")
+	log.Printf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.GetID()[:8]+"...")
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.ID[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -167,12 +167,6 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful SSE No GET SSE mode MCP server...")
-
-	// Create server info.
-	serverInfo := mcp.Implementation{
-		Name:    "Stateful-SSE-No-GETSSE-Server",
-		Version: "1.0.0",
-	}
 
 	// Create session manager (valid for 1 hour).
 	sessionManager := mcp.NewSessionManager(3600)
@@ -182,13 +176,13 @@ func main() {
 	// 2. Use SSE response (streaming)
 	// 3. Do not support independent GET SSE
 	mcpServer := mcp.NewServer(
-		":3005", // Server address and port
-		serverInfo,
+		"Stateful-SSE-No-GETSSE-Server",        // Server name
+		"1.0.0",                                // Server version
+		mcp.WithServerAddress(":3005"),         // Server address and port
 		mcp.WithPathPrefix("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithSSEEnabled(true),               // Enable SSE
+		mcp.WithPostSSEEnabled(true),           // Enable SSE
 		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
-		mcp.WithDefaultResponseMode("sse"),     // Set default response mode to SSE
 	)
 
 	// Register a greeting tool.

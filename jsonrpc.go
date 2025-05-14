@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 // Constants definition
@@ -150,12 +152,12 @@ func ParseJSONRPCMessageType(data []byte) (JSONRPCMessageType, error) {
 	// First try to parse as a generic map to determine message type
 	var message map[string]interface{}
 	if err := json.Unmarshal(data, &message); err != nil {
-		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: %v", ErrParseJSONRPC, err)
+		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: %v", errors.ErrParseJSONRPC, err)
 	}
 
 	// Check JSON-RPC version
 	if version, ok := message["jsonrpc"].(string); !ok || version != JSONRPCVersion {
-		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: invalid or missing jsonrpc version", ErrInvalidJSONRPCFormat)
+		return JSONRPCMessageTypeUnknown, fmt.Errorf("%w: invalid or missing jsonrpc version", errors.ErrInvalidJSONRPCFormat)
 	}
 
 	// Determine message type
@@ -170,7 +172,7 @@ func ParseJSONRPCMessageType(data []byte) (JSONRPCMessageType, error) {
 		return JSONRPCMessageTypeNotification, nil
 	}
 
-	return JSONRPCMessageTypeUnknown, ErrInvalidJSONRPCFormat
+	return JSONRPCMessageTypeUnknown, errors.ErrInvalidJSONRPCFormat
 }
 
 // ParseJSONRPCMessage parses any type of JSON-RPC message
@@ -186,33 +188,33 @@ func ParseJSONRPCMessage(data []byte) (interface{}, JSONRPCMessageType, error) {
 	case JSONRPCMessageTypeResponse:
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(data, &resp); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCResponse, err)
+			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
 		}
 		return &resp, msgType, nil
 
 	case JSONRPCMessageTypeError:
 		var errResp JSONRPCError
 		if err := json.Unmarshal(data, &errResp); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCResponse, err)
+			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
 		}
 		return &errResp, msgType, nil
 
 	case JSONRPCMessageTypeNotification:
 		var notification JSONRPCNotification
 		if err := json.Unmarshal(data, &notification); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCFormat, err)
+			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCFormat, err)
 		}
 		return &notification, msgType, nil
 
 	case JSONRPCMessageTypeRequest:
 		var req JSONRPCRequest
 		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", ErrInvalidJSONRPCRequest, err)
+			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCRequest, err)
 		}
 		return &req, msgType, nil
 
 	default:
-		return nil, msgType, ErrInvalidJSONRPCFormat
+		return nil, msgType, errors.ErrInvalidJSONRPCFormat
 	}
 }
 
@@ -248,27 +250,34 @@ func ParseJSONRequest(body io.ReadCloser, request *JSONRPCRequest) error {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
 
-	// Parse JSON-RPC request
+	// Unmarshal JSON request
 	if err := json.Unmarshal(requestBody, request); err != nil {
-		return fmt.Errorf("failed to parse JSON request: %w", err)
+		return fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCRequest, err)
+	}
+
+	// Validate request
+	if request.JSONRPC != JSONRPCVersion {
+		return fmt.Errorf("%w: invalid jsonrpc version %s", errors.ErrInvalidJSONRPCRequest, request.JSONRPC)
+	}
+	if request.Method == "" {
+		return fmt.Errorf("%w: missing method", errors.ErrInvalidJSONRPCRequest)
 	}
 
 	return nil
 }
 
-// ParseJSONParams parses JSON-RPC params from a generic map
+// ParseJSONParams parses JSON-RPC parameters
 func ParseJSONParams(rawParams interface{}, params interface{}) error {
-	// Convert generic params to JSON
-	jsonBytes, err := json.Marshal(rawParams)
+	if rawParams == nil {
+		return errors.ErrInvalidJSONRPCParams // Or a more specific error like "missing params"
+	}
+	paramsData, err := json.Marshal(rawParams)
 	if err != nil {
-		return fmt.Errorf("failed to serialize params: %w", err)
+		return fmt.Errorf("failed to marshal raw params: %w", err)
 	}
-
-	// Parse into specific structure
-	if err := json.Unmarshal(jsonBytes, params); err != nil {
-		return fmt.Errorf("failed to parse params: %w", err)
+	if err := json.Unmarshal(paramsData, params); err != nil {
+		return fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCParams, err)
 	}
-
 	return nil
 }
 

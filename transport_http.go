@@ -7,17 +7,6 @@ import (
 	"net/http"
 )
 
-// HTTP Header constants
-const (
-	ContentTypeHeader = "Content-Type"
-	AcceptHeader      = "Accept"
-	SessionIDHeader   = "Mcp-Session-Id"
-	LastEventIDHeader = "Last-Event-ID"
-
-	ContentTypeJSON = "application/json"
-	ContentTypeSSE  = "text/event-stream"
-)
-
 // HTTPReqHandler is a custom HTTP request handler interface
 type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)

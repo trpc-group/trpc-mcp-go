@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
 // SSENotificationSender implements the SSE notification sender
@@ -16,6 +18,9 @@ type SSENotificationSender struct {
 
 	// Session ID
 	sessionID string
+
+	// SSE utility writer
+	sseWriter *sseutil.Writer
 }
 
 // NewSSENotificationSender creates an SSE notification sender
@@ -24,6 +29,7 @@ func NewSSENotificationSender(w http.ResponseWriter, f http.Flusher, sessionID s
 		writer:    w,
 		flusher:   f,
 		sessionID: sessionID,
+		sseWriter: sseutil.NewWriter(),
 	}
 }
 
@@ -80,11 +86,12 @@ func (s *SSENotificationSender) SendCustomNotification(method string, params map
 		return fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
-	// Send SSE event
-	fmt.Fprintf(s.writer, "event: message\ndata: %s\n\n", data)
-	s.flusher.Flush()
-
-	return nil
+	// Send SSE event using sseutil.Writer instead of direct fmt.Fprintf
+	eventID := s.sseWriter.GenerateEventID()
+	return s.sseWriter.WriteEvent(s.writer, s.flusher, sseutil.Event{
+		ID:   eventID,
+		Data: data,
+	})
 }
 
 // SendNotification sends a custom notification
@@ -98,11 +105,12 @@ func (s *SSENotificationSender) SendNotification(notification *Notification) err
 		return fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
-	// Send SSE event
-	fmt.Fprintf(s.writer, "event: message\ndata: %s\n\n", data)
-	s.flusher.Flush()
-
-	return nil
+	// Send SSE event using sseutil.Writer instead of direct fmt.Fprintf
+	eventID := s.sseWriter.GenerateEventID()
+	return s.sseWriter.WriteEvent(s.writer, s.flusher, sseutil.Event{
+		ID:   eventID,
+		Data: data,
+	})
 }
 
 // NoopNotificationSender implements a no-operation notification sender

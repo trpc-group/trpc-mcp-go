@@ -5,27 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync/atomic"
-	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
 // SSEResponder implements the SSE response handler
 type SSEResponder struct {
-	// Current event ID
+	// Current event ID (Note: this field seems unused, consider removal if truly not needed for other logic)
 	eventID string
 
 	// Whether to use stateless mode
 	isStateless bool
 
-	// Event ID counter
-	eventCounter uint64
+	// SSE utility writer
+	sseWriter *sseutil.Writer
 }
 
 // NewSSEResponder creates a new SSE response handler
 func NewSSEResponder(options ...func(*SSEResponder)) *SSEResponder {
 	responder := &SSEResponder{
-		eventCounter: 0,
-		isStateless:  false, // Default to stateful mode
+		isStateless: false, // Default to stateful mode
+		sseWriter:   sseutil.NewWriter(),
 	}
 
 	// Apply options
@@ -53,24 +54,20 @@ func WithEventID(eventID string) func(*SSEResponder) {
 }
 
 // Respond sends an SSE response
-func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session *Session) error {
+func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
 	// Check if streaming is supported
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return ErrStreamingNotSupported
 	}
 
-	// Set SSE response headers
-	w.Header().Set(ContentTypeHeader, ContentTypeSSE)
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// Set session ID only in stateful mode
+	// Set standard SSE headers + MCP specific session header
+	sseutil.SetStandardHeaders(w)
 	if !r.isStateless && session != nil {
-		w.Header().Set(SessionIDHeader, session.ID)
+		w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	}
 
-	// If response is nil (notification response), return 202 Accepted
+	// If response is nil (e.g. for a notification that expects 202), return 202 Accepted
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
 		return nil
@@ -83,20 +80,14 @@ func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *
 	}
 
 	// Send SSE event
-	eventID := r.nextEventID()
-	data := string(respBytes)
+	eventID := r.sseWriter.GenerateEventID()
 
-	// Write event
-	fmt.Fprintf(w, "id: %s\n", eventID)
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	flusher.Flush()
-
-	return nil
+	return r.sseWriter.WriteEvent(w, flusher, sseutil.Event{ID: eventID, Data: respBytes})
 }
 
 // SupportsContentType checks if the specified content type is supported
 func (r *SSEResponder) SupportsContentType(accepts []string) bool {
-	return containsContentType(accepts, ContentTypeSSE)
+	return httputil.ContainsContentType(accepts, httputil.ContentTypeSSE)
 }
 
 // ContainsRequest determines if the request might contain a request (not a notification)
@@ -105,9 +96,8 @@ func (r *SSEResponder) ContainsRequest(body []byte) bool {
 	return true
 }
 
-// Note: SendResponse method has been removed, its functionality is integrated into the Respond method
-
 // SendNotification sends a notification event
+// Note: Standard SSE headers should be set by the caller (e.g. handleGet in httpServerHandler) if this is used for GET SSE streams.
 func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
 	// Check if it's a response type, which should be sent using the Respond method
 	if _, ok := notification.(*JSONRPCResponse); ok {
@@ -115,24 +105,21 @@ func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flus
 	}
 
 	// Generate event ID
-	eventID := r.nextEventID()
+	eventID := r.sseWriter.GenerateEventID()
 
-	// Ensure notification object is a core.Notification type with correct jsonrpc field
-	var notifObj *JSONRPCNotification
+	// Ensure notification object is a mcp.Notification type with correct jsonrpc field
 	var notifBytes []byte
 	var err error
 
-	// Try to convert to core.Notification to validate format
+	// Try to convert to mcp.Notification to validate format and set JSONRPCVersion
 	if n, ok := notification.(*JSONRPCNotification); ok {
-		notifObj = n
 		// Ensure jsonrpc field is set correctly
-		if notifObj.JSONRPC == "" {
-			notifObj.JSONRPC = JSONRPCVersion
+		if n.JSONRPC == "" {
+			n.JSONRPC = JSONRPCVersion // JSONRPCVersion is a const in mcp package
 		}
 		// Serialize notification
-		notifBytes, err = json.Marshal(notifObj)
+		notifBytes, err = json.Marshal(n)
 	} else {
-		// If not a core.Notification type, try to serialize directly
 		notifBytes, err = json.Marshal(notification)
 	}
 
@@ -140,17 +127,15 @@ func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flus
 		return "", fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
-	// Send event
-	fmt.Fprintf(w, "id: %s\n", eventID)
-	fmt.Fprintf(w, "data: %s\n\n", notifBytes)
-	flusher.Flush()
+	err = r.sseWriter.WriteEvent(w, flusher, sseutil.Event{ID: eventID, Data: notifBytes})
+	if err != nil {
+		return "", err
+	}
 
 	return eventID, nil
 }
 
-// Generate the next event ID
+// Generate the next event ID - This method is now effectively a proxy to sseWriter.
 func (r *SSEResponder) nextEventID() string {
-	timestamp := time.Now().UnixNano() / 1000000 // Millisecond timestamp
-	counter := atomic.AddUint64(&r.eventCounter, 1)
-	return fmt.Sprintf("evt-%d-%d", timestamp, counter)
+	return r.sseWriter.GenerateEventID()
 }

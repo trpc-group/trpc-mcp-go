@@ -18,7 +18,7 @@ type Logger interface {
 	Fatalf(format string, args ...interface{})
 }
 
-// NewZapLogger returns a Logger interface, hiding zap 细节。
+// NewZapLogger returns a Logger interface, hiding zap details.
 func NewZapLogger() Logger {
 	return log.NewZapLogger()
 }

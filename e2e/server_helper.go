@@ -48,10 +48,11 @@ func StartTestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	pathPrefix := "/mcp"
 
 	// Instantiate server.
-	s := mcp.NewServer("", mcp.Implementation{
-		Name:    "E2E-Test-Server",
-		Version: "1.0.0",
-	}, mcp.WithPathPrefix(pathPrefix))
+	s := mcp.NewServer(
+		"E2E-Test-Server",              // Server name
+		"1.0.0",                        // Server version
+		mcp.WithPathPrefix(pathPrefix), // Set API path
+	)
 
 	// Apply options.
 	for _, opt := range opts {
@@ -84,15 +85,13 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	sessionManager := mcp.NewSessionManager(3600)
 
 	// Instantiate server and enable SSE.
-	s := mcp.NewServer("", mcp.Implementation{
-		Name:    "E2E-SSE-Test-Server",
-		Version: "1.0.0",
-	},
+	s := mcp.NewServer(
+		"E2E-SSE-Test-Server", // Server name
+		"1.0.0",               // Server version
 		mcp.WithPathPrefix(pathPrefix),
 		mcp.WithSessionManager(sessionManager),
-		mcp.WithSSEEnabled(true),           // Enable SSE.
-		mcp.WithGetSSEEnabled(true),        // Enable GET SSE.
-		mcp.WithDefaultResponseMode("sse"), // Set default response mode to SSE.
+		mcp.WithPostSSEEnabled(true), // Enable SSE.
+		mcp.WithGetSSEEnabled(true),  // Enable GET SSE.
 	)
 
 	// Apply options.
@@ -100,22 +99,15 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 		opt(s)
 	}
 
-	// Create HTTP handler.
-	httpHandler := mcp.NewHTTPServerHandler(
-		s.MCPHandler(),
-		mcp.WithTransportSessionManager(sessionManager),
-		mcp.WithTransportGetSSEEnabled(true),
-	)
-
 	// Create custom mux for test routes.
 	mux := http.NewServeMux()
 
 	// Register MCP path.
-	mux.Handle(pathPrefix, httpHandler)
+	mux.Handle(pathPrefix, s.HTTPHandler())
 
 	// Register test notification path.
 	mux.HandleFunc(pathPrefix+"/test/notify", func(w http.ResponseWriter, r *http.Request) {
-		handleTestNotify(w, r, httpHandler)
+		handleTestNotify(w, r, s)
 	})
 
 	// Create HTTP test server.
@@ -134,7 +126,7 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 }
 
 // handleTestNotify handles the test endpoint for sending notifications.
-func handleTestNotify(w http.ResponseWriter, r *http.Request, httpHandler *mcp.HTTPServerHandler) {
+func handleTestNotify(w http.ResponseWriter, r *http.Request, server *mcp.Server) {
 	// Get target session ID.
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
@@ -149,13 +141,32 @@ func handleTestNotify(w http.ResponseWriter, r *http.Request, httpHandler *mcp.H
 		return
 	}
 
-	// Use HTTPServerHandler to send notification directly.
-	if err := httpHandler.SendNotification(sessionID, &notification); err != nil {
+	// Extract params as a map for the SendNotification method
+	params := make(map[string]interface{})
+
+	// Convert the entire notification to JSON and then extract relevant fields
+	data, err := json.Marshal(notification)
+	if err == nil {
+		var fullMap map[string]interface{}
+		if err := json.Unmarshal(data, &fullMap); err == nil {
+			if paramsMap, ok := fullMap["params"].(map[string]interface{}); ok {
+				// Exclude _meta field from params as Server.SendNotification handles it separately
+				for k, v := range paramsMap {
+					if k != "_meta" {
+						params[k] = v
+					}
+				}
+			}
+		}
+	}
+
+	// Use server's API to send notification
+	if err := server.SendNotification(sessionID, notification.Method, params); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to send notification: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Return success.
+	// Return success
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -165,10 +176,12 @@ func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*mcp
 	t.Helper()
 
 	// Create server.
-	s := mcp.NewServer(addr, mcp.Implementation{
-		Name:    "E2E-Test-Server",
-		Version: "1.0.0",
-	}, mcp.WithPathPrefix("/mcp"))
+	s := mcp.NewServer(
+		"E2E-Test-Server", // Server name
+		"1.0.0",           // Server version
+		mcp.WithServerAddress(addr),
+		mcp.WithPathPrefix("/mcp"),
+	)
 
 	// Apply options.
 	for _, opt := range opts {

@@ -12,10 +12,12 @@ import (
 // Create test server
 func createTestServer() (*Server, *httptest.Server) {
 	// Create MCP server
-	mcpServer := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	}, WithPathPrefix("/mcp"))
+	mcpServer := NewServer(
+		"Test-Server",              // Server name
+		"1.0.0",                    // Server version
+		WithServerAddress(":3000"), // Server address
+		WithPathPrefix("/mcp"),     // Set API path
+	)
 
 	// Create HTTP test server
 	httpServer := httptest.NewServer(mcpServer.HTTPHandler())
@@ -25,10 +27,11 @@ func createTestServer() (*Server, *httptest.Server) {
 
 func TestNewServer(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	})
+	server := NewServer(
+		"Test-Server",              // Server name
+		"1.0.0",                    // Server version
+		WithServerAddress(":3000"), // Server address
+	)
 
 	// Verify object creation is successful
 	assert.NotNil(t, server)
@@ -41,10 +44,12 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_WithPathPrefix(t *testing.T) {
 	// Create server with custom path prefix
-	server := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	}, WithPathPrefix("/custom-api"))
+	server := NewServer(
+		"Test-Server",                 // Server name
+		"1.0.0",                       // Server version
+		WithServerAddress(":3000"),    // Server address
+		WithPathPrefix("/custom-api"), // Custom path prefix
+	)
 
 	// Verify path prefix
 	assert.Equal(t, "/custom-api", server.config.PathPrefix)
@@ -52,10 +57,12 @@ func TestServer_WithPathPrefix(t *testing.T) {
 
 func TestServer_WithoutSession(t *testing.T) {
 	// Create server with sessions disabled
-	server := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	}, WithoutSession())
+	server := NewServer(
+		"Test-Server",              // Server name
+		"1.0.0",                    // Server version
+		WithServerAddress(":3000"), // Server address
+		WithoutSession(),           // Disable sessions
+	)
 
 	// Verify server created successfully
 	assert.NotNil(t, server)
@@ -64,10 +71,11 @@ func TestServer_WithoutSession(t *testing.T) {
 
 func TestServer_RegisterTool(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	})
+	server := NewServer(
+		"Test-Server",              // Server name
+		"1.0.0",                    // Server version
+		WithServerAddress(":3000"), // Server address
+	)
 
 	// Register tool
 	tool := NewTool("mock-tool",
@@ -102,10 +110,11 @@ func TestServer_HTTPHandler(t *testing.T) {
 
 func TestServer_MCPHandler(t *testing.T) {
 	// Create server
-	server := NewServer(":3000", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	})
+	server := NewServer(
+		"Test-Server",              // Server name
+		"1.0.0",                    // Server version
+		WithServerAddress(":3000"), // Server address
+	)
 
 	// Verify MCP handler
 	assert.NotNil(t, server.MCPHandler())

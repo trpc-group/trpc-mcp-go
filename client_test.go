@@ -37,10 +37,11 @@ func NewTestTool() *Tool {
 // Create test environment including server and client
 func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 	// Create MCP server
-	mcpServer := NewServer("", Implementation{
-		Name:    "Test-Server",
-		Version: "1.0.0",
-	}, WithPathPrefix("/mcp"))
+	mcpServer := NewServer(
+		"Test-Server",          // Server name
+		"1.0.0",                // Server version
+		WithPathPrefix("/mcp"), // Set API path
+	)
 
 	// Register test tool
 	tool := NewTestTool()
@@ -78,7 +79,7 @@ func TestNewClient(t *testing.T) {
 	assert.NotNil(t, client)
 	assert.Equal(t, "Test-Client", client.clientInfo.Name)
 	assert.Equal(t, "1.0.0", client.clientInfo.Version)
-	assert.Equal(t, ProtocolVersion_2024_11_05, client.protocolVersion) // Default version
+	assert.Equal(t, ProtocolVersion_2025_03_26, client.protocolVersion) // Update to current default version.
 	assert.False(t, client.initialized)
 }
 

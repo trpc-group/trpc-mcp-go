@@ -3,6 +3,8 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/utils"
 )
 
 // ParseInitializeResultFromJSON parses a raw JSON message into an InitializeResult
@@ -43,54 +45,37 @@ func ParseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourc
 
 // ParseReadResourceResultFromJSON parses a raw JSON message into a ReadResourceResult
 func ParseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResourceResult, error) {
-	var data map[string]interface{}
-	if err := json.Unmarshal(*rawMessage, &data); err != nil {
+	// Parse JSON object using internal utility function.
+	data, err := utils.ParseJSONObject(rawMessage)
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
 
 	result := &ReadResourceResult{}
 
 	// Parse contents array
-	if contentsData, ok := data["contents"]; ok {
-		if contentsArray, ok := contentsData.([]interface{}); ok {
-			for _, item := range contentsArray {
-				if contentMap, ok := item.(map[string]interface{}); ok {
-					// Check if it's text or blob resource
-					if _, hasText := contentMap["text"]; hasText {
-						// Text resource
-						textResource := TextResourceContents{}
+	if contentsArray := utils.ExtractArray(data, "contents"); contentsArray != nil {
+		for _, item := range contentsArray {
+			if contentMap, ok := item.(map[string]interface{}); ok {
+				// Parse resource content using internal function.
+				uri, mimeType, content, isText := utils.ParseResourceContent(contentMap)
 
-						if text, ok := contentMap["text"].(string); ok {
-							textResource.Text = text
-						}
-
-						if uri, ok := contentMap["uri"].(string); ok {
-							textResource.URI = uri
-						}
-
-						if mimeType, ok := contentMap["mimeType"].(string); ok {
-							textResource.MIMEType = mimeType
-						}
-
-						result.Contents = append(result.Contents, textResource)
-					} else if _, hasBlob := contentMap["blob"]; hasBlob {
-						// Blob resource
-						blobResource := BlobResourceContents{}
-
-						if blob, ok := contentMap["blob"].(string); ok {
-							blobResource.Blob = blob
-						}
-
-						if uri, ok := contentMap["uri"].(string); ok {
-							blobResource.URI = uri
-						}
-
-						if mimeType, ok := contentMap["mimeType"].(string); ok {
-							blobResource.MIMEType = mimeType
-						}
-
-						result.Contents = append(result.Contents, blobResource)
+				if isText {
+					// Text resource.
+					textResource := TextResourceContents{
+						URI:      uri,
+						MIMEType: mimeType,
+						Text:     content,
 					}
+					result.Contents = append(result.Contents, textResource)
+				} else {
+					// Binary resource.
+					blobResource := BlobResourceContents{
+						URI:      uri,
+						MIMEType: mimeType,
+						Blob:     content,
+					}
+					result.Contents = append(result.Contents, blobResource)
 				}
 			}
 		}
@@ -101,8 +86,9 @@ func ParseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResource
 
 // ParseListToolsResultFromJSON parses a raw JSON message into a ListToolsResult
 func ParseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult, error) {
-	var data map[string]interface{}
-	if err := json.Unmarshal(*rawMessage, &data); err != nil {
+	// Parse JSON object using internal utility function.
+	data, err := utils.ParseJSONObject(rawMessage)
+	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
 
@@ -111,44 +97,29 @@ func ParseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult
 	}
 
 	// Parse tools array
-	if toolsData, ok := data["tools"]; ok {
-		if toolsArray, ok := toolsData.([]interface{}); ok {
-			for _, item := range toolsArray {
-				if toolMap, ok := item.(map[string]interface{}); ok {
-					tool := Tool{}
-
-					// Parse tool properties
-					if name, ok := toolMap["name"].(string); ok {
-						tool.Name = name
-					} else {
-						continue // Name is required
-					}
-
-					if desc, ok := toolMap["description"].(string); ok {
-						tool.Description = desc
-					}
-
-					// Parse input schema if present
-					if schema, ok := toolMap["inputSchema"].(map[string]interface{}); ok {
-						// Convert map to JSON then parse to Schema
-						schemaBytes, err := json.Marshal(schema)
-						if err != nil {
-							continue
-						}
-
-						// Store as raw JSON for now
-						tool.RawInputSchema = schemaBytes
-					}
-
-					// Add tool to result
-					result.Tools = append(result.Tools, tool)
+	if toolsArray := utils.ExtractArray(data, "tools"); toolsArray != nil {
+		for _, item := range toolsArray {
+			if toolMap, ok := item.(map[string]interface{}); ok {
+				// Parse tool item using internal function.
+				name, description, rawSchema, err := utils.ParseToolItem(toolMap)
+				if err != nil {
+					continue
 				}
+
+				tool := Tool{
+					Name:           name,
+					Description:    description,
+					RawInputSchema: rawSchema,
+				}
+
+				// Add tool to result
+				result.Tools = append(result.Tools, tool)
 			}
 		}
 	}
 
 	// Parse nextCursor if present
-	if nextCursor, ok := data["nextCursor"].(string); ok {
+	if nextCursor := utils.ExtractString(data, "nextCursor"); nextCursor != "" {
 		result.NextCursor = Cursor(nextCursor)
 	}
 

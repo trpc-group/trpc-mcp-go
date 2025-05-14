@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"sync/atomic"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 // State represents the client state.
@@ -44,7 +46,7 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 	// Parse the server URL.
 	parsedURL, err := url.Parse(serverURL)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidServerURL, err)
+		return nil, fmt.Errorf("%w: %v", errors.ErrInvalidServerURL, err)
 	}
 
 	// Create client.
@@ -127,7 +129,7 @@ func (c *Client) setState(state State) {
 func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	// Check if already initialized.
 	if c.initialized {
-		return nil, ErrAlreadyInitialized
+		return nil, errors.ErrAlreadyInitialized
 	}
 
 	// Create request.
@@ -190,7 +192,7 @@ func (c *Client) SendInitialized(ctx context.Context) error {
 func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, ErrNotInitialized
+		return nil, errors.ErrNotInitialized
 	}
 
 	// Create request.
@@ -220,7 +222,7 @@ func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 func (c *Client) CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, ErrNotInitialized
+		return nil, errors.ErrNotInitialized
 	}
 
 	// Create request
@@ -287,7 +289,7 @@ func (c *Client) UnregisterNotificationHandler(method string) {
 func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[string]interface{}, streamOpts *StreamOptions) (*CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, ErrNotInitialized
+		return nil, errors.ErrNotInitialized
 	}
 
 	// Create request.
@@ -353,7 +355,7 @@ func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[s
 func (c *Client) ListPrompts(ctx context.Context) (*ListPromptsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, ErrNotInitialized
+		return nil, errors.ErrNotInitialized
 	}
 
 	// Create request.
@@ -383,7 +385,7 @@ func (c *Client) ListPrompts(ctx context.Context) (*ListPromptsResult, error) {
 func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) (*GetPromptResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, ErrNotInitialized
+		return nil, errors.ErrNotInitialized
 	}
 
 	// Prepare parameters.
@@ -423,7 +425,7 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
 	}
 
 	// Create request.
@@ -453,7 +455,7 @@ func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error
 func (c *Client) ReadResource(ctx context.Context, uri string) (*ReadResourceResult, error) {
 	// Check if initialized.
 	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
+		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
 	}
 
 	// Create request.

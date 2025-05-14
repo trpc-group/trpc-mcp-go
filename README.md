@@ -38,41 +38,51 @@ go get trpc.group/trpc-go/trpc-mcp-go
 package main
 
 import (
+	"context"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
-	// Configure logging
+	// Print startup message.
 	log.Printf("Starting example server...")
 
-	// Create server
-	mcpServer := mcp.NewServer(":3000", mcp.Implementation{
-		Name:    "Example-Server",
-		Version: "1.0.0",
-	}, mcp.WithPathPrefix("/mcp"))
+	// Create server using the new API style:
+	// - First two required parameters: server name and version
+	// - WithServerAddress sets the address to listen on (default: "localhost:3000")
+	// - WithPathPrefix sets the API path prefix
+	// - WithServerLogger injects logger at the server level
+	mcpServer := mcp.NewServer(
+		"Example-Server",
+		"1.0.0",
+		mcp.WithServerAddress(":3000"),
+		mcp.WithPathPrefix("/mcp"),
+		mcp.WithServerLogger(mcp.GetDefaultLogger()),
+	)
 
 	// Register a tool (defined elsewhere)
-	if err := mcpServer.RegisterTool(tools.NewGreetTool()); err != nil {
+	if err := mcpServer.RegisterTool(NewGreetTool()); err != nil {
 		log.Fatalf("Failed to register tool: %v", err)
 	}
+	log.Printf("Registered tool: greet")
 
-	// Set up graceful shutdown
+	// Set up a graceful shutdown.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	// Start server in background
+	// Start server (run in goroutine).
 	go func() {
-		log.Printf("Server started on port 3000")
+		log.Printf("MCP server started, listening on port 3000, path /mcp")
 		if err := mcpServer.Start(); err != nil {
-			log.Fatalf("Server failed: %v", err)
+			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
 
-	// Wait for termination signal
+	// Wait for termination signal.
 	<-stop
 	log.Printf("Shutting down server...")
 }
@@ -81,28 +91,19 @@ func main() {
 ### Tool Definition Example
 
 ```go
-package tools
-
-import (
-	"context"
-	"fmt"
-
-	"trpc.group/trpc-go/trpc-mcp-go"
-)
-
-// NewGreetTool creates a simple greeting tool
+// NewGreetTool creates a simple greeting tool.
 func NewGreetTool() *mcp.Tool {
 	return mcp.NewTool("greet",
 		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Check for context cancellation
+			// Check if the context is cancelled.
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return mcp.NewErrorResult("Request cancelled"), ctx.Err()
 			default:
-				// Continue execution
+				// Continue execution.
 			}
 
-			// Extract name parameter
+			// Extract name parameter.
 			name := "World"
 			if nameArg, ok := req.Params.Arguments["name"]; ok {
 				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
@@ -110,15 +111,15 @@ func NewGreetTool() *mcp.Tool {
 				}
 			}
 
-			// Create greeting message
+			// Create greeting message.
 			greeting := fmt.Sprintf("Hello, %s!", name)
 
-			// Return result
-			return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent(greeting)}}, nil
+			// Create tool result.
+			return mcp.NewTextResult(greeting), nil
 		},
-		mcp.WithDescription("A simple greeting tool"),
+		mcp.WithDescription("A simple greeting tool that returns a greeting message."),
 		mcp.WithString("name",
-			mcp.Description("Name to greet"),
+			mcp.Description("The name to greet."),
 		),
 	)
 }
@@ -131,55 +132,60 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"os"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
-	// Initialize logging
-	log.Printf("Starting client...")
+	// Initialize log.
+	log.Println("Starting example client...")
 
-	// Create context
+	// Create context.
 	ctx := context.Background()
 
-	// Create client
-	mcpClient, err := mcp.NewClient("http://localhost:3000/mcp", mcp.Implementation{
-		Name:    "MCP-Go-Client",
-		Version: "1.0.0",
-	}, mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05))
+	// Create client.
+	serverURL := "http://localhost:3000/mcp"
+	// Inject custom logger via WithClientLogger.
+	mcpClient, err := mcp.NewClient(
+		serverURL,
+		mcp.Implementation{
+			Name:    "MCP-Go-Client",
+			Version: "1.0.0",
+		},
+		mcp.WithClientLogger(mcp.GetDefaultLogger()),
+	)
 	if err != nil {
 		log.Printf("Failed to create client: %v", err)
-		return
+		os.Exit(1)
 	}
 	defer mcpClient.Close()
 
-	// Initialize client
+	// Initialize client.
 	initResp, err := mcpClient.Initialize(ctx)
 	if err != nil {
 		log.Printf("Initialization failed: %v", err)
-		return
+		os.Exit(1)
 	}
-	log.Printf("Server: %s %s, Protocol: %s",
-		initResp.ServerInfo.Name,
-		initResp.ServerInfo.Version,
-		initResp.ProtocolVersion)
+	
+	log.Printf("Server info: %s %s", initResp.ServerInfo.Name, initResp.ServerInfo.Version)
+	log.Printf("Protocol version: %s", initResp.ProtocolVersion)
 
-	// Get session ID
+	// Get session ID.
 	sessionID := mcpClient.GetSessionID()
 	if sessionID != "" {
 		log.Printf("Session ID: %s", sessionID)
 	}
 
-	// List available tools
+	// List available tools.
 	toolsResult, err := mcpClient.ListTools(ctx)
 	if err != nil {
 		log.Printf("Failed to list tools: %v", err)
 		return
 	}
 
-	// Call a tool if available
+	// Call a tool if available.
 	if len(toolsResult.Tools) > 0 {
 		log.Printf("Calling tool: %s", toolsResult.Tools[0].Name)
 		callRes, err := mcpClient.CallTool(ctx, toolsResult.Tools[0].Name, map[string]interface{}{
@@ -190,7 +196,7 @@ func main() {
 			return
 		}
 
-		// Process results
+		// Process results.
 		for _, item := range callRes.Content {
 			if textContent, ok := item.(mcp.TextContent); ok {
 				log.Printf("Result: %s", textContent.Text)
@@ -198,12 +204,14 @@ func main() {
 		}
 	}
 
-	// Terminate session if active
+	// Terminate session if active.
 	if sessionID != "" {
 		if err := mcpClient.TerminateSession(ctx); err != nil {
 			log.Printf("Failed to terminate session: %v", err)
 		}
 	}
+	
+	log.Printf("Example finished.")
 }
 ```
 
@@ -215,16 +223,14 @@ The server can be configured using option functions:
 
 ```go
 server := mcp.NewServer(
-    ":3000",                        // Listen address
-    mcp.Implementation{              // Server info
-        Name:    "My-MCP-Server",
-        Version: "1.0.0",
-    },
-    mcp.WithPathPrefix("/mcp"),            // API path prefix
-    mcp.WithSSEEnabled(true),              // Enable SSE
-    mcp.WithGetSSEEnabled(true),           // Allow GET for SSE
-    mcp.WithDefaultResponseMode("sse"),    // Default to SSE mode
-    mcp.WithStatelessMode(false),          // Use stateful mode
+    "My-MCP-Server",                      // Server name
+    "1.0.0",                              // Server version 
+    mcp.WithServerAddress(":3000"),       // Listen address
+    mcp.WithPathPrefix("/mcp"),           // API path prefix
+    mcp.WithSSEEnabled(true),             // Enable SSE
+    mcp.WithGetSSEEnabled(true),          // Allow GET for SSE
+    mcp.WithStatelessMode(false),         // Use stateful mode
+    mcp.WithServerLogger(mcp.GetDefaultLogger()), // Custom logger
 )
 ```
 
@@ -232,14 +238,15 @@ server := mcp.NewServer(
 
 | Option | Description | Default |
 |--------|-------------|---------|
+| `WithServerAddress` | Set server address to listen on | `"localhost:3000"` |
 | `WithPathPrefix` | Set API path prefix | `/mcp` |
 | `WithSessionManager` | Use custom session manager | Built-in manager |
 | `WithoutSession` | Disable session management | Sessions enabled |
 | `WithSSEEnabled` | Enable SSE responses | `true` |
 | `WithGetSSEEnabled` | Allow GET for SSE connections | `true` |
-| `WithDefaultResponseMode` | Default mode: "json" or "sse" | `"sse"` |
 | `WithNotificationBufferSize` | Size of notification buffer | `10` |
 | `WithStatelessMode` | Run in stateless mode | `false` |
+| `WithServerLogger` | Custom logger for server | Default logger |
 
 ### Client Configuration
 
@@ -247,13 +254,14 @@ The client can be configured using option functions:
 
 ```go
 client, err := mcp.NewClient(
-    "http://localhost:3000/mcp",             // Server URL
-    mcp.Implementation{                      // Client info
+    "http://localhost:3000/mcp",                        // Server URL
+    mcp.Implementation{                                 // Client info
         Name:    "MCP-Client",
         Version: "1.0.0",
     },
     mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05),  // Protocol version
-    mcp.WithGetSSEEnabled(true),                                    // Use GET for SSE
+    mcp.WithGetSSEEnabled(true),                              // Use GET for SSE
+    mcp.WithClientLogger(mcp.GetDefaultLogger()),             // Custom logger
 )
 ```
 
@@ -263,7 +271,8 @@ client, err := mcp.NewClient(
 |--------|-------------|---------|
 | `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2024_11_05` |
 | `WithGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
-| `WithTransport`     | Use a custom HTTP transport   | Default `http.DefaultTransport` |
+| `WithTransport` | Use a custom HTTP transport | Default `http.DefaultTransport` |
+| `WithClientLogger` | Custom logger for client | Default logger |
 
 ## Advanced Features
 
@@ -387,8 +396,8 @@ func (nc *NotificationCollector) HandleLog(notification *mcp.JSONRPCNotification
 func main() {
 	// ... (client setup as in previous example)
 	// Set custom logger if needed. Example:
-	// mcpServer := mcp.NewServer(":3000", mcp.Implementation{...}, mcp.WithServerLogger(mcp.NewZapLogger()))
-	// The default logger prints to stdout. To use zap or other loggers, inject with WithServerLogger or WithLogger.
+	// mcpServer := mcp.NewServer("My-Server", "1.0.0", mcp.WithServerLogger(mcp.GetDefaultLogger()))
+	// The default logger prints to stdout. To use zap or other loggers, inject with WithServerLogger or WithClientLogger.
 	ctx := context.Background()
 	mcpClient, err := mcp.NewClient("http://localhost:3000/mcp", mcp.Implementation{
 		Name:    "MCP-Go-Client-Stream-Handler",

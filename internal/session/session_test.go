@@ -1,7 +1,6 @@
-package mcp
+package session
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ func TestNewSessionManager(t *testing.T) {
 
 	// Verify object created successfully
 	assert.NotNil(t, manager)
-	assert.Empty(t, manager.GetActiveSessions())
+	assert.Empty(t, manager.sessions)
 }
 
 func TestSessionManager_CreateSession(t *testing.T) {
@@ -26,14 +25,13 @@ func TestSessionManager_CreateSession(t *testing.T) {
 	session := manager.CreateSession()
 
 	// Verify session
-	assert.NotEmpty(t, session.GetID())
-	assert.WithinDuration(t, time.Now(), session.GetCreatedAt(), 1*time.Second)
-	assert.WithinDuration(t, time.Now(), session.GetLastActivity(), 1*time.Second)
+	assert.NotEmpty(t, session.ID)
+	assert.WithinDuration(t, time.Now(), session.CreatedAt, 1*time.Second)
+	assert.WithinDuration(t, time.Now(), session.LastActivity, 1*time.Second)
 
 	// Verify session is stored in the manager
-	sessions := manager.GetActiveSessions()
-	assert.Len(t, sessions, 1)
-	assert.Contains(t, sessions, session.GetID())
+	assert.Len(t, manager.sessions, 1)
+	assert.Contains(t, manager.sessions, session.ID)
 }
 
 func TestSessionManager_GetSession(t *testing.T) {
@@ -70,7 +68,7 @@ func TestSessionManager_GetSession(t *testing.T) {
 	existingSession := manager.CreateSession()
 
 	// Record initial access time
-	initialTime := existingSession.GetLastActivity()
+	initialTime := existingSession.LastActivity
 
 	// Wait a short time to ensure timestamp changes can be detected
 	time.Sleep(10 * time.Millisecond)
@@ -80,7 +78,7 @@ func TestSessionManager_GetSession(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID := tc.sessionID
 			if tc.shouldExist {
-				sessionID = existingSession.GetID()
+				sessionID = existingSession.ID
 			}
 
 			session, exists := manager.GetSession(sessionID)
@@ -88,12 +86,12 @@ func TestSessionManager_GetSession(t *testing.T) {
 			if tc.shouldExist {
 				assert.True(t, exists)
 				assert.NotNil(t, session)
-				assert.Equal(t, existingSession.GetID(), session.GetID())
-				assert.Equal(t, existingSession.GetCreatedAt(), session.GetCreatedAt())
+				assert.Equal(t, existingSession.ID, session.ID)
+				assert.Equal(t, existingSession.CreatedAt, session.CreatedAt)
 
 				if tc.shouldUpdate {
 					// Verify LastActivity has been updated
-					assert.True(t, session.GetLastActivity().After(initialTime))
+					assert.True(t, session.LastActivity.After(initialTime))
 				}
 			} else {
 				assert.False(t, exists)
@@ -111,30 +109,27 @@ func TestSessionManager_TerminateSession(t *testing.T) {
 	session := manager.CreateSession()
 
 	// Verify session exists
-	sessions := manager.GetActiveSessions()
-	assert.Len(t, sessions, 1)
-	assert.Contains(t, sessions, session.GetID())
+	assert.Len(t, manager.sessions, 1)
+	assert.Contains(t, manager.sessions, session.ID)
 
 	// Terminate session
-	success := manager.TerminateSession(session.GetID())
+	success := manager.TerminateSession(session.ID)
 
 	// Verify session has been terminated
 	assert.True(t, success)
-	sessions = manager.GetActiveSessions()
-	assert.Empty(t, sessions)
-	assert.NotContains(t, sessions, session.GetID())
+	assert.Empty(t, manager.sessions)
+	assert.NotContains(t, manager.sessions, session.ID)
 
 	// Terminate non-existent session
 	success = manager.TerminateSession("non-existent-session")
 	assert.False(t, success)
-	sessions = manager.GetActiveSessions()
-	assert.Empty(t, sessions)
+	assert.Empty(t, manager.sessions)
 }
 
 func TestSession_UpdateActivity(t *testing.T) {
 	// Create session
 	session := NewSession()
-	initialTime := session.GetLastActivity()
+	initialTime := session.LastActivity
 
 	// Wait a short time
 	time.Sleep(10 * time.Millisecond)
@@ -143,7 +138,7 @@ func TestSession_UpdateActivity(t *testing.T) {
 	session.UpdateActivity()
 
 	// Verify activity time has been updated
-	assert.True(t, session.GetLastActivity().After(initialTime))
+	assert.True(t, session.LastActivity.After(initialTime))
 }
 
 func TestSession_DataOperations(t *testing.T) {
@@ -176,15 +171,37 @@ func TestSession_DataOperations(t *testing.T) {
 	assert.Equal(t, newValue, retrievedValue)
 }
 
-func TestSessionContext(t *testing.T) {
-	// Create session
-	session := NewSession()
+func TestSessionManager_GetActiveSessions(t *testing.T) {
+	// Create session manager
+	manager := NewSessionManager(3600)
 
-	// Test storing and retrieving from context
-	ctx := SetSessionToContext(context.Background(), session)
+	// Initially there should be no active sessions
+	sessions := manager.GetActiveSessions()
+	assert.Empty(t, sessions)
 
-	// Get from context
-	retrievedSession, ok := GetSessionFromContext(ctx)
-	assert.True(t, ok)
-	assert.Equal(t, session.GetID(), retrievedSession.GetID())
+	// Create a few sessions
+	session1 := manager.CreateSession()
+	session2 := manager.CreateSession()
+	session3 := manager.CreateSession()
+
+	// Get active sessions
+	sessions = manager.GetActiveSessions()
+
+	// Verify all sessions are returned
+	assert.Len(t, sessions, 3)
+	assert.Contains(t, sessions, session1.ID)
+	assert.Contains(t, sessions, session2.ID)
+	assert.Contains(t, sessions, session3.ID)
+
+	// Terminate one session
+	manager.TerminateSession(session2.ID)
+
+	// Get active sessions again
+	sessions = manager.GetActiveSessions()
+
+	// Verify only remaining sessions are returned
+	assert.Len(t, sessions, 2)
+	assert.Contains(t, sessions, session1.ID)
+	assert.NotContains(t, sessions, session2.ID)
+	assert.Contains(t, sessions, session3.ID)
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
-// PromptManager manages prompt templates
+// promptManager manages prompt templates
 //
 // Prompt functionality follows these enabling mechanisms:
 // 1. By default, prompt functionality is disabled
@@ -15,7 +17,7 @@ import (
 // 4. Clients can determine if the server supports prompt functionality through the capabilities field in the initialization response
 //
 // This design simplifies API usage, eliminating the need for explicit configuration parameters to enable or disable prompt functionality.
-type PromptManager struct {
+type promptManager struct {
 	// Prompt mapping table
 	prompts map[string]*Prompt
 
@@ -23,18 +25,18 @@ type PromptManager struct {
 	mu sync.RWMutex
 }
 
-// NewPromptManager creates a new prompt manager
+// newPromptManager creates a new prompt manager
 //
 // Note: Simply creating a prompt manager does not enable prompt functionality,
 // it is only enabled when the first prompt is added.
-func NewPromptManager() *PromptManager {
-	return &PromptManager{
+func newPromptManager() *promptManager {
+	return &promptManager{
 		prompts: make(map[string]*Prompt),
 	}
 }
 
 // RegisterPrompt registers a prompt
-func (m *PromptManager) RegisterPrompt(prompt *Prompt) error {
+func (m *promptManager) RegisterPrompt(prompt *Prompt) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -43,11 +45,11 @@ func (m *PromptManager) RegisterPrompt(prompt *Prompt) error {
 	}
 
 	if prompt.Name == "" {
-		return fmt.Errorf("prompt name cannot be empty")
+		return errors.ErrEmptyPromptName
 	}
 
 	if _, exists := m.prompts[prompt.Name]; exists {
-		return fmt.Errorf("prompt %s already exists", prompt.Name)
+		return fmt.Errorf("%w: %s", errors.ErrInvalidParams, fmt.Sprintf("prompt %s already exists", prompt.Name))
 	}
 
 	m.prompts[prompt.Name] = prompt
@@ -55,7 +57,7 @@ func (m *PromptManager) RegisterPrompt(prompt *Prompt) error {
 }
 
 // GetPrompt retrieves a prompt
-func (m *PromptManager) GetPrompt(name string) (*Prompt, bool) {
+func (m *promptManager) GetPrompt(name string) (*Prompt, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -64,7 +66,7 @@ func (m *PromptManager) GetPrompt(name string) (*Prompt, bool) {
 }
 
 // GetPrompts retrieves all prompts
-func (m *PromptManager) GetPrompts() []*Prompt {
+func (m *promptManager) GetPrompts() []*Prompt {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -76,7 +78,7 @@ func (m *PromptManager) GetPrompts() []*Prompt {
 }
 
 // HandleListPrompts handles listing prompts requests
-func (m *PromptManager) HandleListPrompts(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *promptManager) HandleListPrompts(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	prompts := m.GetPrompts()
 
 	// Convert []*mcp.Prompt to []mcp.Prompt for the result
@@ -93,23 +95,23 @@ func (m *PromptManager) HandleListPrompts(ctx context.Context, req *JSONRPCReque
 }
 
 // HandleGetPrompt handles retrieving prompt requests
-func (m *PromptManager) HandleGetPrompt(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *promptManager) HandleGetPrompt(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get prompt name from parameters
 	name, ok := paramsMap["name"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing prompt name", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Get prompt
 	prompt, exists := m.GetPrompt(name)
 	if !exists {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("prompt %s does not exist", name), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrPromptNotFound, name), nil), nil
 	}
 
 	// Get arguments
@@ -152,52 +154,52 @@ func (m *PromptManager) HandleGetPrompt(ctx context.Context, req *JSONRPCRequest
 }
 
 // HandleCompletionComplete handles prompt completion requests
-func (m *PromptManager) HandleCompletionComplete(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+func (m *promptManager) HandleCompletionComplete(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid parameters format", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get reference type and name from parameters
 	ref, ok := paramsMap["ref"].(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing reference information", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check reference type
 	refType, ok := ref["type"].(string)
 	if !ok || refType != "ref/prompt" {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid reference type", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get prompt name
 	promptName, ok := ref["name"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing prompt name", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Get prompt
 	prompt, exists := m.GetPrompt(promptName)
 	if !exists {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("prompt %s does not exist", promptName), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrPromptNotFound, promptName), nil), nil
 	}
 
 	// Get arguments
 	argument, ok := paramsMap["argument"].(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing arguments", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Extract argument name and value
 	argName, ok := argument["name"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing argument name", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	argValue, ok := argument["value"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing argument value", nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if argument is valid

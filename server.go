@@ -14,55 +14,56 @@ var (
 	ErrFilteredNotificationFailed = errors.New("failed to send filtered notification")
 )
 
-// ServerConfig stores all server configuration options
-type ServerConfig struct {
+// serverConfig stores all server configuration options
+type serverConfig struct {
 	// Basic configuration
 	Addr       string
 	PathPrefix string
 
 	// Session related
-	SessionManager *SessionManager
+	SessionManager SessionManager
 	EnableSession  bool
 	IsStateless    bool
 
 	// Response related
 	POSTSSEEnabled         bool
 	GetSSEEnabled          bool
-	DefaultResponseMode    string
 	NotificationBufferSize int
 }
 
 // Server MCP server
 type Server struct {
 	serverInfo      Implementation     // Server information.
-	config          *ServerConfig      // Configuration.
+	config          *serverConfig      // Configuration.
 	logger          Logger             // Logger for the server and subcomponents.
-	httpHandler     *HTTPServerHandler // HTTP handler.
-	mcpHandler      *MCPHandler        // MCP handler.
-	toolManager     *ToolManager       // Tool manager.
-	resourceManager *ResourceManager   // Resource manager.
-	promptManager   *PromptManager     // Prompt manager.
+	httpHandler     *httpServerHandler // HTTP handler.
+	mcpHandler      *mcpHandler        // MCP handler.
+	toolManager     *toolManager       // Tool manager.
+	resourceManager *resourceManager   // Resource manager.
+	promptManager   *promptManager     // Prompt manager.
 	customServer    *http.Server       // Custom HTTP server.
 }
 
 // NewServer creates a new MCP server
-func NewServer(addr string, serverInfo Implementation, options ...ServerOption) *Server {
+func NewServer(name, version string, options ...ServerOption) *Server {
 	// Create default configuration
-	config := &ServerConfig{
-		Addr:                   addr,
+	config := &serverConfig{
+		Addr:                   "localhost:3000", // default address
 		PathPrefix:             "/mcp",
 		EnableSession:          true,
 		IsStateless:            false,
 		POSTSSEEnabled:         true,
 		GetSSEEnabled:          true,
-		DefaultResponseMode:    "sse",
 		NotificationBufferSize: 10,
 	}
 
-	// Create server
+	// Create server with provided serverInfo
 	server := &Server{
-		serverInfo: serverInfo,
-		config:     config,
+		serverInfo: Implementation{
+			Name:    name,
+			Version: version,
+		},
+		config: config,
 	}
 
 	// Apply options
@@ -79,24 +80,24 @@ func NewServer(addr string, serverInfo Implementation, options ...ServerOption) 
 // initComponents initializes server components based on configuration.
 func (s *Server) initComponents() {
 	// Create tool manager.
-	s.toolManager = NewToolManager()
+	s.toolManager = newToolManager()
 
 	// Create resource manager.
-	s.resourceManager = NewResourceManager()
+	s.resourceManager = newResourceManager()
 
 	// Create prompt manager.
-	s.promptManager = NewPromptManager()
+	s.promptManager = newPromptManager()
 
 	// Create lifecycle manager, inject logger if provided.
-	var lifecycleManager *LifecycleManager
+	var lifecycleManager *lifecycleManager
 	if s.logger != nil {
-		lifecycleManager = NewLifecycleManager(s.serverInfo).WithLogger(s.logger)
+		lifecycleManager = newLifecycleManager(s.serverInfo).WithLogger(s.logger)
 	} else {
-		lifecycleManager = NewLifecycleManager(s.serverInfo)
+		lifecycleManager = newLifecycleManager(s.serverInfo)
 	}
 
 	// Create MCP handler.
-	s.mcpHandler = NewMCPHandler(
+	s.mcpHandler = newMCPHandler(
 		WithToolManager(s.toolManager),
 		WithLifecycleManager(lifecycleManager),
 		WithResourceManager(s.resourceManager),
@@ -104,35 +105,34 @@ func (s *Server) initComponents() {
 	)
 
 	// Collect HTTP handler options.
-	var httpOptions []func(*HTTPServerHandler)
+	var httpOptions []func(*httpServerHandler)
 
 	// Session configuration.
 	if !s.config.EnableSession {
-		httpOptions = append(httpOptions, WithoutTransportSession())
+		httpOptions = append(httpOptions, withoutTransportSession())
 	} else if s.config.SessionManager != nil {
-		httpOptions = append(httpOptions, WithTransportSessionManager(s.config.SessionManager))
+		httpOptions = append(httpOptions, withTransportSessionManager(s.config.SessionManager))
 	}
 
 	// State mode configuration.
 	if s.config.IsStateless {
-		httpOptions = append(httpOptions, WithTransportStatelessMode())
+		httpOptions = append(httpOptions, withTransportStatelessMode())
 	}
 
 	// Response type configuration.
 	httpOptions = append(httpOptions,
-		WithServerSSEEnabled(s.config.POSTSSEEnabled),
-		WithTransportGetSSEEnabled(s.config.GetSSEEnabled),
-		WithServerDefaultResponseMode(s.config.DefaultResponseMode),
-		WithTransportNotificationBufferSize(s.config.NotificationBufferSize),
+		withServerPOSTSSEEnabled(s.config.POSTSSEEnabled),
+		withTransportGetSSEEnabled(s.config.GetSSEEnabled),
+		withTransportNotificationBufferSize(s.config.NotificationBufferSize),
 	)
 
-	// Inject logger into HTTPServerHandler if provided.
+	// Inject logger into httpServerHandler if provided.
 	if s.logger != nil {
-		httpOptions = append(httpOptions, WithServerTransportLogger(s.logger)) // This is the HTTPServerHandler option version.
+		httpOptions = append(httpOptions, withServerTransportLogger(s.logger)) // This is the httpServerHandler option version.
 	}
 
 	// Create HTTP handler.
-	s.httpHandler = NewHTTPServerHandler(s.mcpHandler, httpOptions...)
+	s.httpHandler = newHTTPServerHandler(s.mcpHandler, httpOptions...)
 
 	// Set server instance as the tool manager's server provider.
 	s.toolManager.WithServerProvider(s)
@@ -142,7 +142,7 @@ func (s *Server) initComponents() {
 type ServerOption func(*Server)
 
 // WithServerLogger sets the logger for the server and all subcomponents.
-// This is a ServerOption, and should not be confused with WithServerTransportLogger for HTTPServerHandler.
+// This is a ServerOption, and should not be confused with withServerTransportLogger for httpServerHandler.
 func WithServerLogger(logger Logger) ServerOption {
 	return func(s *Server) {
 		s.logger = logger
@@ -150,7 +150,7 @@ func WithServerLogger(logger Logger) ServerOption {
 }
 
 // WithSessionManager sets the session manager
-func WithSessionManager(manager *SessionManager) ServerOption {
+func WithSessionManager(manager SessionManager) ServerOption {
 	return func(s *Server) {
 		s.config.SessionManager = manager
 		s.config.EnableSession = true
@@ -172,8 +172,8 @@ func WithPathPrefix(prefix string) ServerOption {
 	}
 }
 
-// WithSSEEnabled enables or disables SSE responses
-func WithSSEEnabled(enabled bool) ServerOption {
+// WithPostSSEEnabled enables or disables SSE responses
+func WithPostSSEEnabled(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.POSTSSEEnabled = enabled
 	}
@@ -183,13 +183,6 @@ func WithSSEEnabled(enabled bool) ServerOption {
 func WithGetSSEEnabled(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.GetSSEEnabled = enabled
-	}
-}
-
-// WithDefaultResponseMode sets the default response mode ("json" or "sse")
-func WithDefaultResponseMode(mode string) ServerOption {
-	return func(s *Server) {
-		s.config.DefaultResponseMode = mode
 	}
 }
 
@@ -206,6 +199,13 @@ func WithNotificationBufferSize(size int) ServerOption {
 func WithStatelessMode(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.IsStateless = enabled
+	}
+}
+
+// WithServerAddress sets the server address
+func WithServerAddress(addr string) ServerOption {
+	return func(s *Server) {
+		s.config.Addr = addr
 	}
 }
 
@@ -290,8 +290,14 @@ func (s *Server) getActiveSessions() ([]string, error) {
 		return nil, ErrStatelessMode
 	}
 
-	// Use the API provided by HTTPServerHandler to get active sessions
+	// Use the API provided by httpServerHandler to get active sessions
 	return s.httpHandler.GetActiveSessions(), nil
+}
+
+// GetActiveSessions returns all active session IDs.
+// Returns an error if the server is in stateless mode.
+func (s *Server) GetActiveSessions() ([]string, error) {
+	return s.getActiveSessions()
 }
 
 // SendFilteredNotification sends a notification to sessions passing a filter
@@ -349,8 +355,8 @@ func WithCustomServer(srv *http.Server) ServerOption {
 	}
 }
 
-// MCPHandler returns the MCP handler
-func (s *Server) MCPHandler() *MCPHandler {
+// mcpHandler returns the MCP handler
+func (s *Server) MCPHandler() RequestHandler {
 	return s.mcpHandler
 }
 

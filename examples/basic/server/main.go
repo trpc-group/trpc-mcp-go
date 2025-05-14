@@ -1,35 +1,41 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	mcp "trpc.group/trpc-go/trpc-mcp-go"
-	"trpc.group/trpc-go/trpc-mcp-go/examples/basic/tools"
 )
 
 func main() {
 	// Print startup message.
 	log.Printf("Starting basic example server...")
 
-	// Create server, set an API path to "/mcp".
-	// Inject custom logger using WithServerTransportLogger.
-	// Use WithServerLogger to inject logger at the server level (not to be confused with WithServerTransportLogger for HTTPServerHandler).
-	mcpServer := mcp.NewServer(":3000", mcp.Implementation{
-		Name:    "Basic-Example-Server",
-		Version: "0.1.0",
-	}, mcp.WithPathPrefix("/mcp"), mcp.WithServerLogger(mcp.GetDefaultLogger()))
+	// Create server using the new API style:
+	// - First two required parameters: server name and version
+	// - WithServerAddress sets the address to listen on (default: "localhost:3000")
+	// - WithPathPrefix sets the API path prefix
+	// - WithServerLogger injects logger at the server level
+	mcpServer := mcp.NewServer(
+		"Basic-Example-Server",
+		"0.1.0",
+		mcp.WithServerAddress(":3000"),
+		mcp.WithPathPrefix("/mcp"),
+		mcp.WithServerLogger(mcp.GetDefaultLogger()),
+	)
 
 	// Register basic greet tool.
-	if err := mcpServer.RegisterTool(tools.NewGreetTool()); err != nil {
+	if err := mcpServer.RegisterTool(NewGreetTool()); err != nil {
 		log.Fatalf("Failed to register basic greet tool: %v", err)
 	}
 	log.Printf("Registered basic greet tool: greet")
 
 	// Register advanced greet tool.
-	if err := mcpServer.RegisterTool(tools.NewAdvancedGreetTool()); err != nil {
+	if err := mcpServer.RegisterTool(NewAdvancedGreetTool()); err != nil {
 		log.Fatalf("Failed to register advanced greet tool: %v", err)
 	}
 	log.Printf("Registered advanced greet tool: advanced-greet")
@@ -49,4 +55,92 @@ func main() {
 	// Wait for termination signal.
 	<-stop
 	log.Printf("Shutting down server...")
+}
+
+// NewGreetTool creates a simple greeting tool.
+func NewGreetTool() *mcp.Tool {
+	return mcp.NewTool("greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Check if the context is cancelled.
+			select {
+			case <-ctx.Done():
+				return mcp.NewErrorResult("Request cancelled"), ctx.Err()
+			default:
+				// Continue execution.
+			}
+
+			// Extract name parameter.
+			name := "World"
+			if nameArg, ok := req.Params.Arguments["name"]; ok {
+				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+					name = nameStr
+				}
+			}
+
+			// Create greeting message.
+			greeting := fmt.Sprintf("Hello, %s!", name)
+
+			// Create tool result.
+			return mcp.NewTextResult(greeting), nil
+		},
+		mcp.WithDescription("A simple greeting tool that returns a greeting message."),
+		mcp.WithString("name",
+			mcp.Description("The name to greet."),
+		),
+	)
+}
+
+// NewAdvancedGreetTool Add a more advanced tool example.
+func NewAdvancedGreetTool() *mcp.Tool {
+	return mcp.NewTool("advanced-greet",
+		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract parameters.
+			name := "World"
+			if nameArg, ok := req.Params.Arguments["name"]; ok {
+				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+					name = nameStr
+				}
+			}
+
+			format := "text"
+			if formatArg, ok := req.Params.Arguments["format"]; ok {
+				if formatStr, ok := formatArg.(string); ok && formatStr != "" {
+					format = formatStr
+				}
+			}
+
+			// Example: if name is "error", return an error result.
+			if name == "error" {
+				return mcp.NewErrorResult(fmt.Sprintf("Cannot greet '%s': name not allowed.", name)), nil
+			}
+
+			// Return different content types based on format.
+			switch format {
+			case "json":
+				// JSON format is no longer supported, fallback to text.
+				jsonMessage := fmt.Sprintf("JSON format: {\"greeting\":\"Hello, %s!\",\"timestamp\":\"2025-05-14T12:00:00Z\"}", name)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						mcp.NewTextContent(jsonMessage),
+					},
+				}, nil
+			case "html":
+				// HTML format is no longer supported, fallback to text.
+				htmlContent := fmt.Sprintf("<h1>Greeting</h1><p>Hello, <strong>%s</strong>!</p>", name)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						mcp.NewTextContent(htmlContent),
+					},
+				}, nil
+			default:
+				// Default: return plain text.
+				return mcp.NewTextResult(fmt.Sprintf("Hello, %s!", name)), nil
+			}
+		},
+		mcp.WithDescription("An enhanced greeting tool supporting multiple output formats."),
+		mcp.WithString("name", mcp.Description("The name to greet.")),
+		mcp.WithString("format",
+			mcp.Description("Output format: text, json, or html."),
+			mcp.Default("text")),
+	)
 }

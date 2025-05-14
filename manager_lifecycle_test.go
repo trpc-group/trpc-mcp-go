@@ -15,7 +15,7 @@ func TestNewLifecycleManager(t *testing.T) {
 		Version: "1.0.0",
 	}
 
-	manager := NewLifecycleManager(serverInfo)
+	manager := newLifecycleManager(serverInfo)
 
 	// Verify object created successfully
 	assert.NotNil(t, manager)
@@ -29,7 +29,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 		Version: "1.0.0",
 	}
 
-	manager := NewLifecycleManager(serverInfo)
+	manager := newLifecycleManager(serverInfo)
 
 	// Create session
 	session := NewSession()
@@ -123,7 +123,7 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 		Version: "1.0.0",
 	}
 
-	manager := NewLifecycleManager(serverInfo)
+	manager := newLifecycleManager(serverInfo)
 
 	// Skip this test, we will update it after fixing the capabilities conversion logic
 	t.Skip("Waiting for capabilities conversion logic fix to re-test")

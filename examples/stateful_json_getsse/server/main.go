@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Simple greeting tool handler function.
@@ -32,7 +32,7 @@ func handleGreet(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallTo
 	if ok && session != nil {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server. Your session ID is: %s",
-			name, session.ID[:8]+"...")))
+			name, session.GetID()[:8]+"...")))
 	} else {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server, but session info could not be obtained.",
@@ -75,7 +75,7 @@ func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.Call
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-				count, session.ID[:8]+"...")),
+				count, session.GetID()[:8]+"...")),
 		},
 	}, nil
 }
@@ -112,7 +112,7 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent after %d seconds. Please make sure to subscribe to notifications with GET SSE connection. (Session ID: %s)",
-				delaySeconds, session.ID[:8]+"...")),
+				delaySeconds, session.GetID()[:8]+"...")),
 		},
 	}
 
@@ -135,20 +135,20 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		}
 
 		// Use server's notification API to send notification directly.
-		err := mcpServer.SendNotification(session.ID, "notifications/message", map[string]interface{}{
+		err := mcpServer.SendNotification(session.GetID(), "notifications/message", map[string]interface{}{
 			"level": "info",
 			"data": map[string]interface{}{
 				"type":      "test_notification",
 				"message":   message,
 				"timestamp": time.Now().Format(time.RFC3339),
-				"sessionId": session.ID,
+				"sessionId": session.GetID(),
 			},
 		})
 
 		if err != nil {
 			log.Printf("Failed to send notification: %v.", err)
 		} else {
-			log.Printf("Notification sent to session %s.", session.ID)
+			log.Printf("Notification sent to session %s.", session.GetID())
 		}
 	}()
 
@@ -158,12 +158,6 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 func main() {
 	log.Printf("Starting Stateful JSON Yes GET SSE mode MCP server...")
 
-	// Create server info.
-	serverInfo := mcp.Implementation{
-		Name:    "Stateful-JSON-Yes-GETSSE-Server",
-		Version: "1.0.0",
-	}
-
 	// Create session manager (valid for 1 hour).
 	sessionManager := mcp.NewSessionManager(3600)
 
@@ -172,13 +166,13 @@ func main() {
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. Support GET SSE
 	mcpServer := mcp.NewServer(
-		":3004", // Server address and port
-		serverInfo,
+		"Stateful-JSON-Yes-GETSSE-Server",      // Server name
+		"1.0.0",                                // Server version
+		mcp.WithServerAddress(":3004"),         // Server address and port
 		mcp.WithPathPrefix("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithSSEEnabled(false),              // Disable SSE
+		mcp.WithPostSSEEnabled(false),          // Disable SSE
 		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
-		mcp.WithDefaultResponseMode("json"),    // Set default response mode to JSON
 	)
 
 	// Register a greeting tool.
@@ -258,8 +252,13 @@ func main() {
 	// Register session management route to allow viewing active sessions
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
-			// Use the new API to get the list of active sessions
-			sessions := mcpServer.HTTPHandler().(*mcp.HTTPServerHandler).GetActiveSessions()
+			// Use the new public API to get the list of active sessions
+			sessions, err := mcpServer.GetActiveSessions()
+			if err != nil {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				fmt.Fprintf(w, "Error getting active sessions: %v\n", err)
+				return
+			}
 
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Session manager status: Active\n")

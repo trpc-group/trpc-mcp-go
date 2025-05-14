@@ -1,5 +1,5 @@
-// Package mcp defines common error types and constants
-package mcp
+// Package mcperrors defines common error types and constants
+package errors
 
 import "errors"
 

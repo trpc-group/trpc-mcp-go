@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
 // Responder defines the interface for different response handlers
 type Responder interface {
 	// Respond to a request
-	Respond(ctx context.Context, w http.ResponseWriter, r *http.Request, response interface{}, session *Session) error
+	Respond(ctx context.Context, w http.ResponseWriter, r *http.Request, response interface{}, session Session) error
 
 	// Check if the specified content type is supported
 	SupportsContentType(accepts []string) bool
@@ -22,42 +23,10 @@ type Responder interface {
 // ResponderOption represents an option for a responder
 type ResponderOption func(Responder)
 
-// Parse Accept header
-func parseAcceptHeader(acceptHeader string) []string {
-	if acceptHeader == "" {
-		return []string{}
-	}
-
-	// Split and process each value
-	accepts := []string{}
-	for _, accept := range strings.Split(acceptHeader, ",") {
-		// Remove potential parameters (like q values)
-		mediaType := strings.Split(strings.TrimSpace(accept), ";")[0]
-		if mediaType != "" {
-			accepts = append(accepts, mediaType)
-		}
-	}
-
-	return accepts
-}
-
-// Check if Accept header contains the specified content type
-func containsContentType(accepts []string, contentType string) bool {
-	for _, accept := range accepts {
-		if accept == contentType || accept == "*/*" {
-			return true
-		}
-	}
-	return false
-}
-
 // ResponderFactory creates an appropriate response handler
 type ResponderFactory struct {
 	// Whether to enable SSE
-	enableSSE bool
-
-	// Default response mode ("json" or "sse")
-	defaultMode string
+	enablePOSTSSE bool
 
 	// Whether to use stateless mode
 	isStateless bool
@@ -69,9 +38,8 @@ type ResponderFactoryOption func(*ResponderFactory)
 // NewResponderFactory creates a responder factory
 func NewResponderFactory(options ...ResponderFactoryOption) *ResponderFactory {
 	factory := &ResponderFactory{
-		enableSSE:   true,  // Default: SSE enabled
-		defaultMode: "sse", // Default: use SSE response
-		isStateless: false, // Default: stateful mode
+		enablePOSTSSE: true,  // Default: SSE enabled
+		isStateless:   false, // Default: stateful mode
 	}
 
 	// Apply options
@@ -85,16 +53,7 @@ func NewResponderFactory(options ...ResponderFactoryOption) *ResponderFactory {
 // WithResponderSSEEnabled sets whether SSE is enabled
 func WithResponderSSEEnabled(enabled bool) ResponderFactoryOption {
 	return func(f *ResponderFactory) {
-		f.enableSSE = enabled
-	}
-}
-
-// WithResponderDefaultResponseMode sets the default response mode
-func WithResponderDefaultResponseMode(mode string) ResponderFactoryOption {
-	return func(f *ResponderFactory) {
-		if mode == "json" || mode == "sse" {
-			f.defaultMode = mode
-		}
+		f.enablePOSTSSE = enabled
 	}
 }
 
@@ -108,7 +67,7 @@ func WithFactoryStatelessMode(enabled bool) ResponderFactoryOption {
 // CreateResponder creates an appropriate responder based on the request and request body
 func (f *ResponderFactory) CreateResponder(req *http.Request, body []byte) Responder {
 	// If SSE is not enabled, return a JSON responder
-	if !f.enableSSE {
+	if !f.enablePOSTSSE {
 		return NewJSONResponder(
 			WithJSONStatelessMode(f.isStateless),
 		)
@@ -124,10 +83,10 @@ func (f *ResponderFactory) CreateResponder(req *http.Request, body []byte) Respo
 	if req != nil && body != nil && len(body) > 0 {
 		if err := json.Unmarshal(body, &rpcReq); err == nil && rpcReq.ID != nil {
 			// RPC request: check content types accepted by the client
-			accepts := parseAcceptHeader(req.Header.Get(AcceptHeader))
+			accepts := httputil.ParseAcceptHeader(req.Header.Get(httputil.AcceptHeader))
 
-			// Prefer SSE response mode (if client accepts it and it's the default mode)
-			if containsContentType(accepts, ContentTypeSSE) && (f.defaultMode == "sse" || req.Header.Get("Prefer") == "respond-async") {
+			// Prefer SSE response mode
+			if httputil.ContainsContentType(accepts, httputil.ContentTypeSSE) && f.enablePOSTSSE {
 				return NewSSEResponder(
 					WithSSEStatelessMode(f.isStateless),
 				)
