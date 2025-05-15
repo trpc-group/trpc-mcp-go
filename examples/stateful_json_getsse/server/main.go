@@ -116,12 +116,15 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		},
 	}
 
+	serverInstance := mcp.GetServerFromContext(ctx)
+
 	// Start a goroutine in the background to send delayed notification.
 	go func() {
 		time.Sleep(time.Duration(delaySeconds) * time.Second)
 
-		// Get server instance from context.
-		serverInstance := mcp.GetServerFromContext(ctx)
+		serverInstance := serverInstance
+		session := session
+
 		if serverInstance == nil {
 			log.Printf("Failed to send notification: could not get server instance from context.")
 			return
@@ -162,14 +165,14 @@ func main() {
 	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
-	// 1. Stateful mode (using SessionManager)
+	// 1. Stateful mode (using sessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. Support GET SSE
 	mcpServer := mcp.NewServer(
 		"Stateful-JSON-Yes-GETSSE-Server",      // Server name
 		"1.0.0",                                // Server version
 		mcp.WithServerAddress(":3004"),         // Server address and port
-		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithServerPath("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
 		mcp.WithPostSSEEnabled(false),          // Disable SSE
 		mcp.WithGetSSEEnabled(true),            // Enable GET SSE

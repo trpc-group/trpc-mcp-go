@@ -28,53 +28,53 @@ type Session interface {
 	SetData(key string, value interface{})
 }
 
-// SessionManager defines the session manager interface
-type SessionManager interface {
+// sessionManager defines the session manager interface
+type sessionManager interface {
 	// CreateSession creates a new session
-	CreateSession() Session
+	createSession() Session
 
 	// GetSession gets a session
-	GetSession(id string) (Session, bool)
+	getSession(id string) (Session, bool)
 
-	// GetActiveSessions gets all active session IDs
-	GetActiveSessions() []string
+	// getActiveSessions gets all active session IDs
+	getActiveSessions() []string
 
 	// TerminateSession terminates a session
-	TerminateSession(id string) bool
+	terminateSession(id string) bool
 }
 
-// NewSession creates a new session
-func NewSession() Session {
+// newSession creates a new session
+func newSession() Session {
 	return session.NewSession()
 }
 
-// Session manager adapter that implements the SessionManager interface
+// Session manager adapter that implements the sessionManager interface
 type sessionManagerAdapter struct {
 	manager *session.SessionManager
 }
 
 // CreateSession creates a new session
-func (a *sessionManagerAdapter) CreateSession() Session {
+func (a *sessionManagerAdapter) createSession() Session {
 	return a.manager.CreateSession()
 }
 
 // GetSession gets a session
-func (a *sessionManagerAdapter) GetSession(id string) (Session, bool) {
+func (a *sessionManagerAdapter) getSession(id string) (Session, bool) {
 	return a.manager.GetSession(id)
 }
 
-// GetActiveSessions gets all active session IDs
-func (a *sessionManagerAdapter) GetActiveSessions() []string {
+// getActiveSessions gets all active session IDs
+func (a *sessionManagerAdapter) getActiveSessions() []string {
 	return a.manager.GetActiveSessions()
 }
 
 // TerminateSession terminates a session
-func (a *sessionManagerAdapter) TerminateSession(id string) bool {
+func (a *sessionManagerAdapter) terminateSession(id string) bool {
 	return a.manager.TerminateSession(id)
 }
 
 // NewSessionManager creates a session manager
-func NewSessionManager(expirySeconds int) SessionManager {
+func NewSessionManager(expirySeconds int) sessionManager {
 	return &sessionManagerAdapter{
 		manager: session.NewSessionManager(expirySeconds),
 	}
@@ -86,8 +86,8 @@ type sessionContextKey struct{}
 // Server context key
 type serverContextKey struct{}
 
-// SetSessionToContext adds a session to the context
-func SetSessionToContext(ctx context.Context, session Session) context.Context {
+// setSessionToContext adds a session to the context
+func setSessionToContext(ctx context.Context, session Session) context.Context {
 	return context.WithValue(ctx, sessionContextKey{}, session)
 }
 
@@ -97,8 +97,8 @@ func GetSessionFromContext(ctx context.Context) (Session, bool) {
 	return session, ok
 }
 
-// SetServerToContext adds a server instance to the context
-func SetServerToContext(ctx context.Context, server interface{}) context.Context {
+// setServerToContext adds a server instance to the context
+func setServerToContext(ctx context.Context, server interface{}) context.Context {
 	return context.WithValue(ctx, serverContextKey{}, server)
 }
 

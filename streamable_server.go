@@ -11,13 +11,13 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
-// RequestHandler interface defines a component that handles requests
-type RequestHandler interface {
-	// HandleRequest handle a request
-	HandleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
+// requestHandler interface defines a component that handles requests
+type requestHandler interface {
+	// handleRequest handle a request
+	handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
-	// HandleNotification handle a notification
-	HandleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error
+	// handleNotification handle a notification
+	handleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error
 }
 
 // httpServerHandler implements an HTTP server handler
@@ -25,10 +25,10 @@ type httpServerHandler struct {
 	// Logger for this server handler.
 	logger Logger
 	// Session manager
-	sessionManager SessionManager
+	sessionManager sessionManager
 
 	// Request handler
-	requestHandler RequestHandler
+	requestHandler requestHandler
 
 	// Whether sessions are enabled
 	enableSession bool
@@ -36,8 +36,8 @@ type httpServerHandler struct {
 	// Whether stateless mode is used
 	isStateless bool
 
-	// Responder factory
-	responderFactory *ResponderFactory
+	// responder factory
+	responderFactory *responderFactory
 
 	// Notification channel buffer size
 	notificationBufferSize int
@@ -64,12 +64,12 @@ type getSSEConnection struct {
 	// Prevent concurrent write conflicts
 	writeLock sync.Mutex
 
-	// Event ID generator, reuses existing SSEResponder
-	sseResponder *SSEResponder
+	// Event ID generator, reuses existing sseResponder
+	sseResponder *sseResponder
 }
 
 // newHTTPServerHandler creates an HTTP server handler
-func newHTTPServerHandler(handler RequestHandler, options ...func(*httpServerHandler)) *httpServerHandler {
+func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHandler)) *httpServerHandler {
 	h := &httpServerHandler{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		requestHandler:         handler,
@@ -91,10 +91,10 @@ func newHTTPServerHandler(handler RequestHandler, options ...func(*httpServerHan
 		h.logger = GetDefaultLogger()
 	}
 
-	// After applying all options, ensure ResponderFactory uses correct stateless mode setting
-	h.responderFactory = NewResponderFactory(
-		WithResponderSSEEnabled(h.enablePostSSE),
-		WithFactoryStatelessMode(h.isStateless),
+	// After applying all options, ensure responderFactory uses correct stateless mode setting
+	h.responderFactory = newResponderFactory(
+		withResponderSSEEnabled(h.enablePostSSE),
+		withFactoryStatelessMode(h.isStateless),
 	)
 
 	// If sessions are enabled but no session manager is set, create a default one
@@ -106,7 +106,7 @@ func newHTTPServerHandler(handler RequestHandler, options ...func(*httpServerHan
 }
 
 // withTransportSessionManager sets the session manager.
-func withTransportSessionManager(manager SessionManager) func(*httpServerHandler) {
+func withTransportSessionManager(manager sessionManager) func(*httpServerHandler) {
 	return func(h *httpServerHandler) {
 		h.sessionManager = manager
 	}
@@ -219,20 +219,20 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	var session Session
 	if h.isStateless {
 		// Stateless mode: create a temporary session for each request.
-		session = NewSession()
+		session = newSession()
 	} else if h.enableSession {
 		// Stateful mode
 		sessionIDHeader := r.Header.Get(httputil.SessionIDHeader)
 		if sessionIDHeader != "" {
 			var ok bool
-			session, ok = h.sessionManager.GetSession(sessionIDHeader)
+			session, ok = h.sessionManager.getSession(sessionIDHeader)
 			if !ok {
 				http.Error(w, "Session not found or expired", http.StatusNotFound) // 404 if session ID provided but not found
 				return
 			}
 		} else if isInitialize {
 			// If it's an initialize request and no session ID header, create a new session
-			session = h.sessionManager.CreateSession()
+			session = h.sessionManager.createSession()
 			h.logger.Infof("Created new session ID: %s for initialize request", session.GetID())
 		} else {
 			// Not an initialize request and no session ID header was provided.
@@ -243,7 +243,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	}
 
 	// Create response processor
-	responder := h.responderFactory.CreateResponder(r, rawMessage)
+	responder := h.responderFactory.createResponder(r, rawMessage)
 
 	// This is a request
 	if base.ID != nil && base.Method != "" {
@@ -254,7 +254,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		}
 
 		// Check response processor type
-		if sseResponder, ok := responder.(*SSEResponder); ok {
+		if sseResponder, ok := responder.(*sseResponder); ok {
 			// Use SSE response mode
 			// Check if streaming is supported
 			flusher, ok := w.(http.Flusher)
@@ -276,21 +276,21 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 			if session != nil {
 				sessionID = session.GetID()
 			}
-			notificationSender := NewSSENotificationSender(w, flusher, sessionID)
-			reqCtx := WithNotificationSender(ctx, notificationSender)
+			notificationSender := newSSENotificationSender(w, flusher, sessionID)
+			reqCtx := withNotificationSender(ctx, notificationSender)
 
 			// Add session to context
 			if session != nil {
-				reqCtx = SetSessionToContext(reqCtx, session)
+				reqCtx = setSessionToContext(reqCtx, session)
 			}
 
 			// Directly sync process request
-			resp, err := h.requestHandler.HandleRequest(reqCtx, &req, session)
+			resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 			if err != nil {
 				h.logger.Infof("Request processing failed: %v", err)
-				errorResp := NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+				errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
 				// Send error response
-				err = sseResponder.Respond(ctx, w, r, errorResp, session)
+				err = sseResponder.respond(ctx, w, r, errorResp, session)
 				if err != nil {
 					h.logger.Infof("Failed to send SSE error response: %v", err)
 				}
@@ -302,7 +302,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 				ID:      req.ID,
 				Result:  resp,
 			}
-			err = sseResponder.Respond(ctx, w, r, jsonrpcResponse, session)
+			err = sseResponder.respond(ctx, w, r, jsonrpcResponse, session)
 			if err != nil {
 				h.logger.Infof("Failed to send SSE final response: %v", err)
 			}
@@ -311,19 +311,19 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 
 		// Use normal JSON response mode
 		// Create a NoOp notification sender for JSON mode
-		noopSender := &NoopNotificationSender{}
-		reqCtx := WithNotificationSender(ctx, noopSender)
+		noopSender := &noopNotificationSender{}
+		reqCtx := withNotificationSender(ctx, noopSender)
 
 		// Add session to context
 		if session != nil {
-			reqCtx = SetSessionToContext(reqCtx, session)
+			reqCtx = setSessionToContext(reqCtx, session)
 		}
 
-		resp, err := h.requestHandler.HandleRequest(reqCtx, &req, session)
+		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 		if err != nil {
 			h.logger.Infof("Request processing failed: %v", err)
-			errorResp := NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
-			responder.Respond(respCtx, w, r, errorResp, session)
+			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+			responder.respond(respCtx, w, r, errorResp, session)
 			return
 		}
 
@@ -333,7 +333,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 			Result:  resp,
 		}
 
-		responder.Respond(respCtx, w, r, jsonrpcResponse, session)
+		responder.respond(respCtx, w, r, jsonrpcResponse, session)
 		return
 	}
 
@@ -352,7 +352,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 				h.logger.Info("Warning: Received initialized notification but no active session")
 			}
 
-			// Directly return 202 Accepted, instead of using responder.Respond
+			// Directly return 202 Accepted, instead of using responder.respond
 			h.sendNotificationResponse(w, session)
 			return
 		}
@@ -360,17 +360,17 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		// Add session to context
 		notificationCtx := ctx
 		if session != nil {
-			notificationCtx = SetSessionToContext(ctx, session)
+			notificationCtx = setSessionToContext(ctx, session)
 		}
 
 		// Handle other notifications
-		if err := h.requestHandler.HandleNotification(notificationCtx, &notification, session); err != nil {
+		if err := h.requestHandler.handleNotification(notificationCtx, &notification, session); err != nil {
 			h.logger.Infof("Notification processing failed: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		// Return 202 Accepted, use helper function instead of responder.Respond
+		// Return 202 Accepted, use helper function instead of responder.respond
 		h.sendNotificationResponse(w, session)
 		return
 	}
@@ -391,7 +391,7 @@ func (h *httpServerHandler) handleDelete(ctx context.Context, w http.ResponseWri
 	// Get session
 	if h.enableSession {
 		// Terminate session
-		if h.sessionManager.TerminateSession(sessionID) {
+		if h.sessionManager.terminateSession(sessionID) {
 			// Clean up GET SSE connections
 			h.cleanupSession(sessionID)
 
@@ -410,6 +410,25 @@ func (h *httpServerHandler) handleDelete(ctx context.Context, w http.ResponseWri
 
 // handleGet handles GET requests (for Server-Sent Events)
 func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	sessionIDHeader := r.Header.Get(httputil.SessionIDHeader) // Get session ID early for logging
+	h.logger.Infof("Session [%s]: handleGet invoked. Initial r.Context().Err(): %v", sessionIDHeader, r.Context().Err())
+
+	// Defer full cancel log
+	var localCancelFunc context.CancelFunc // To access in defer for logging state before explicit cancel by defer
+	// currentConnCtxForDefer was removed as it was unused after simplifying defer logging
+
+	defer func() {
+		// It's tricky to reliably get the specific connCtx here if the function exits in multiple ways
+		// or if connCtx is shadowed. We'll log based on localCancelFunc being set.
+		if localCancelFunc != nil {
+			h.logger.Infof("Session [%s]: handleGet defer: Calling localCancelFunc().", sessionIDHeader)
+			localCancelFunc() // This is the cancelConn from WithCancel for the current handleGet instance
+			h.logger.Infof("Session [%s]: handleGet defer: localCancelFunc() called.", sessionIDHeader)
+		} else {
+			h.logger.Infof("Session [%s]: handleGet defer: localCancelFunc was nil (should not happen if connCtx was created).", sessionIDHeader)
+		}
+	}()
+
 	// Check if GET SSE is enabled
 	if !h.enableGetSSE {
 		w.Header().Set("Allow", "POST, DELETE")
@@ -431,7 +450,7 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	}
 
 	// Get session
-	session, ok := h.sessionManager.GetSession(sessionID)
+	session, ok := h.sessionManager.getSession(sessionID)
 	if !ok {
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
@@ -452,7 +471,7 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 
 	// Create context, for canceling connection
 	connCtx, cancelConn := context.WithCancel(ctx)
-	defer cancelConn()
+	localCancelFunc = cancelConn // Assign to the variable captured by defer
 
 	// Check if there's already a GET SSE connection
 	h.getSSEConnectionsLock.Lock()
@@ -470,7 +489,7 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 		ctx:          connCtx,
 		cancelFunc:   cancelConn,
 		lastEventID:  lastEventID,
-		sseResponder: NewSSEResponder(),
+		sseResponder: newSSEResponder(),
 	}
 	h.getSSEConnections[session.GetID()] = conn
 	h.getSSEConnectionsLock.Unlock()
@@ -507,7 +526,7 @@ func (h *httpServerHandler) sendNotificationToGetSSE(sessionID string, notificat
 	defer conn.writeLock.Unlock()
 
 	// Use SSE responder to send notification
-	eventID, err := conn.sseResponder.SendNotification(conn.writer, conn.flusher, notification)
+	eventID, err := conn.sseResponder.sendNotification(conn.writer, conn.flusher, notification)
 	if err != nil {
 		return fmt.Errorf("failed to send notification via SSE: %w", err)
 	}
@@ -520,7 +539,7 @@ func (h *httpServerHandler) sendNotificationToGetSSE(sessionID string, notificat
 // Handle SSE stream resumption
 func (h *httpServerHandler) handleStreamResumption(ctx context.Context, conn *getSSEConnection, sessionID string) {
 	// Get session
-	session, ok := h.sessionManager.GetSession(sessionID)
+	session, ok := h.sessionManager.getSession(sessionID)
 	if !ok {
 		h.logger.Infof("Stream resumption failed: session %s not found", sessionID)
 		return
@@ -528,7 +547,7 @@ func (h *httpServerHandler) handleStreamResumption(ctx context.Context, conn *ge
 
 	// Add session to context (this is useful for future code that might use session through context)
 	// Note: Currently not used in this context, but we keep this code to ensure context has session information
-	_ = SetSessionToContext(ctx, session)
+	_ = setSessionToContext(ctx, session)
 
 	// Implement resumption logic, re-sending messages based on lastEventID
 	// This needs to be handled according to the server's storage/cache mechanism
@@ -549,7 +568,7 @@ func (h *httpServerHandler) handleStreamResumption(ctx context.Context, conn *ge
 
 	// Create strictly conforming JSON-RPC 2.0 notification object
 	// Use core.NewNotification to ensure jsonrpc field is set to "2.0"
-	jsonNotification := NewJSONRPCNotification(notification)
+	jsonNotification := newJSONRPCNotification(notification)
 
 	// Validate notification object format before sending
 	notifBytes, _ := json.Marshal(notification)
@@ -578,29 +597,29 @@ func (h *httpServerHandler) sendNotificationResponse(w http.ResponseWriter, sess
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// SessionEventNotifier defines the interface for receiving session event notifications
-type SessionEventNotifier interface {
+// sessionEventNotifier defines the interface for receiving session event notifications
+type sessionEventNotifier interface {
 	// Called when session terminates
-	OnSessionTerminated(sessionID string)
+	onSessionTerminated(sessionID string)
 }
 
-// SendNotification sends notification to GET SSE connection
-func (h *httpServerHandler) SendNotification(sessionID string, notification *JSONRPCNotification) error {
+// sendNotification sends notification to GET SSE connection
+func (h *httpServerHandler) sendNotification(sessionID string, notification *JSONRPCNotification) error {
 	// Directly send notification through GET SSE, without distinguishing notification type
 	return h.sendNotificationToGetSSE(sessionID, notification)
 }
 
-// GetActiveSessions gets all active session IDs
-func (h *httpServerHandler) GetActiveSessions() []string {
+// getActiveSessions gets all active session IDs
+func (h *httpServerHandler) getActiveSessions() []string {
 	if h.sessionManager == nil {
 		return []string{}
 	}
-	return h.sessionManager.GetActiveSessions()
+	return h.sessionManager.getActiveSessions()
 }
 
 // Clean up resources when session terminates
 func (h *httpServerHandler) cleanupSession(sessionID string) {
-	// Close GET SSE connection
+	// close GET SSE connection
 	h.getSSEConnectionsLock.Lock()
 	if conn, exists := h.getSSEConnections[sessionID]; exists {
 		conn.cancelFunc()

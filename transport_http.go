@@ -75,31 +75,31 @@ var (
 	ErrInvalidResponseType = errors.New("invalid response type")
 )
 
-// Transport represents the interface for the communication transport layer
-type Transport interface {
+// transport represents the interface for the communication transport layer
+type transport interface {
 	// Send a request and wait for a response
-	SendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error)
+	sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error)
 
 	// Send a notification (no response expected)
-	SendNotification(ctx context.Context, notification *JSONRPCNotification) error
+	sendNotification(ctx context.Context, notification *JSONRPCNotification) error
 
 	// Send a response
-	SendResponse(ctx context.Context, resp *JSONRPCResponse) error
+	sendResponse(ctx context.Context, resp *JSONRPCResponse) error
 
 	// Close the transport
-	Close() error
+	close() error
 }
 
-// HTTPTransport represents the interface for HTTP transport
-type HTTPTransport interface {
-	Transport
+// httpTransport represents the interface for HTTP transport
+type httpTransport interface {
+	transport
 
 	// Get the session ID
-	GetSessionID() string
+	getSessionID() string
 
 	// Set the session ID
-	SetSessionID(sessionID string)
+	setSessionID(sessionID string)
 
 	// Terminate the session
-	TerminateSession(ctx context.Context) error
+	terminateSession(ctx context.Context) error
 }

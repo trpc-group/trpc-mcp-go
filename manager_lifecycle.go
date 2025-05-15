@@ -56,43 +56,43 @@ func newLifecycleManager(serverInfo Implementation) *lifecycleManager {
 }
 
 // WithProtocolVersion sets the default protocol version
-func (m *lifecycleManager) WithProtocolVersion(version string) *lifecycleManager {
+func (m *lifecycleManager) withProtocolVersion(version string) *lifecycleManager {
 	m.defaultProtocolVersion = version
 	return m
 }
 
-// WithSupportedVersions sets the supported protocol versions
-func (m *lifecycleManager) WithSupportedVersions(versions []string) *lifecycleManager {
+// withSupportedVersions sets the supported protocol versions
+func (m *lifecycleManager) withSupportedVersions(versions []string) *lifecycleManager {
 	m.supportedVersions = versions
 	return m
 }
 
-// WithCapabilities sets the capabilities
-func (m *lifecycleManager) WithCapabilities(capabilities map[string]interface{}) *lifecycleManager {
+// withCapabilities sets the capabilities
+func (m *lifecycleManager) withCapabilities(capabilities map[string]interface{}) *lifecycleManager {
 	m.capabilities = capabilities
 	return m
 }
 
-// WithToolManager sets the tool manager
-func (m *lifecycleManager) WithToolManager(toolManager *toolManager) *lifecycleManager {
+// withToolManager sets the tool manager
+func (m *lifecycleManager) withToolManager(toolManager *toolManager) *lifecycleManager {
 	m.toolManager = toolManager
 	return m
 }
 
-// WithResourceManager sets the resource manager
-func (m *lifecycleManager) WithResourceManager(resourceManager *resourceManager) *lifecycleManager {
+// withResourceManager sets the resource manager
+func (m *lifecycleManager) withResourceManager(resourceManager *resourceManager) *lifecycleManager {
 	m.resourceManager = resourceManager
 	return m
 }
 
-// WithPromptManager sets the prompt manager.
-func (m *lifecycleManager) WithPromptManager(promptManager *promptManager) *lifecycleManager {
+// withPromptManager sets the prompt manager.
+func (m *lifecycleManager) withPromptManager(promptManager *promptManager) *lifecycleManager {
 	m.promptManager = promptManager
 	return m
 }
 
-// WithClientTransportLogger sets the logger for lifecycleManager.
-func (m *lifecycleManager) WithLogger(logger Logger) *lifecycleManager {
+// withClientTransportLogger sets the logger for lifecycleManager.
+func (m *lifecycleManager) withLogger(logger Logger) *lifecycleManager {
 	m.logger = logger
 	return m
 }
@@ -108,14 +108,14 @@ func (m *lifecycleManager) updateCapabilities() {
 	}
 
 	// If there is a resource manager and resources are registered, add resource capabilities
-	if m.resourceManager != nil && len(m.resourceManager.GetResources()) > 0 {
+	if m.resourceManager != nil && len(m.resourceManager.getResources()) > 0 {
 		capMap["resources"] = map[string]interface{}{
 			"listChanged": true,
 		}
 	}
 
 	// If there is a prompt manager and prompts are registered, add prompt capabilities
-	if m.promptManager != nil && len(m.promptManager.GetPrompts()) > 0 {
+	if m.promptManager != nil && len(m.promptManager.getPrompts()) > 0 {
 		capMap["prompts"] = map[string]interface{}{
 			"listChanged": true,
 		}
@@ -130,23 +130,23 @@ func (m *lifecycleManager) updateCapabilities() {
 	m.capabilities = capMap
 }
 
-// HandleInitialize handles initialize requests
-func (m *lifecycleManager) HandleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+// handleInitialize handles initialize requests
+func (m *lifecycleManager) handleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get protocol version
 	protocolVersion, ok := paramsMap["protocolVersion"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if protocol version is supported
@@ -252,8 +252,8 @@ func convertToServerCapabilities(capMap map[string]interface{}) ServerCapabiliti
 	return capabilities
 }
 
-// HandleInitialized handles initialized notifications
-func (m *lifecycleManager) HandleInitialized(ctx context.Context, notification *JSONRPCNotification, session Session) error {
+// handleInitialized handles initialized notifications
+func (m *lifecycleManager) handleInitialized(ctx context.Context, notification *JSONRPCNotification, session Session) error {
 	if session == nil {
 		// Or handle as a global initialized event if applicable
 		return nil
@@ -261,7 +261,7 @@ func (m *lifecycleManager) HandleInitialized(ctx context.Context, notification *
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.sessionStates[session.GetID()]; !exists {
-		// This case should ideally not happen if HandleInitialize was called first for the session
+		// This case should ideally not happen if handleInitialize was called first for the session
 		return errors.ErrSessionNotInitialized // Session not found in states, wasn't being initialized
 	}
 	if m.sessionStates[session.GetID()] {
@@ -272,15 +272,15 @@ func (m *lifecycleManager) HandleInitialized(ctx context.Context, notification *
 	return nil
 }
 
-// IsInitialized checks if a session is initialized
-func (m *lifecycleManager) IsInitialized(sessionID string) bool {
+// isInitialized checks if a session is initialized
+func (m *lifecycleManager) isInitialized(sessionID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sessionStates[sessionID]
 }
 
 // OnSessionTerminated handles session termination events
-func (m *lifecycleManager) OnSessionTerminated(sessionID string) {
+func (m *lifecycleManager) onSessionTerminated(sessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessionStates, sessionID)

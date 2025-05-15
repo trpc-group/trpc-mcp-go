@@ -19,8 +19,8 @@ type contextKey string
 // Notification sender context key
 const notificationSenderKey contextKey = "notificationSender"
 
-// NotificationSender defines the notification sender interface
-type NotificationSender interface {
+// notificationSender defines the notification sender interface
+type notificationSender interface {
 	// SendLogMessage sends a log message notification
 	SendLogMessage(level string, message string) error
 
@@ -33,14 +33,14 @@ type NotificationSender interface {
 	SendNotification(notification *Notification) error
 }
 
-// WithNotificationSender adds a notification sender to the context
-func WithNotificationSender(ctx context.Context, sender NotificationSender) context.Context {
+// withNotificationSender adds a notification sender to the context
+func withNotificationSender(ctx context.Context, sender notificationSender) context.Context {
 	return context.WithValue(ctx, notificationSenderKey, sender)
 }
 
 // GetNotificationSender retrieves the notification sender from the context
-func GetNotificationSender(ctx context.Context) (NotificationSender, bool) {
-	sender, ok := ctx.Value(notificationSenderKey).(NotificationSender)
+func GetNotificationSender(ctx context.Context) (notificationSender, bool) {
+	sender, ok := ctx.Value(notificationSenderKey).(notificationSender)
 	return sender, ok
 }
 

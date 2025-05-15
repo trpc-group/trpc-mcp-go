@@ -116,10 +116,13 @@ func TestContextCancellation(t *testing.T) {
 		defer cancel()
 
 		// Call long delay tool.
-		_, err := client.CallTool(ctx, "delay-tool", map[string]interface{}{
+		callToolReq := &mcp.CallToolRequest{}
+		callToolReq.Params.Name = "delay-tool"
+		callToolReq.Params.Arguments = map[string]interface{}{
 			"delay_ms": 2000, // Set delay longer than context timeout.
 			"message":  "This message should not be received",
-		})
+		}
+		_, err := client.CallTool(ctx, callToolReq)
 
 		// Verify error.
 		require.Error(t, err, "should return timeout error")

@@ -8,8 +8,8 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
-// SSENotificationSender implements the SSE notification sender
-type SSENotificationSender struct {
+// sseNotificationSender implements the SSE notification sender
+type sseNotificationSender struct {
 	// Response writer
 	writer http.ResponseWriter
 
@@ -23,9 +23,9 @@ type SSENotificationSender struct {
 	sseWriter *sseutil.Writer
 }
 
-// NewSSENotificationSender creates an SSE notification sender
-func NewSSENotificationSender(w http.ResponseWriter, f http.Flusher, sessionID string) *SSENotificationSender {
-	return &SSENotificationSender{
+// newSSENotificationSender creates an SSE notification sender
+func newSSENotificationSender(w http.ResponseWriter, f http.Flusher, sessionID string) *sseNotificationSender {
+	return &sseNotificationSender{
 		writer:    w,
 		flusher:   f,
 		sessionID: sessionID,
@@ -34,7 +34,7 @@ func NewSSENotificationSender(w http.ResponseWriter, f http.Flusher, sessionID s
 }
 
 // SendLogMessage sends a log message notification
-func (s *SSENotificationSender) SendLogMessage(level string, message string) error {
+func (s *sseNotificationSender) SendLogMessage(level string, message string) error {
 	return s.SendCustomNotification(NotificationMethodMessage, map[string]interface{}{
 		"level": level,
 		"data": map[string]interface{}{
@@ -45,7 +45,7 @@ func (s *SSENotificationSender) SendLogMessage(level string, message string) err
 }
 
 // SendProgress sends a progress update notification
-func (s *SSENotificationSender) SendProgress(progress float64, message string) error {
+func (s *sseNotificationSender) SendProgress(progress float64, message string) error {
 	return s.SendCustomNotification(NotificationMethodProgress, map[string]interface{}{
 		"progress": progress,
 		"message":  message,
@@ -58,7 +58,7 @@ func (s *SSENotificationSender) SendProgress(progress float64, message string) e
 }
 
 // SendCustomNotification sends a custom notification
-func (s *SSENotificationSender) SendCustomNotification(method string, params map[string]interface{}) error {
+func (s *sseNotificationSender) SendCustomNotification(method string, params map[string]interface{}) error {
 	// Create NotificationParams
 	notificationParams := NotificationParams{
 		AdditionalFields: params,
@@ -78,7 +78,7 @@ func (s *SSENotificationSender) SendCustomNotification(method string, params map
 	}
 
 	// Create jsonNotification
-	jsonNotification := NewJSONRPCNotification(notification)
+	jsonNotification := newJSONRPCNotification(notification)
 
 	// Serialize jsonNotification
 	data, err := json.Marshal(jsonNotification)
@@ -95,9 +95,9 @@ func (s *SSENotificationSender) SendCustomNotification(method string, params map
 }
 
 // SendNotification sends a custom notification
-func (s *SSENotificationSender) SendNotification(notification *Notification) error {
+func (s *sseNotificationSender) SendNotification(notification *Notification) error {
 	// Create notification
-	jsonNotification := NewJSONRPCNotification(*notification)
+	jsonNotification := newJSONRPCNotification(*notification)
 
 	// Serialize notifications
 	data, err := json.Marshal(jsonNotification)
@@ -113,24 +113,24 @@ func (s *SSENotificationSender) SendNotification(notification *Notification) err
 	})
 }
 
-// NoopNotificationSender implements a no-operation notification sender
-type NoopNotificationSender struct{}
+// noopNotificationSender implements a no-operation notification sender
+type noopNotificationSender struct{}
 
 // SendLogMessage no-op implementation
-func (n *NoopNotificationSender) SendLogMessage(level string, message string) error {
+func (n *noopNotificationSender) SendLogMessage(level string, message string) error {
 	return nil
 }
 
 // SendProgress no-op implementation
-func (n *NoopNotificationSender) SendProgress(progress float64, message string) error {
+func (n *noopNotificationSender) SendProgress(progress float64, message string) error {
 	return nil
 }
 
 // SendCustomNotification no-op implementation
-func (n *NoopNotificationSender) SendCustomNotification(method string, params map[string]interface{}) error {
+func (n *noopNotificationSender) SendCustomNotification(method string, params map[string]interface{}) error {
 	return nil
 }
 
-func (NoopNotificationSender) SendNotification(notification *Notification) error {
+func (n *noopNotificationSender) SendNotification(notification *Notification) error {
 	return nil
 }

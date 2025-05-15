@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 type ListToolsRequest struct {
@@ -35,6 +34,9 @@ type CallToolRequest struct {
 type CallToolParams struct {
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Meta      *struct {
+		ProgressToken ProgressToken `json:"progressToken,omitempty"`
+	} `json:"_meta,omitempty"`
 }
 
 // RequestMeta represents request metadata
@@ -186,86 +188,7 @@ func NewErrorResult(text string) *CallToolResult {
 	}
 }
 
-// ParseListToolsResult parses a tool list response
-func ParseListToolsResult(result interface{}) (*ListToolsResult, error) {
-	// Type assertion to map
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		return nil, errors.ErrInvalidToolListFormat
-	}
-
-	// Create result object
-	toolsResult := &ListToolsResult{}
-
-	// Parse next page cursor
-	if cursor, ok := resultMap["nextCursor"].(string); ok {
-		toolsResult.NextCursor = Cursor(cursor)
-	}
-
-	// Parse tool list
-	toolsArray, ok := resultMap["tools"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("%w: tools field not found or invalid type", errors.ErrInvalidToolListFormat)
-	}
-
-	// Create a slice of Tool (not *Tool)
-	tools := make([]Tool, 0, len(toolsArray))
-	for _, item := range toolsArray {
-		tool, err := parseToolItem(item)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse tool item: %w", err)
-		}
-		tools = append(tools, *tool)
-	}
-
-	// Create result
-	return &ListToolsResult{
-		Tools: tools,
-	}, nil
-}
-
-// parseToolItem parses a single tool item
-func parseToolItem(item interface{}) (*Tool, error) {
-	toolMap, ok := item.(map[string]interface{})
-	if !ok {
-		return nil, errors.ErrInvalidToolFormat
-	}
-
-	// Create tool object
-	tool := &Tool{}
-
-	// Extract name
-	if name, ok := toolMap["name"].(string); ok {
-		tool.Name = name
-	} else {
-		return nil, fmt.Errorf("tool missing name")
-	}
-
-	// Extract description
-	if description, ok := toolMap["description"].(string); ok {
-		tool.Description = description
-	}
-
-	// Parse input schema
-	if schema, ok := toolMap["inputSchema"].(map[string]interface{}); ok {
-		// Convert map to JSON then parse to Schema
-		schemaBytes, err := json.Marshal(schema)
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize schema: %w", err)
-		}
-
-		inputSchema := &openapi3.Schema{}
-		if err := json.Unmarshal(schemaBytes, inputSchema); err != nil {
-			return nil, fmt.Errorf("failed to parse schema: %w", err)
-		}
-
-		tool.InputSchema = inputSchema
-	}
-
-	return tool, nil
-}
-
-func ParseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
+func parseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 	var jsonContent map[string]any
 	if err := json.Unmarshal(*rawMessage, &jsonContent); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
@@ -305,7 +228,7 @@ func ParseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 		}
 
 		// Process content.
-		content, err := ParseContent(contentMap)
+		content, err := parseContent(contentMap)
 		if err != nil {
 			return nil, err
 		}
@@ -316,32 +239,32 @@ func ParseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 	return &result, nil
 }
 
-func ParseContent(contentMap map[string]any) (Content, error) {
-	contentType := ExtractString(contentMap, "type")
+func parseContent(contentMap map[string]any) (Content, error) {
+	contentType := extractString(contentMap, "type")
 
 	switch contentType {
 	case "text":
-		text := ExtractString(contentMap, "text")
+		text := extractString(contentMap, "text")
 		if text == "" {
 			return nil, fmt.Errorf("text is missing")
 		}
 		return NewTextContent(text), nil
 
 	case "image":
-		data := ExtractString(contentMap, "data")
-		mimeType := ExtractString(contentMap, "mimeType")
+		data := extractString(contentMap, "data")
+		mimeType := extractString(contentMap, "mimeType")
 		if data == "" || mimeType == "" {
 			return nil, fmt.Errorf("image data or mimeType is missing")
 		}
 		return NewImageContent(data, mimeType), nil
 
 	case "resource":
-		resourceMap := ExtractMap(contentMap, "resource")
+		resourceMap := extractMap(contentMap, "resource")
 		if resourceMap == nil {
 			return nil, fmt.Errorf("resource is missing")
 		}
 
-		resourceContents, err := ParseResourceContents(resourceMap)
+		resourceContents, err := parseResourceContents(resourceMap)
 		if err != nil {
 			return nil, err
 		}
@@ -352,7 +275,7 @@ func ParseContent(contentMap map[string]any) (Content, error) {
 	return nil, fmt.Errorf("unsupported content type: %s", contentType)
 }
 
-func ExtractString(data map[string]any, key string) string {
+func extractString(data map[string]any, key string) string {
 	if value, ok := data[key]; ok {
 		if str, ok := value.(string); ok {
 			return str
@@ -361,7 +284,7 @@ func ExtractString(data map[string]any, key string) string {
 	return ""
 }
 
-func ExtractMap(data map[string]any, key string) map[string]any {
+func extractMap(data map[string]any, key string) map[string]any {
 	if value, ok := data[key]; ok {
 		if m, ok := value.(map[string]any); ok {
 			return m
@@ -370,15 +293,15 @@ func ExtractMap(data map[string]any, key string) map[string]any {
 	return nil
 }
 
-func ParseResourceContents(contentMap map[string]any) (ResourceContents, error) {
-	uri := ExtractString(contentMap, "uri")
+func parseResourceContents(contentMap map[string]any) (ResourceContents, error) {
+	uri := extractString(contentMap, "uri")
 	if uri == "" {
 		return nil, fmt.Errorf("resource uri is missing")
 	}
 
-	mimeType := ExtractString(contentMap, "mimeType")
+	mimeType := extractString(contentMap, "mimeType")
 
-	if text := ExtractString(contentMap, "text"); text != "" {
+	if text := extractString(contentMap, "text"); text != "" {
 		return TextResourceContents{
 			URI:      uri,
 			MIMEType: mimeType,
@@ -386,7 +309,7 @@ func ParseResourceContents(contentMap map[string]any) (ResourceContents, error) 
 		}, nil
 	}
 
-	if blob := ExtractString(contentMap, "blob"); blob != "" {
+	if blob := extractString(contentMap, "blob"); blob != "" {
 		return BlobResourceContents{
 			URI:      uri,
 			MIMEType: mimeType,

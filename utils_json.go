@@ -7,8 +7,8 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/utils"
 )
 
-// ParseInitializeResultFromJSON parses a raw JSON message into an InitializeResult
-func ParseInitializeResultFromJSON(rawMessage *json.RawMessage) (*InitializeResult, error) {
+// parseInitializeResultFromJSON parses a raw JSON message into an InitializeResult
+func parseInitializeResultFromJSON(rawMessage *json.RawMessage) (*InitializeResult, error) {
 	var result InitializeResult
 	if err := json.Unmarshal(*rawMessage, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal InitializeResult: %v", err)
@@ -16,8 +16,8 @@ func ParseInitializeResultFromJSON(rawMessage *json.RawMessage) (*InitializeResu
 	return &result, nil
 }
 
-// ParseListPromptsResultFromJSON parses a raw JSON message into a ListPromptsResult
-func ParseListPromptsResultFromJSON(rawMessage *json.RawMessage) (*ListPromptsResult, error) {
+// parseListPromptsResultFromJSON parses a raw JSON message into a ListPromptsResult
+func parseListPromptsResultFromJSON(rawMessage *json.RawMessage) (*ListPromptsResult, error) {
 	var result ListPromptsResult
 	if err := json.Unmarshal(*rawMessage, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal ListPromptsResult: %v", err)
@@ -25,8 +25,8 @@ func ParseListPromptsResultFromJSON(rawMessage *json.RawMessage) (*ListPromptsRe
 	return &result, nil
 }
 
-// ParseGetPromptResultFromJSON parses a raw JSON message into a GetPromptResult
-func ParseGetPromptResultFromJSON(rawMessage *json.RawMessage) (*GetPromptResult, error) {
+// parseGetPromptResultFromJSON parses a raw JSON message into a GetPromptResult
+func parseGetPromptResultFromJSON(rawMessage *json.RawMessage) (*GetPromptResult, error) {
 	var result GetPromptResult
 	if err := json.Unmarshal(*rawMessage, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal GetPromptResult: %v", err)
@@ -34,8 +34,8 @@ func ParseGetPromptResultFromJSON(rawMessage *json.RawMessage) (*GetPromptResult
 	return &result, nil
 }
 
-// ParseListResourcesResultFromJSON parses a raw JSON message into a ListResourcesResult
-func ParseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourcesResult, error) {
+// parseListResourcesResultFromJSON parses a raw JSON message into a ListResourcesResult
+func parseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourcesResult, error) {
 	var result ListResourcesResult
 	if err := json.Unmarshal(*rawMessage, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal ListResourcesResult: %v", err)
@@ -43,8 +43,8 @@ func ParseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourc
 	return &result, nil
 }
 
-// ParseReadResourceResultFromJSON parses a raw JSON message into a ReadResourceResult
-func ParseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResourceResult, error) {
+// parseReadResourceResultFromJSON parses a raw JSON message into a ReadResourceResult
+func parseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResourceResult, error) {
 	// Parse JSON object using internal utility function.
 	data, err := utils.ParseJSONObject(rawMessage)
 	if err != nil {
@@ -84,8 +84,8 @@ func ParseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResource
 	return result, nil
 }
 
-// ParseListToolsResultFromJSON parses a raw JSON message into a ListToolsResult
-func ParseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult, error) {
+// parseListToolsResultFromJSON parses a raw JSON message into a ListToolsResult
+func parseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult, error) {
 	// Parse JSON object using internal utility function.
 	data, err := utils.ParseJSONObject(rawMessage)
 	if err != nil {

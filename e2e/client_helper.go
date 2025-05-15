@@ -31,7 +31,7 @@ func WithGetSSEEnabled() ClientOption {
 }
 
 // WithLastEventID option: set Last-Event-ID for stream recovery.
-// Note: This only saves eventID in test helpers, actual usage requires passing via StreamOptions.
+// Note: This only saves eventID in test helpers, actual usage requires passing via streamOptions.
 func WithLastEventID(eventID string) ClientOption {
 	return func(c *mcp.Client) {
 		// No need to set here, will be used in ExecuteSSETestTool and similar methods.
@@ -68,7 +68,7 @@ func InitializeClient(t *testing.T, c *mcp.Client) {
 	defer cancel()
 
 	// Initialize client.
-	resp, err := c.Initialize(ctx)
+	resp, err := c.Initialize(ctx, &mcp.InitializeRequest{})
 	require.NoError(t, err, "failed to initialize client")
 	require.NotNil(t, resp, "init response should not be nil")
 
@@ -93,7 +93,10 @@ func ExecuteTestTool(t *testing.T, c *mcp.Client, toolName string, args map[stri
 	defer cancel()
 
 	// Call tool.
-	result, err := c.CallTool(ctx, toolName, args)
+	callToolReq := &mcp.CallToolRequest{}
+	callToolReq.Params.Name = toolName
+	callToolReq.Params.Arguments = args
+	result, err := c.CallTool(ctx, callToolReq)
 	require.NoError(t, err, "failed to call tool %s", toolName)
 	require.NotNil(t, result, "tool call result should not be nil")
 
@@ -124,7 +127,7 @@ func CleanupClient(t *testing.T, c *mcp.Client) {
 		}
 	}
 
-	// Close client.
+	// close client.
 	c.Close()
 	t.Log("client resources cleaned up")
 }
@@ -158,13 +161,14 @@ func ExecuteSSETestTool(t *testing.T, c *mcp.Client, toolName string, args map[s
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Create streamOptions.
-	streamOpts := &mcp.StreamOptions{
-		NotificationHandlers: collector.GetHandlers(),
-	}
+	// Register notification handler.
+	c.RegisterNotificationHandler(toolName, collector.GetHandlers()[toolName])
 
 	// Call tool with streaming method.
-	result, err := c.CallToolWithStream(ctx, toolName, args, streamOpts)
+	callToolReq := &mcp.CallToolRequest{}
+	callToolReq.Params.Name = toolName
+	callToolReq.Params.Arguments = args
+	result, err := c.CallTool(ctx, callToolReq)
 	require.NoError(t, err, "failed to call tool %s", toolName)
 	require.NotNil(t, result, "tool call stream result should not be nil")
 

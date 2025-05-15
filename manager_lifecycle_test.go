@@ -32,7 +32,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 	manager := newLifecycleManager(serverInfo)
 
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Test cases
 	testCases := []struct {
@@ -73,27 +73,23 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 
 			// Process request
 			ctx := context.Background()
-			response, err := manager.HandleInitialize(ctx, request, session)
+			response, err := manager.handleInitialize(ctx, request, session)
 
 			// Verify results
 			require.NoError(t, err)
 
 			if tc.expectError {
-				// Type assert to JSONRPCError
+				// Type asserts to JSONRPCError
 				errorResp, ok := response.(JSONRPCError)
 				require.True(t, ok, "Expected JSONRPCError but got different type")
 				assert.Equal(t, tc.errorCode, errorResp.Error.Code)
 			} else {
-				// Type assert to JSONRPCResponse
-				successResp, ok := response.(JSONRPCResponse)
-				require.True(t, ok, "Expected JSONRPCResponse but got different type")
-
-				// Verify response content
-				initResp, ok := successResp.Result.(InitializeResult)
-				require.True(t, ok)
+				// Type asserts to JSONRPCResponse
+				initResp, ok := response.(InitializeResult)
+				require.True(t, ok, "Expected InitializeResult but got different type")
 
 				if tc.protocolVersion == "2023-01-01" {
-					assert.Equal(t, ProtocolVersion_2024_11_05, initResp.ProtocolVersion)
+					assert.Equal(t, ProtocolVersion_2025_03_26, initResp.ProtocolVersion)
 				} else {
 					assert.Equal(t, tc.protocolVersion, initResp.ProtocolVersion)
 				}
@@ -107,7 +103,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 				require.True(t, ok)
 
 				if tc.protocolVersion == "2023-01-01" {
-					assert.Equal(t, ProtocolVersion_2024_11_05, storedVersion)
+					assert.Equal(t, ProtocolVersion_2025_03_26, storedVersion)
 				} else {
 					assert.Equal(t, tc.protocolVersion, storedVersion)
 				}
@@ -125,15 +121,17 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 
 	manager := newLifecycleManager(serverInfo)
 
+	// Create and set prompt manager with a dummy prompt
+	promptMgr := newPromptManager()
+	dummyPrompt := &Prompt{Name: "test-prompt"} // Create a dummy prompt
+	promptMgr.registerPrompt(dummyPrompt)       // Register the dummy prompt
+	manager.withPromptManager(promptMgr)        // Set the prompt manager
+
 	// Skip this test, we will update it after fixing the capabilities conversion logic
-	t.Skip("Waiting for capabilities conversion logic fix to re-test")
 
 	// Set custom capabilities
 	capabilities := map[string]interface{}{
 		"tools": map[string]interface{}{
-			"listChanged": true,
-		},
-		"prompts": map[string]interface{}{
 			"listChanged": true,
 		},
 		"experimental": map[string]interface{}{
@@ -142,15 +140,10 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 	}
 
 	// Set capabilities
-	manager.WithCapabilities(capabilities)
-
-	// Ensure prompts feature is added directly to capabilities
-	manager.capabilities["prompts"] = map[string]interface{}{
-		"listChanged": true,
-	}
+	manager.withCapabilities(capabilities)
 
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Create request
 	request := NewInitializeRequest(
@@ -169,17 +162,13 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 
 	// Process request
 	ctx := context.Background()
-	response, err := manager.HandleInitialize(ctx, request, session)
+	response, err := manager.handleInitialize(ctx, request, session)
 
 	// Verify results
 	require.NoError(t, err)
 
-	// Type assert to JSONRPCResponse
-	successResp, ok := response.(JSONRPCResponse)
-	require.True(t, ok, "Expected JSONRPCResponse but got different type")
-
 	// Verify custom capabilities in response
-	initResp, ok := successResp.Result.(InitializeResult)
+	initResp, ok := response.(InitializeResult)
 	require.True(t, ok)
 
 	// Check Tools capability
@@ -190,9 +179,6 @@ func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
 
 	// Check Prompts capability
 	assert.NotNil(t, initResp.Capabilities.Prompts, "Prompts capability should not be nil")
-	if initResp.Capabilities.Prompts != nil {
-		assert.True(t, initResp.Capabilities.Prompts.ListChanged, "Prompts.ListChanged should be true")
-	}
 
 	// Check Experimental capability
 	assert.NotNil(t, initResp.Capabilities.Experimental, "Experimental capability should not be nil")

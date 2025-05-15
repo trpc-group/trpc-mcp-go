@@ -47,8 +47,8 @@ func newResourceManager() *resourceManager {
 	}
 }
 
-// RegisterResource registers a resource
-func (m *resourceManager) RegisterResource(resource *Resource) error {
+// registerResource registers a resource
+func (m *resourceManager) registerResource(resource *Resource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,8 +72,8 @@ func (m *resourceManager) RegisterResource(resource *Resource) error {
 	return nil
 }
 
-// RegisterTemplate registers a resource template
-func (m *resourceManager) RegisterTemplate(template *ResourceTemplate) error {
+// registerTemplate registers a resource template
+func (m *resourceManager) registerTemplate(template *ResourceTemplate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -97,8 +97,8 @@ func (m *resourceManager) RegisterTemplate(template *ResourceTemplate) error {
 	return nil
 }
 
-// GetResource retrieves a resource
-func (m *resourceManager) GetResource(uri string) (*Resource, bool) {
+// getResource retrieves a resource
+func (m *resourceManager) getResource(uri string) (*Resource, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -106,8 +106,8 @@ func (m *resourceManager) GetResource(uri string) (*Resource, bool) {
 	return resource, exists
 }
 
-// GetResources retrieves all resources
-func (m *resourceManager) GetResources() []*Resource {
+// getResources retrieves all resources
+func (m *resourceManager) getResources() []*Resource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -118,8 +118,8 @@ func (m *resourceManager) GetResources() []*Resource {
 	return resources
 }
 
-// GetTemplates retrieves all resource templates
-func (m *resourceManager) GetTemplates() []*ResourceTemplate {
+// getTemplates retrieves all resource templates
+func (m *resourceManager) getTemplates() []*ResourceTemplate {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -130,8 +130,8 @@ func (m *resourceManager) GetTemplates() []*ResourceTemplate {
 	return templates
 }
 
-// Subscribe subscribes to resource updates
-func (m *resourceManager) Subscribe(uri string) chan *JSONRPCNotification {
+// subscribe subscribes to resource updates
+func (m *resourceManager) subscribe(uri string) chan *JSONRPCNotification {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -140,8 +140,8 @@ func (m *resourceManager) Subscribe(uri string) chan *JSONRPCNotification {
 	return ch
 }
 
-// Unsubscribe cancels a subscription
-func (m *resourceManager) Unsubscribe(uri string, ch chan *JSONRPCNotification) {
+// unsubscribe cancels a subscription
+func (m *resourceManager) unsubscribe(uri string, ch chan *JSONRPCNotification) {
 	m.subMu.Lock()
 	defer m.subMu.Unlock()
 
@@ -160,8 +160,8 @@ func (m *resourceManager) Unsubscribe(uri string, ch chan *JSONRPCNotification) 
 	}
 }
 
-// NotifyUpdate notifies about resource updates
-func (m *resourceManager) NotifyUpdate(uri string) {
+// notifyUpdate notifies about resource updates
+func (m *resourceManager) notifyUpdate(uri string) {
 	m.subMu.RLock()
 	subs := m.subscribers[uri]
 	m.subMu.RUnlock()
@@ -176,7 +176,7 @@ func (m *resourceManager) NotifyUpdate(uri string) {
 		},
 	}
 
-	jsonrpcNotification := NewJSONRPCNotification(notification)
+	jsonrpcNotification := newJSONRPCNotification(notification)
 
 	for _, ch := range subs {
 		select {
@@ -187,9 +187,9 @@ func (m *resourceManager) NotifyUpdate(uri string) {
 	}
 }
 
-// HandleListResources handles listing resources requests
-func (m *resourceManager) HandleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	resources := m.GetResources()
+// handleListResources handles listing resources requests
+func (m *resourceManager) handleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	resources := m.getResources()
 
 	// Convert []*mcp.Resource to []mcp.Resource for the result
 	resultResources := make([]Resource, len(resources))
@@ -206,24 +206,24 @@ func (m *resourceManager) HandleListResources(ctx context.Context, req *JSONRPCR
 	return result, nil
 }
 
-// HandleReadResource handles reading resource requests
-func (m *resourceManager) HandleReadResource(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+// handleReadResource handles reading resource requests
+func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Get resource
-	resource, exists := m.GetResource(uri)
+	resource, exists := m.getResource(uri)
 	if !exists {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri), nil), nil
 	}
 
 	// Create a dummy text content for now
@@ -244,9 +244,9 @@ func (m *resourceManager) HandleReadResource(ctx context.Context, req *JSONRPCRe
 	return result, nil
 }
 
-// HandleListTemplates handles listing templates requests
-func (m *resourceManager) HandleListTemplates(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	templates := m.GetTemplates()
+// handleListTemplates handles listing templates requests
+func (m *resourceManager) handleListTemplates(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	templates := m.getTemplates()
 
 	// Convert []*mcp.ResourceTemplate to []mcp.ResourceTemplate for the result
 	resultTemplates := make([]ResourceTemplate, len(templates))
@@ -262,28 +262,28 @@ func (m *resourceManager) HandleListTemplates(ctx context.Context, req *JSONRPCR
 	return result, nil
 }
 
-// HandleSubscribe handles subscription requests
-func (m *resourceManager) HandleSubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+// handleSubscribe handles subscription requests
+func (m *resourceManager) handleSubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if resource exists
-	_, exists := m.GetResource(uri)
+	_, exists := m.getResource(uri)
 	if !exists {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
 	}
 
-	// Subscribe to resource updates
-	_ = m.Subscribe(uri) // We're not using the channel directly in the response
+	// subscribe to resource updates
+	_ = m.subscribe(uri) // We're not using the channel directly in the response
 
 	// Return success response
 	result := map[string]interface{}{
@@ -294,21 +294,21 @@ func (m *resourceManager) HandleSubscribe(ctx context.Context, req *JSONRPCReque
 	return result, nil
 }
 
-// HandleUnsubscribe handles unsubscription requests
-func (m *resourceManager) HandleUnsubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+// handleUnsubscribe handles unsubscription requests
+func (m *resourceManager) handleUnsubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
-	// Unsubscribe from resource updates
+	// unsubscribe from resource updates
 	// Note: In real implementation, you need to locate the specific channel to unsubscribe
 	// This is just a simplified implementation
 

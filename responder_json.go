@@ -9,15 +9,15 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
-// JSONResponder implements the JSON response handler
-type JSONResponder struct {
+// jsonResponder implements the JSON response handler
+type jsonResponder struct {
 	// Whether to use stateless mode
 	isStateless bool
 }
 
-// NewJSONResponder creates a new JSON response handler
-func NewJSONResponder(options ...func(*JSONResponder)) *JSONResponder {
-	responder := &JSONResponder{
+// newJSONResponder creates a new JSON response handler
+func newJSONResponder(options ...func(*jsonResponder)) *jsonResponder {
+	responder := &jsonResponder{
 		isStateless: false, // Default to stateful mode
 	}
 
@@ -29,15 +29,15 @@ func NewJSONResponder(options ...func(*JSONResponder)) *JSONResponder {
 	return responder
 }
 
-// WithJSONStatelessMode sets whether to use stateless mode
-func WithJSONStatelessMode(isStateless bool) func(*JSONResponder) {
-	return func(r *JSONResponder) {
+// withJSONStatelessMode sets whether to use stateless mode
+func withJSONStatelessMode(isStateless bool) func(*jsonResponder) {
+	return func(r *jsonResponder) {
 		r.isStateless = isStateless
 	}
 }
 
-// Respond implements the Responder interface
-func (r *JSONResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
+// Respond implements the responder interface
+func (r *jsonResponder) respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
 	// Set response headers
 	w.Header().Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
 	if !r.isStateless && session != nil {
@@ -60,12 +60,12 @@ func (r *JSONResponder) Respond(ctx context.Context, w http.ResponseWriter, req 
 }
 
 // SupportsContentType checks if the specified content type is supported
-func (r *JSONResponder) SupportsContentType(accepts []string) bool {
+func (r *jsonResponder) supportsContentType(accepts []string) bool {
 	return httputil.ContainsContentType(accepts, httputil.ContentTypeJSON)
 }
 
 // ContainsRequest determines if the request might contain a request (not a notification)
-func (r *JSONResponder) ContainsRequest(body []byte) bool {
+func (r *jsonResponder) containsRequest(body []byte) bool {
 	// Simple check for the presence of an "id" field
 	return strings.Contains(string(body), `"id"`)
 }

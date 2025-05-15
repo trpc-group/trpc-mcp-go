@@ -26,7 +26,7 @@ func TestNewJSONRPCRequest(t *testing.T) {
 				Request: Request{
 					Method: "test.method",
 				},
-				Params: nil,
+				Params: (map[string]interface{}(nil)),
 			},
 		},
 		{
@@ -54,7 +54,7 @@ func TestNewJSONRPCRequest(t *testing.T) {
 	// Execute tests
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := NewJSONRPCRequest(tc.id, tc.method, tc.params)
+			result := newJSONRPCRequest(tc.id, tc.method, tc.params)
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
@@ -101,7 +101,7 @@ func TestNewJSONRPCResponse(t *testing.T) {
 	// Execute tests
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := NewJSONRPCResponse(tc.id, tc.result)
+			result := newJSONRPCResponse(tc.id, tc.result)
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
@@ -165,7 +165,7 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 	// Execute tests
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := NewJSONRPCErrorResponse(tc.id, tc.code, tc.message, tc.data)
+			result := newJSONRPCErrorResponse(tc.id, tc.code, tc.message, tc.data)
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
@@ -177,8 +177,8 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 
 	// Test backward compatibility function
 	t.Run("Backward compatibility", func(t *testing.T) {
-		errResp1 := NewJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
-		errResp2 := NewJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
+		errResp1 := newJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
+		errResp2 := newJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
 
 		assert.Equal(t, errResp1.JSONRPC, errResp2.JSONRPC)
 		assert.Equal(t, errResp1.ID, errResp2.ID)
@@ -207,7 +207,7 @@ func TestNewJSONRPCNotification(t *testing.T) {
 					Method: "notifications/initialized",
 					Params: NotificationParams{
 						Meta:             nil,
-						AdditionalFields: nil,
+						AdditionalFields: map[string]interface{}{},
 					},
 				},
 			},

@@ -51,7 +51,7 @@ func StartTestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	s := mcp.NewServer(
 		"E2E-Test-Server",              // Server name
 		"1.0.0",                        // Server version
-		mcp.WithPathPrefix(pathPrefix), // Set API path
+		mcp.WithServerPath(pathPrefix), // Set API path
 	)
 
 	// Apply options.
@@ -88,7 +88,7 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	s := mcp.NewServer(
 		"E2E-SSE-Test-Server", // Server name
 		"1.0.0",               // Server version
-		mcp.WithPathPrefix(pathPrefix),
+		mcp.WithServerPath(pathPrefix),
 		mcp.WithSessionManager(sessionManager),
 		mcp.WithPostSSEEnabled(true), // Enable SSE.
 		mcp.WithGetSSEEnabled(true),  // Enable GET SSE.
@@ -141,7 +141,7 @@ func handleTestNotify(w http.ResponseWriter, r *http.Request, server *mcp.Server
 		return
 	}
 
-	// Extract params as a map for the SendNotification method
+	// Extract params as a map for the sendNotification method
 	params := make(map[string]interface{})
 
 	// Convert the entire notification to JSON and then extract relevant fields
@@ -150,7 +150,7 @@ func handleTestNotify(w http.ResponseWriter, r *http.Request, server *mcp.Server
 		var fullMap map[string]interface{}
 		if err := json.Unmarshal(data, &fullMap); err == nil {
 			if paramsMap, ok := fullMap["params"].(map[string]interface{}); ok {
-				// Exclude _meta field from params as Server.SendNotification handles it separately
+				// Exclude _meta field from params as Server.sendNotification handles it separately
 				for k, v := range paramsMap {
 					if k != "_meta" {
 						params[k] = v
@@ -180,7 +180,7 @@ func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*mcp
 		"E2E-Test-Server", // Server name
 		"1.0.0",           // Server version
 		mcp.WithServerAddress(addr),
-		mcp.WithPathPrefix("/mcp"),
+		mcp.WithServerPath("/mcp"),
 	)
 
 	// Apply options.
@@ -200,8 +200,8 @@ func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*mcp
 	// Return cleanup function.
 	cleanup := func() {
 		t.Log("Closing local test server.")
-		// Server does not provide a Close method, but Start returns when server is closed.
-		// No need to close explicitly here, as httptest.Server's Close will handle it.
+		// Server does not provide a close method, but Start returns when server is closed.
+		// No need to close explicitly here, as httptest.Server's close will handle it.
 	}
 
 	return s, cleanup
@@ -209,8 +209,8 @@ func StartLocalTestServer(t *testing.T, addr string, opts ...ServerOption) (*mcp
 
 // ServerNotifier is a server notification sender for testing.
 type ServerNotifier interface {
-	// SendNotification sends a notification.
-	SendNotification(sessionID string, notification *mcp.JSONRPCNotification) error
+	// sendNotification sends a notification.
+	sendNotification(sessionID string, notification *mcp.JSONRPCNotification) error
 }
 
 // GetServerNotifier gets a test server's notification sender.
@@ -238,8 +238,8 @@ func NewTestServerNotifier(t *testing.T, serverURL string) *TestServerNotifier {
 	}
 }
 
-// SendNotification sends a notification.
-func (n *TestServerNotifier) SendNotification(sessionID string, notification *mcp.JSONRPCNotification) error {
+// sendNotification sends a notification.
+func (n *TestServerNotifier) sendNotification(sessionID string, notification *mcp.JSONRPCNotification) error {
 	n.t.Helper()
 
 	// Create POST request to send notification to server.

@@ -16,7 +16,7 @@ func createTestServer() (*Server, *httptest.Server) {
 		"Test-Server",              // Server name
 		"1.0.0",                    // Server version
 		WithServerAddress(":3000"), // Server address
-		WithPathPrefix("/mcp"),     // Set API path
+		WithServerPath("/mcp"),     // Set API path
 	)
 
 	// Create HTTP test server
@@ -35,8 +35,8 @@ func TestNewServer(t *testing.T) {
 
 	// Verify object creation is successful
 	assert.NotNil(t, server)
-	assert.Equal(t, ":3000", server.config.Addr)
-	assert.Equal(t, "/mcp", server.config.PathPrefix) // Default prefix
+	assert.Equal(t, ":3000", server.config.addr)
+	assert.Equal(t, "/mcp", server.config.path) // Default prefix
 	assert.NotNil(t, server.httpHandler)
 	assert.NotNil(t, server.mcpHandler)
 	assert.NotNil(t, server.toolManager)
@@ -48,11 +48,11 @@ func TestServer_WithPathPrefix(t *testing.T) {
 		"Test-Server",                 // Server name
 		"1.0.0",                       // Server version
 		WithServerAddress(":3000"),    // Server address
-		WithPathPrefix("/custom-api"), // Custom path prefix
+		WithServerPath("/custom-api"), // Custom path prefix
 	)
 
 	// Verify path prefix
-	assert.Equal(t, "/custom-api", server.config.PathPrefix)
+	assert.Equal(t, "/custom-api", server.config.path)
 }
 
 func TestServer_WithoutSession(t *testing.T) {

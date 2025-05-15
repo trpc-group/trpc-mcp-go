@@ -2,9 +2,9 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
@@ -27,13 +27,14 @@ func (s State) String() string {
 
 // Client represents an MCP client.
 type Client struct {
-	transport       HTTPTransport          // Transport layer.
-	clientInfo      Implementation         // Client information.
-	protocolVersion string                 // Protocol version.
-	initialized     bool                   // Whether the client is initialized.
-	requestID       atomic.Int64           // Atomic counter for request IDs.
-	capabilities    map[string]interface{} // Capabilities.
-	state           State                  // State.
+	transport        httpTransport          // transport layer.
+	clientInfo       Implementation         // Client information.
+	protocolVersion  string                 // Protocol version.
+	initialized      bool                   // Whether the client is initialized.
+	requestID        atomic.Int64           // Atomic counter for request IDs.
+	capabilities     map[string]interface{} // Capabilities.
+	state            State                  // State.
+	transportOptions []transportOption
 
 	logger Logger // Logger for client transport (optional).
 }
@@ -51,10 +52,11 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 
 	// Create client.
 	client := &Client{
-		clientInfo:      clientInfo,
-		protocolVersion: ProtocolVersion_2025_03_26, // Default compatible version.
-		capabilities:    make(map[string]interface{}),
-		state:           StateDisconnected,
+		clientInfo:       clientInfo,
+		protocolVersion:  ProtocolVersion_2025_03_26, // Default compatible version.
+		capabilities:     make(map[string]interface{}),
+		state:            StateDisconnected,
+		transportOptions: []transportOption{},
 	}
 
 	// Apply options.
@@ -64,12 +66,7 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 
 	// Create transport layer if not previously set via options.
 	if client.transport == nil {
-		// If logger is set, inject it into transport.
-		if client.logger != nil {
-			client.transport = NewStreamableHTTPClientTransport(parsedURL, WithClientTransportLogger(client.logger))
-		} else {
-			client.transport = NewStreamableHTTPClientTransport(parsedURL)
-		}
+		client.transport = newStreamableHTTPClientTransport(parsedURL, client.transportOptions...)
 	}
 
 	return client, nil
@@ -82,36 +79,31 @@ func WithProtocolVersion(version string) ClientOption {
 	}
 }
 
-// WithTransport sets the custom transport layer.
-func WithTransport(transport HTTPTransport) ClientOption {
-	return func(c *Client) {
-		c.transport = transport
-	}
-}
-
 // WithClientLogger sets the logger for the client transport.
 func WithClientLogger(logger Logger) ClientOption {
 	return func(c *Client) {
 		c.logger = logger
+		c.transportOptions = append(c.transportOptions, withClientTransportLogger(logger))
 	}
 }
 
 // WithClientGetSSEEnabled sets whether to enable GET SSE.
 func WithClientGetSSEEnabled(enabled bool) ClientOption {
 	return func(c *Client) {
-		if httpTransport, ok := c.transport.(*StreamableHTTPClientTransport); ok {
-			// Use WithClientTransportGetSSEEnabled option.
-			WithClientTransportGetSSEEnabled(enabled)(httpTransport)
-		}
+		c.transportOptions = append(c.transportOptions, withClientTransportGetSSEEnabled(enabled))
+	}
+}
+
+func WithClientPath(path string) ClientOption {
+	return func(c *Client) {
+		c.transportOptions = append(c.transportOptions, withClientTransportPath(path))
 	}
 }
 
 // WithHTTPReqHandler sets a custom HTTP request handler for the client
 func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 	return func(c *Client) {
-		if httpTransport, ok := c.transport.(*StreamableHTTPClientTransport); ok {
-			WithTransportHTTPReqHandler(handler)(httpTransport)
-		}
+		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandler(handler))
 	}
 }
 
@@ -126,7 +118,7 @@ func (c *Client) setState(state State) {
 }
 
 // Initialize initializes the client connection.
-func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
+func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*InitializeResult, error) {
 	// Check if already initialized.
 	if c.initialized {
 		return nil, errors.ErrAlreadyInitialized
@@ -134,14 +126,18 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodInitialize, map[string]interface{}{
+	req := newJSONRPCRequest(requestID, MethodInitialize, map[string]interface{}{
 		"protocolVersion": c.protocolVersion,
 		"clientInfo":      c.clientInfo,
 		"capabilities":    c.capabilities,
 	})
 
+	if initReq != nil && !isZeroStruct(initReq.Params) {
+		req.Params = initReq.Params
+	}
+
 	// Send request and wait for response
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		c.setState(StateDisconnected)
 		return nil, fmt.Errorf("initialization request failed: %w", err)
@@ -151,8 +147,8 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	c.setState(StateConnected)
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			c.setState(StateDisconnected)
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
@@ -163,7 +159,7 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	}
 
 	// Parse the response using our specialized parser
-	initResult, err := ParseInitializeResultFromJSON(rawResp)
+	initResult, err := parseInitializeResultFromJSON(rawResp)
 	if err != nil {
 		c.setState(StateDisconnected)
 		return nil, fmt.Errorf("failed to parse initialization response: %v", err)
@@ -179,17 +175,23 @@ func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	c.initialized = true
 	c.setState(StateInitialized)
 
+	// Try to establish GET SSE connection if transport supports it
+	if t, ok := c.transport.(*streamableHTTPClientTransport); ok {
+		// Start GET SSE connection asynchronously to avoid blocking
+		go t.establishGetSSEConnection()
+	}
+
 	return initResult, nil
 }
 
 // SendInitialized sends an initialized notification.
 func (c *Client) SendInitialized(ctx context.Context) error {
 	notification := NewInitializedNotification()
-	return c.transport.SendNotification(ctx, notification)
+	return c.transport.sendNotification(ctx, notification)
 }
 
 // ListTools lists available tools.
-func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
+func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) (*ListToolsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -197,16 +199,16 @@ func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodToolsList, nil)
+	req := newJSONRPCRequest(requestID, MethodToolsList, nil)
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %v", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -215,11 +217,11 @@ func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 	}
 
 	// Parse response using specialized parser
-	return ParseListToolsResultFromJSON(rawResp)
+	return parseListToolsResultFromJSON(rawResp)
 }
 
 // CallTool calls a tool.
-func (c *Client) CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error) {
+func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -227,19 +229,23 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]inte
 
 	// Create request
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodToolsCall, map[string]interface{}{
-		"name":      name,
-		"arguments": args,
-	})
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodToolsCall,
+		},
+		Params: callToolReq.Params,
+	}
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("tool call request failed: %w", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -247,13 +253,13 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]inte
 			errResp.Error.Message, errResp.Error.Code)
 	}
 
-	return ParseCallToolResult(rawResp)
+	return parseCallToolResult(rawResp)
 }
 
 // Close closes the client connection and cleans up resources.
 func (c *Client) Close() error {
 	if c.transport != nil {
-		err := c.transport.Close()
+		err := c.transport.close()
 		c.setState(StateDisconnected)
 		c.initialized = false
 		return err
@@ -263,113 +269,54 @@ func (c *Client) Close() error {
 
 // GetSessionID gets the session ID.
 func (c *Client) GetSessionID() string {
-	return c.transport.GetSessionID()
+	return c.transport.getSessionID()
 }
 
 // TerminateSession terminates the session.
 func (c *Client) TerminateSession(ctx context.Context) error {
-	return c.transport.TerminateSession(ctx)
+	return c.transport.terminateSession(ctx)
 }
 
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler NotificationHandler) {
-	if httpTransport, ok := c.transport.(*StreamableHTTPClientTransport); ok {
-		httpTransport.RegisterNotificationHandler(method, handler)
+	if httpTransport, ok := c.transport.(*streamableHTTPClientTransport); ok {
+		httpTransport.registerNotificationHandler(method, handler)
 	}
 }
 
 // UnregisterNotificationHandler unregisters a notification handler.
 func (c *Client) UnregisterNotificationHandler(method string) {
-	if httpTransport, ok := c.transport.(*StreamableHTTPClientTransport); ok {
-		httpTransport.UnregisterNotificationHandler(method)
+	if httpTransport, ok := c.transport.(*streamableHTTPClientTransport); ok {
+		httpTransport.unregisterNotificationHandler(method)
 	}
-}
-
-// CallToolWithStream calls a tool with streaming support.
-func (c *Client) CallToolWithStream(ctx context.Context, name string, args map[string]interface{}, streamOpts *StreamOptions) (*CallToolResult, error) {
-	// Check if initialized.
-	if !c.initialized {
-		return nil, errors.ErrNotInitialized
-	}
-
-	// Create request.
-	req := NewJSONRPCRequest("tool-call", MethodToolsCall, map[string]interface{}{
-		"name":      name,
-		"arguments": args,
-	})
-
-	// Check if using streaming transport.
-	if httpTransport, ok := c.transport.(*StreamableHTTPClientTransport); ok {
-		// If no streaming options, try using unified parsing method.
-		if streamOpts == nil {
-			rawResp, err := c.transport.SendRequest(ctx, req)
-			if err != nil {
-				return nil, fmt.Errorf("tool call request failed: %w", err)
-			}
-
-			// Check for error response
-			if IsErrorResponse(rawResp) {
-				errResp, err := ParseRawMessageToError(rawResp)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse error response: %w", err)
-				}
-				return nil, fmt.Errorf("tool call error: %s (code: %d)",
-					errResp.Error.Message, errResp.Error.Code)
-			}
-
-			return ParseCallToolResult(rawResp)
-		}
-
-		// Use streaming request if streaming options are provided
-		rawResp, err := httpTransport.SendRequestWithStream(ctx, req, streamOpts)
-		if err != nil {
-			return nil, fmt.Errorf("tool call request failed: %w", err)
-		}
-
-		// Check for error response
-		if IsErrorResponse(rawResp) {
-			errResp, err := ParseRawMessageToError(rawResp)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse error response: %w", err)
-			}
-			return nil, fmt.Errorf("tool call error: %s (code: %d)",
-				errResp.Error.Message, errResp.Error.Code)
-		}
-
-		// Parse response as success response
-		var resp struct {
-			Result CallToolResult `json:"result"`
-		}
-		if err := json.Unmarshal(*rawResp, &resp); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal tool call response: %w", err)
-		}
-
-		return &resp.Result, nil
-	}
-
-	// Fall back to regular call for non-streaming transports
-	return c.CallTool(ctx, name, args)
 }
 
 // ListPrompts lists available prompts.
-func (c *Client) ListPrompts(ctx context.Context) (*ListPromptsResult, error) {
+func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsRequest) (*ListPromptsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Create request.
+	// Create request
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodPromptsList, nil)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodPromptsList,
+		},
+		Params: listPromptsReq.Params,
+	}
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list prompts request failed: %w", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -378,38 +325,35 @@ func (c *Client) ListPrompts(ctx context.Context) (*ListPromptsResult, error) {
 	}
 
 	// Parse response using specialized parser
-	return ParseListPromptsResultFromJSON(rawResp)
+	return parseListPromptsResultFromJSON(rawResp)
 }
 
 // GetPrompt gets a specific prompt.
-func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) (*GetPromptResult, error) {
+func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) (*GetPromptResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Prepare parameters.
-	params := map[string]interface{}{
-		"name": name,
-	}
-
-	// If arguments are provided, add them to the request.
-	if arguments != nil && len(arguments) > 0 {
-		params["arguments"] = arguments
-	}
-
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodPromptsGet, params)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodPromptsGet,
+		},
+		Params: getPromptReq.Params,
+	}
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt request failed: %v", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -418,11 +362,11 @@ func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[strin
 	}
 
 	// Parse response using specialized parser
-	return ParseGetPromptResultFromJSON(rawResp)
+	return parseGetPromptResultFromJSON(rawResp)
 }
 
 // ListResources lists available resources.
-func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error) {
+func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResourcesRequest) (*ListResourcesResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
@@ -430,16 +374,23 @@ func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error
 
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodResourcesList, nil)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodResourcesList,
+		},
+		Params: listResourcesReq.Params,
+	}
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("list resources request failed: %v", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -448,11 +399,11 @@ func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error
 	}
 
 	// Parse response using specialized parser
-	return ParseListResourcesResultFromJSON(rawResp)
+	return parseListResourcesResultFromJSON(rawResp)
 }
 
 // ReadResource reads a specific resource.
-func (c *Client) ReadResource(ctx context.Context, uri string) (*ReadResourceResult, error) {
+func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResourceRequest) (*ReadResourceResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
@@ -460,18 +411,23 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*ReadResourceRes
 
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := NewJSONRPCRequest(requestID, MethodResourcesRead, map[string]interface{}{
-		"uri": uri,
-	})
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodResourcesRead,
+		},
+		Params: readResourceReq.Params,
+	}
 
-	rawResp, err := c.transport.SendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("read resource request failed: %v", err)
 	}
 
 	// Check for error response
-	if IsErrorResponse(rawResp) {
-		errResp, err := ParseRawMessageToError(rawResp)
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse error response: %w", err)
 		}
@@ -480,5 +436,9 @@ func (c *Client) ReadResource(ctx context.Context, uri string) (*ReadResourceRes
 	}
 
 	// Parse response using specialized parser
-	return ParseReadResourceResultFromJSON(rawResp)
+	return parseReadResourceResultFromJSON(rawResp)
+}
+
+func isZeroStruct(x interface{}) bool {
+	return reflect.ValueOf(x).IsZero()
 }

@@ -28,8 +28,8 @@ func TestMCPHandler_WithOptions(t *testing.T) {
 
 	// Create handler with options
 	handler := newMCPHandler(
-		WithToolManager(toolManager),
-		WithLifecycleManager(lifecycleManager),
+		withToolManager(toolManager),
+		withLifecycleManager(lifecycleManager),
 	)
 
 	// Verify options applied
@@ -46,8 +46,8 @@ func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	})
 
 	handler := newMCPHandler(
-		WithToolManager(toolManager),
-		WithLifecycleManager(lifecycleManager),
+		withToolManager(toolManager),
+		withLifecycleManager(lifecycleManager),
 	)
 
 	// Create initialization request
@@ -66,11 +66,11 @@ func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	)
 
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Process request
 	ctx := context.Background()
-	resp, err := handler.HandleRequest(ctx, request, session)
+	resp, err := handler.handleRequest(ctx, request, session)
 
 	// Verify results
 	require.NoError(t, err)
@@ -87,14 +87,14 @@ func TestMCPHandler_HandleRequest_UnknownMethod(t *testing.T) {
 	handler := newMCPHandler()
 
 	// Create request with unknown method
-	req := NewJSONRPCRequest(1, "unknown/method", nil)
+	req := newJSONRPCRequest(1, "unknown/method", nil)
 
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Process request
 	ctx := context.Background()
-	resp, err := handler.HandleRequest(ctx, req, session)
+	resp, err := handler.handleRequest(ctx, req, session)
 
 	// Updated test expectation: for unknown methods, the handler now may return a JSONRPCError response instead of an error
 	// This might be due to internal implementation changes
@@ -114,18 +114,18 @@ func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
 
 	// Register test tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
-	handler.toolManager.RegisterTool(tool)
+	handler.toolManager.registerTool(tool)
 
 	// Create session and set protocol version
-	session := NewSession()
-	session.SetData("protocolVersion", ProtocolVersion_2024_11_05)
+	session := newSession()
+	session.SetData("protocolVersion", ProtocolVersion_2025_03_26)
 
 	// Create list tools request
-	req := NewJSONRPCRequest(1, MethodToolsList, nil)
+	req := newJSONRPCRequest(1, MethodToolsList, nil)
 
 	// Process request
 	ctx := context.Background()
-	resp, err := handler.HandleRequest(ctx, req, session)
+	resp, err := handler.handleRequest(ctx, req, session)
 
 	// Verify results
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
 	}
 
 	// Check if it's a ListToolsResult type
-	if result, ok := resp.(*ListToolsResult); ok {
+	if result, ok := resp.(ListToolsResult); ok {
 		assert.NotNil(t, result.Tools)
 		assert.Len(t, result.Tools, 1)
 		assert.Equal(t, "test-tool", result.Tools[0].Name)
@@ -170,14 +170,14 @@ func TestMCPHandler_HandleRequest_ToolsCall(t *testing.T) {
 
 	// Register test tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
-	handler.toolManager.RegisterTool(tool)
+	handler.toolManager.registerTool(tool)
 
 	// Create session
-	session := NewSession()
+	session := newSession()
 	session.SetData("protocolVersion", ProtocolVersion_2024_11_05)
 
 	// Create call tool request
-	req := NewJSONRPCRequest(1, MethodToolsCall, map[string]interface{}{
+	req := newJSONRPCRequest(1, MethodToolsCall, map[string]interface{}{
 		"name": "test-tool",
 		"arguments": map[string]interface{}{
 			"param1": "value1",
@@ -186,7 +186,7 @@ func TestMCPHandler_HandleRequest_ToolsCall(t *testing.T) {
 
 	// Process request
 	ctx := context.Background()
-	resp, err := handler.HandleRequest(ctx, req, session)
+	resp, err := handler.handleRequest(ctx, req, session)
 
 	// Verify results
 	require.NoError(t, err)

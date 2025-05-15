@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 // Callback function for handling SSE incremental updates.
@@ -62,9 +62,11 @@ func main() {
 	}
 	defer mcpClient.Close()
 
+	mcpClient.RegisterNotificationHandler("notifications/message", handleNotification)
+
 	// Initialize client.
 	log.Printf("Initializing client...")
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 	}
@@ -83,7 +85,7 @@ func main() {
 
 	// Get available tools list.
 	log.Printf("Listing tools...")
-	toolsResult, err := mcpClient.ListTools(ctx)
+	toolsResult, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
@@ -95,9 +97,12 @@ func main() {
 
 	// Call greet tool.
 	log.Printf("Calling greet tool...")
-	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
+	callToolReq := &mcp.CallToolRequest{}
+	callToolReq.Params.Name = "greet"
+	callToolReq.Params.Arguments = map[string]interface{}{
 		"name": "SSE client user",
-	})
+	}
+	callResult, err := mcpClient.CallTool(ctx, callToolReq)
 	if err != nil {
 		log.Fatalf("Failed to call tool: %v", err)
 	}
@@ -114,8 +119,13 @@ func main() {
 
 	// Call counter tool, demonstrate session state keeping.
 	log.Printf("Calling counter tool first time...")
-	counterResult1, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 1,
+	counterResult1, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 1,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -131,8 +141,13 @@ func main() {
 
 	// Call counter tool again, verify state keeping.
 	log.Printf("Calling counter tool second time...")
-	counterResult2, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 2,
+	counterResult2, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 2,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -149,18 +164,16 @@ func main() {
 	// Call delayedResponse tool, demonstrate the advantage of SSE streaming response.
 	log.Printf("Calling delayedResponse tool, experience streaming response...")
 
-	// Create stream options, set callback for handling incremental content.
-	streamOpts := &mcp.StreamOptions{
-		NotificationHandlers: map[string]mcp.NotificationHandler{
-			"notifications/message": handleNotification,
-		},
-	}
-
 	// Use streaming API to call tool.
-	_, err = mcpClient.CallToolWithStream(ctx, "delayedResponse", map[string]interface{}{
-		"steps":   5,
-		"delayMs": 500,
-	}, streamOpts)
+	_, err = mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "delayedResponse",
+			Arguments: map[string]interface{}{
+				"steps":   5,
+				"delayMs": 500,
+			},
+		},
+	})
 
 	if err != nil {
 		log.Fatalf("Failed to call delayedResponse tool: %v", err)

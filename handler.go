@@ -4,13 +4,13 @@ import (
 	"context"
 )
 
-// Handler interface defines the MCP protocol handler
-type Handler interface {
+// handler interface defines the MCP protocol handler
+type handler interface {
 	// HandleRequest processes requests
-	HandleRequest(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error)
+	handleRequest(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error)
 
 	// HandleNotification processes notifications
-	HandleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
+	handleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
 }
 
 // mcpHandler implements the default MCP protocol handler
@@ -59,52 +59,52 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 	}
 
 	// Pass managers to lifecycle manager
-	h.lifecycleManager.WithToolManager(h.toolManager)
-	h.lifecycleManager.WithResourceManager(h.resourceManager)
-	h.lifecycleManager.WithPromptManager(h.promptManager)
+	h.lifecycleManager.withToolManager(h.toolManager)
+	h.lifecycleManager.withResourceManager(h.resourceManager)
+	h.lifecycleManager.withPromptManager(h.promptManager)
 
 	return h
 }
 
-// WithToolManager sets the tool manager
-func WithToolManager(manager *toolManager) func(*mcpHandler) {
+// withToolManager sets the tool manager
+func withToolManager(manager *toolManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
 		h.toolManager = manager
 	}
 }
 
-// WithLifecycleManager sets the lifecycle manager
-func WithLifecycleManager(manager *lifecycleManager) func(*mcpHandler) {
+// withLifecycleManager sets the lifecycle manager
+func withLifecycleManager(manager *lifecycleManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
 		h.lifecycleManager = manager
 	}
 }
 
-// WithResourceManager sets the resource manager
-func WithResourceManager(manager *resourceManager) func(*mcpHandler) {
+// withResourceManager sets the resource manager
+func withResourceManager(manager *resourceManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
 		h.resourceManager = manager
 	}
 }
 
-// WithPromptManager sets the prompt manager
-func WithPromptManager(manager *promptManager) func(*mcpHandler) {
+// withPromptManager sets the prompt manager
+func withPromptManager(manager *promptManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
 		h.promptManager = manager
 	}
 }
 
-// HandleRequest implements the Handler interface's HandleRequest method
+// handleRequest implements the handler interface's handleRequest method
 //
 // Resource and prompt functionality handling logic:
 // 1. If no resources or prompts are registered, the corresponding functionality is disabled by default, and requests will return "method not found" error
 // 2. If resources or prompts are registered (even if the list is empty), the corresponding functionality is enabled, and requests will return an empty list rather than an error
 // 3. Clients can identify which functionalities the server supports through the capabilities field in the initialization response
-func (h *mcpHandler) HandleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	// Dispatch request based on method
 	switch req.Method {
 	case MethodInitialize:
-		return h.lifecycleManager.HandleInitialize(ctx, req, session)
+		return h.lifecycleManager.handleInitialize(ctx, req, session)
 
 	case MethodPing: // Using string constant directly
 		// Ping simply returns an empty result
@@ -112,50 +112,50 @@ func (h *mcpHandler) HandleRequest(ctx context.Context, req *JSONRPCRequest, ses
 
 	// Tool related
 	case MethodToolsList:
-		return h.toolManager.HandleListTools(ctx, req, session)
+		return h.toolManager.handleListTools(ctx, req, session)
 	case MethodToolsCall:
-		return h.toolManager.HandleCallTool(ctx, req, session)
+		return h.toolManager.handleCallTool(ctx, req, session)
 
 	// Resource related
 	case MethodResourcesList:
-		return h.resourceManager.HandleListResources(ctx, req)
+		return h.resourceManager.handleListResources(ctx, req)
 	case MethodResourcesRead:
-		return h.resourceManager.HandleReadResource(ctx, req)
+		return h.resourceManager.handleReadResource(ctx, req)
 	case MethodResourcesTemplatesList:
-		return h.resourceManager.HandleListTemplates(ctx, req)
+		return h.resourceManager.handleListTemplates(ctx, req)
 	case MethodResourcesSubscribe:
-		return h.resourceManager.HandleSubscribe(ctx, req)
+		return h.resourceManager.handleSubscribe(ctx, req)
 	case MethodResourcesUnsubscribe:
-		return h.resourceManager.HandleUnsubscribe(ctx, req)
+		return h.resourceManager.handleUnsubscribe(ctx, req)
 
 	// Prompt related
 	case MethodPromptsList:
-		return h.promptManager.HandleListPrompts(ctx, req)
+		return h.promptManager.handleListPrompts(ctx, req)
 	case MethodPromptsGet:
-		return h.promptManager.HandleGetPrompt(ctx, req)
+		return h.promptManager.handleGetPrompt(ctx, req)
 	case MethodCompletionComplete:
-		return h.promptManager.HandleCompletionComplete(ctx, req)
+		return h.promptManager.handleCompletionComplete(ctx, req)
 
 	default:
 		// Unknown method
-		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
 	}
 }
 
-// HandleNotification implements the Handler interface's HandleNotification method
-func (h *mcpHandler) HandleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error {
+// handleNotification implements the handler interface's handleNotification method
+func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error {
 	// Dispatch notification based on method
 	switch notification.Method {
 	case MethodNotificationsInitialized:
-		return h.lifecycleManager.HandleInitialized(ctx, notification, session)
+		return h.lifecycleManager.handleInitialized(ctx, notification, session)
 	default:
 		// Ignore unknown notifications
 		return nil
 	}
 }
 
-// OnSessionTerminated implements the SessionEventNotifier interface's OnSessionTerminated method
-func (h *mcpHandler) OnSessionTerminated(sessionID string) {
+// OnSessionTerminated implements the sessionEventNotifier interface's OnSessionTerminated method
+func (h *mcpHandler) onSessionTerminated(sessionID string) {
 	// Notify lifecycle manager that session has terminated
-	h.lifecycleManager.OnSessionTerminated(sessionID)
+	h.lifecycleManager.onSessionTerminated(sessionID)
 }

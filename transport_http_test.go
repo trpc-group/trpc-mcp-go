@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// MockHTTPTransport is a mock implementation of the HTTPTransport interface
+// MockHTTPTransport is a mock implementation of the httpTransport interface
 type MockHTTPTransport struct {
 	sendRequestFunc      func(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error)
 	sendNotificationFunc func(ctx context.Context, notification *JSONRPCNotification) error
@@ -82,28 +82,28 @@ func TestMockHTTPTransport(t *testing.T) {
 		},
 	}
 
-	// Test SendRequest
+	// Test sendRequest
 	ctx := context.Background()
-	req := NewJSONRPCRequest(1, "test.method", nil)
+	req := newJSONRPCRequest(1, "test.method", nil)
 	resp, err := mockTransport.SendRequest(ctx, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "test result", resp.Result)
 
-	// Test SendNotification
+	// Test sendNotification
 	notification := NewJSONRPCNotificationFromMap("test.notification", nil)
 	err = mockTransport.SendNotification(ctx, notification)
 	assert.NoError(t, err)
 
-	// Test GetSessionID
+	// Test getSessionID
 	sessionID := mockTransport.GetSessionID()
 	assert.Equal(t, "test-session-id", sessionID)
 
-	// Test TerminateSession
+	// Test terminateSession
 	err = mockTransport.TerminateSession(ctx)
 	assert.NoError(t, err)
 
-	// Test Close
+	// Test close
 	err = mockTransport.Close()
 	assert.NoError(t, err)
 }
@@ -111,7 +111,7 @@ func TestMockHTTPTransport(t *testing.T) {
 func TestNewStreamableHTTPClientTransport(t *testing.T) {
 	// Test creating transport object
 	serverURL, _ := url.Parse("http://localhost:3000/mcp")
-	transport := NewStreamableHTTPClientTransport(serverURL)
+	transport := newStreamableHTTPClientTransport(serverURL)
 
 	// Verify object was created successfully
 	assert.NotNil(t, transport)

@@ -18,13 +18,13 @@ func main() {
 	// Create server using the new API style:
 	// - First two required parameters: server name and version
 	// - WithServerAddress sets the address to listen on (default: "localhost:3000")
-	// - WithPathPrefix sets the API path prefix
+	// - WithServerPath sets the API path prefix
 	// - WithServerLogger injects logger at the server level
 	mcpServer := mcp.NewServer(
 		"Basic-Example-Server",
 		"0.1.0",
 		mcp.WithServerAddress(":3000"),
-		mcp.WithPathPrefix("/mcp"),
+		mcp.WithServerPath("/mcp"),
 		mcp.WithServerLogger(mcp.GetDefaultLogger()),
 	)
 

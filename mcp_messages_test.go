@@ -31,12 +31,11 @@ func TestNewInitializeRequest(t *testing.T) {
 	assert.Equal(t, MethodInitialize, req.Method)
 
 	// Verify parameters
-	initializeParams, ok := req.Params.(InitializeParams)
-	assert.True(t, ok, "Params should be of InitializeParams type")
-	assert.Equal(t, protocolVersion, initializeParams.ProtocolVersion)
-	assert.NotNil(t, initializeParams.ClientInfo)            // Ensure ClientInfo is not nil before dereferencing
-	assert.Equal(t, clientInfo, initializeParams.ClientInfo) // Dereference pointer for comparison
-	assert.Equal(t, capabilities, initializeParams.Capabilities)
+	params, ok := req.Params.(map[string]interface{})
+	assert.True(t, ok, "Params should be of map[string]interface{} type")
+	assert.Equal(t, protocolVersion, params["protocolVersion"])
+	assert.Equal(t, clientInfo, params["clientInfo"])
+	assert.Equal(t, capabilities, params["capabilities"])
 }
 
 func TestNewInitializeResponse(t *testing.T) {
@@ -80,7 +79,7 @@ func TestNewInitializedNotification(t *testing.T) {
 	// Verify results
 	assert.Equal(t, JSONRPCVersion, notification.JSONRPC)
 	assert.Equal(t, MethodNotificationsInitialized, notification.Method)
-	assert.Nil(t, notification.Params)
+	assert.Equal(t, NotificationParams{}, notification.Params)
 }
 
 func TestIsProtocolVersionSupported(t *testing.T) {

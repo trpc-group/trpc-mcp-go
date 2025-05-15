@@ -5,7 +5,8 @@ import (
 	"time"
 
 	"log"
-	"trpc.group/trpc-go/trpc-mcp-go"
+
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 
 	// Initialize client.
 	log.Printf("Initializing client...")
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 	}
@@ -45,7 +46,7 @@ func main() {
 
 	// Get available tools list.
 	log.Printf("Listing tools...")
-	tools, err := mcpClient.ListTools(ctx)
+	tools, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
@@ -57,9 +58,12 @@ func main() {
 
 	// Call greet tool.
 	log.Printf("Calling greet tool...")
-	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
+	callToolReq := &mcp.CallToolRequest{}
+	callToolReq.Params.Name = "greet"
+	callToolReq.Params.Arguments = map[string]interface{}{
 		"name": "Stateful client user",
-	})
+	}
+	callResult, err := mcpClient.CallTool(ctx, callToolReq)
 	if err != nil {
 		log.Fatalf("Failed to call tool: %v", err)
 	}
@@ -76,8 +80,13 @@ func main() {
 
 	// Call counter tool, demonstrate session state keeping.
 	log.Printf("\nCalling counter tool first time...")
-	counterResult1, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 1,
+	counterResult1, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 1,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -93,8 +102,13 @@ func main() {
 
 	// Call counter tool again, verify state keeping.
 	log.Printf("\nCalling counter tool second time...")
-	counterResult2, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 2,
+	counterResult2, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 2,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -110,8 +124,13 @@ func main() {
 
 	// Call counter tool third time, continue verifying state keeping.
 	log.Printf("\nCalling counter tool third time...")
-	counterResult3, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 3,
+	counterResult3, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 3,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)

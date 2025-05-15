@@ -67,9 +67,12 @@ func TestErrorHandling(t *testing.T) {
 		defer cancel()
 
 		// Call error tool.
-		_, err := client.CallTool(ctx, "error-tool", map[string]interface{}{
+		callToolReq := &mcp.CallToolRequest{}
+		callToolReq.Params.Name = "error-tool"
+		callToolReq.Params.Arguments = map[string]interface{}{
 			"error_message": errorMsg,
-		})
+		}
+		_, err := client.CallTool(ctx, callToolReq)
 
 		// Verify error.
 		require.Error(t, err, "Should return error")

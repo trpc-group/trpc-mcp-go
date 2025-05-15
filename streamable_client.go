@@ -15,10 +15,12 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
-// StreamableHTTPClientTransport implements an HTTP-based MCP transport
-type StreamableHTTPClientTransport struct {
+// streamableHTTPClientTransport implements an HTTP-based MCP transport
+type streamableHTTPClientTransport struct {
 	// Server URL
 	serverURL *url.URL
+
+	path string
 
 	// HTTP client
 	httpClient *http.Client
@@ -52,7 +54,7 @@ type StreamableHTTPClientTransport struct {
 	// Whether in stateless mode
 	// In stateless mode, the client will not send a session ID and will not attempt to establish a GET SSE connection.
 	// This field is set by auto-detection when no session ID is provided in the initialize response.
-	isStatelessMode bool
+	isStateless bool
 
 	// Logger for this client transport.
 	logger Logger
@@ -61,24 +63,24 @@ type StreamableHTTPClientTransport struct {
 // NotificationHandler is a handler for notifications
 type NotificationHandler func(notification *JSONRPCNotification) error
 
-// StreamOptions represents streaming options
-type StreamOptions struct {
+// streamOptions represents streaming options
+type streamOptions struct {
 	// Event ID (for stream recovery)
-	LastEventID string
+	lastEventID string
 
 	// Notification handlers
-	NotificationHandlers map[string]NotificationHandler
+	notificationHandlers map[string]NotificationHandler
 }
 
-// NewStreamableHTTPClientTransport creates a new client transport
+// newStreamableHTTPClientTransport creates a new client transport
 //
 // This transport implementation automatically detects if the server is in stateless mode.
 // When no session ID is provided in the initialize response, the client automatically
 // sets itself to stateless mode and disables GET SSE connections.
-// NewStreamableHTTPClientTransport creates a new client transport.
+// newStreamableHTTPClientTransport creates a new client transport.
 // If logger is not set via options, uses the default logger.
-func NewStreamableHTTPClientTransport(serverURL *url.URL, options ...func(*StreamableHTTPClientTransport)) *StreamableHTTPClientTransport {
-	transport := &StreamableHTTPClientTransport{
+func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOption) *streamableHTTPClientTransport {
+	transport := &streamableHTTPClientTransport{
 		serverURL:            serverURL,
 		httpClient:           &http.Client{},
 		httpReqHandler:       NewDefaultHTTPReqHandler(),
@@ -94,37 +96,33 @@ func NewStreamableHTTPClientTransport(serverURL *url.URL, options ...func(*Strea
 	return transport
 }
 
-// WithSessionID sets the session ID option
-func WithSessionID(sessionID string) func(*StreamableHTTPClientTransport) {
-	return func(t *StreamableHTTPClientTransport) {
-		t.sessionID = sessionID
-	}
-}
+// transportOption transport option function
+type transportOption func(*streamableHTTPClientTransport)
 
-// WithHTTPClient sets the HTTP client option
-func WithHTTPClient(client *http.Client) func(*StreamableHTTPClientTransport) {
-	return func(t *StreamableHTTPClientTransport) {
-		t.httpClient = client
-	}
-}
-
-// WithClientTransportGetSSEEnabled sets whether GET SSE is enabled
-func WithClientTransportGetSSEEnabled(enabled bool) func(*StreamableHTTPClientTransport) {
-	return func(t *StreamableHTTPClientTransport) {
+// withClientTransportGetSSEEnabled sets whether GET SSE is enabled
+func withClientTransportGetSSEEnabled(enabled bool) transportOption {
+	return func(t *streamableHTTPClientTransport) {
 		t.enableGetSSE = enabled
 	}
 }
 
-// WithClientTransportLogger sets the logger for the client transport.
-func WithClientTransportLogger(logger Logger) func(*StreamableHTTPClientTransport) {
-	return func(t *StreamableHTTPClientTransport) {
+// withClientTransportLogger sets the logger for the client transport.
+func withClientTransportLogger(logger Logger) transportOption {
+	return func(t *streamableHTTPClientTransport) {
 		t.logger = logger
 	}
 }
 
-// WithHTTPReqHandler sets the HTTP request handler
-func WithTransportHTTPReqHandler(handler HTTPReqHandler) func(*StreamableHTTPClientTransport) {
-	return func(t *StreamableHTTPClientTransport) {
+// withClientTransportLogger sets the logger for the client transport.
+func withClientTransportPath(path string) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.path = path
+	}
+}
+
+// withTransportHTTPReqHandler sets the HTTP request handler
+func withTransportHTTPReqHandler(handler HTTPReqHandler) transportOption {
+	return func(t *streamableHTTPClientTransport) {
 		if handler != nil {
 			t.httpReqHandler = handler
 		}
@@ -132,12 +130,12 @@ func WithTransportHTTPReqHandler(handler HTTPReqHandler) func(*StreamableHTTPCli
 }
 
 // SendRequest sends a request and waits for a response
-func (t *StreamableHTTPClientTransport) SendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
-	return t.sendRequest(ctx, req, nil)
+func (t *streamableHTTPClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+	return t.send(ctx, req, nil)
 }
 
-// sendRequest sends a request and handles the response
-func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest, options *StreamOptions) (*json.RawMessage, error) {
+// send sends a request and handles the response
+func (t *streamableHTTPClientTransport) send(ctx context.Context, req *JSONRPCRequest, options *streamOptions) (*json.RawMessage, error) {
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
@@ -149,17 +147,20 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
 	}
+	if len(t.path) != 0 {
+		httpReq.URL.Path = t.path
+	}
 
 	// Set request headers - accept both SSE and JSON responses
 	httpReq.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
 	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
-	if t.sessionID != "" && !t.isStatelessMode {
+	if t.sessionID != "" && !t.isStateless {
 		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	}
 
-	// If LastEventID is provided, attach it to the request
-	if options != nil && options.LastEventID != "" {
-		httpReq.Header.Set(httputil.LastEventIDHeader, options.LastEventID)
+	// If lastEventID is provided, attach it to the request
+	if options != nil && options.lastEventID != "" {
+		httpReq.Header.Set(httputil.LastEventIDHeader, options.lastEventID)
 	} else if t.lastEventID != "" {
 		httpReq.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
@@ -172,11 +173,11 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 
 	// Handle session ID
 	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); sessionID != "" {
-		t.sessionID = sessionID
-		t.isStatelessMode = false
-	} else if req.Method == MethodInitialize && !t.isStatelessMode {
+		t.setSessionID(sessionID)
+		t.isStateless = false
+	} else if req.Method == MethodInitialize && !t.isStateless {
 		// If this is an initialize request and no session ID was received, auto-detect as stateless mode
-		t.isStatelessMode = true
+		t.isStateless = true
 		t.enableGetSSE = false // Disable GET SSE in stateless mode
 	}
 
@@ -231,7 +232,7 @@ func (t *StreamableHTTPClientTransport) sendRequest(ctx context.Context, req *JS
 }
 
 // Handle SSE response
-func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, httpResp *http.Response, reqID interface{}, options *StreamOptions) (*json.RawMessage, error) {
+func (t *streamableHTTPClientTransport) handleSSEResponse(ctx context.Context, httpResp *http.Response, reqID interface{}, options *streamOptions) (*json.RawMessage, error) {
 	reader := bufio.NewReader(httpResp.Body)
 	var rawResult *json.RawMessage
 	var resultReceived bool
@@ -247,8 +248,8 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 	t.handlersMutex.RUnlock()
 
 	// Add request-specific handlers (if any)
-	if options != nil && options.NotificationHandlers != nil {
-		for method, handler := range options.NotificationHandlers {
+	if options != nil && options.notificationHandlers != nil {
+		for method, handler := range options.notificationHandlers {
 			handlers[method] = handler
 		}
 	}
@@ -340,24 +341,24 @@ func (t *StreamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 	}
 }
 
-// RegisterNotificationHandler registers a notification handler
-func (t *StreamableHTTPClientTransport) RegisterNotificationHandler(method string, handler NotificationHandler) {
+// registerNotificationHandler registers a notification handler
+func (t *streamableHTTPClientTransport) registerNotificationHandler(method string, handler NotificationHandler) {
 	t.handlersMutex.Lock()
 	defer t.handlersMutex.Unlock()
 
 	t.notificationHandlers[method] = handler
 }
 
-// UnregisterNotificationHandler unregisters a notification handler
-func (t *StreamableHTTPClientTransport) UnregisterNotificationHandler(method string) {
+// unregisterNotificationHandler unregisters a notification handler
+func (t *streamableHTTPClientTransport) unregisterNotificationHandler(method string) {
 	t.handlersMutex.Lock()
 	defer t.handlersMutex.Unlock()
 
 	delete(t.notificationHandlers, method)
 }
 
-// SendNotification sends a notification (no response expected)
-func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, notification *JSONRPCNotification) error {
+// sendNotification sends a notification (no response expected)
+func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, notification *JSONRPCNotification) error {
 	// Serialize notification to JSON
 	notifBytes, err := json.Marshal(notification)
 	if err != nil {
@@ -367,7 +368,10 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(notifBytes))
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		return fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
+	}
+	if len(t.path) != 0 {
+		httpReq.URL.Path = t.path
 	}
 
 	// Set request headers
@@ -378,7 +382,7 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 	}
 
 	// Send request
-	httpResp, err := t.httpClient.Do(httpReq)
+	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -398,13 +402,13 @@ func (t *StreamableHTTPClientTransport) SendNotification(ctx context.Context, no
 }
 
 // SendResponse sends a response (clients don't need to implement this method)
-func (t *StreamableHTTPClientTransport) SendResponse(ctx context.Context, resp *JSONRPCResponse) error {
+func (t *streamableHTTPClientTransport) sendResponse(ctx context.Context, resp *JSONRPCResponse) error {
 	return fmt.Errorf("client transport does not support sending responses")
 }
 
 // Close closes the transport connection
-func (t *StreamableHTTPClientTransport) Close() error {
-	// Close GET SSE connection
+func (t *streamableHTTPClientTransport) close() error {
+	// close GET SSE connection
 	t.getSSEConn.mutex.Lock()
 	if t.getSSEConn.active && t.getSSEConn.cancel != nil {
 		t.getSSEConn.cancel()
@@ -421,31 +425,17 @@ func (t *StreamableHTTPClientTransport) Close() error {
 }
 
 // GetSessionID gets the session ID
-func (t *StreamableHTTPClientTransport) GetSessionID() string {
+func (t *streamableHTTPClientTransport) getSessionID() string {
 	return t.sessionID
 }
 
 // SetSessionID sets the session ID
-func (t *StreamableHTTPClientTransport) SetSessionID(sessionID string) {
+func (t *streamableHTTPClientTransport) setSessionID(sessionID string) {
 	t.sessionID = sessionID
-	t.logger.Infof("Set session ID: %s", sessionID)
-
-	// If GET SSE is enabled and session ID exists, try to establish GET SSE connection
-	if t.enableGetSSE && t.sessionID != "" {
-		t.logger.Info("GET SSE is enabled, will attempt to establish GET SSE connection")
-		// Establish connection asynchronously to avoid blocking
-		go t.establishGetSSEConnection()
-	} else {
-		if !t.enableGetSSE {
-			t.logger.Info("GET SSE is not enabled, will not establish GET SSE connection")
-		} else if t.sessionID == "" {
-			t.logger.Info("Session ID is empty, cannot establish GET SSE connection")
-		}
-	}
 }
 
 // Establish GET SSE connection
-func (t *StreamableHTTPClientTransport) establishGetSSEConnection() {
+func (t *streamableHTTPClientTransport) establishGetSSE() {
 	// Get lock to ensure only one active connection
 	t.getSSEConn.mutex.Lock()
 	defer t.getSSEConn.mutex.Unlock()
@@ -480,7 +470,7 @@ func (t *StreamableHTTPClientTransport) establishGetSSEConnection() {
 }
 
 // Connect to GET SSE endpoint
-func (t *StreamableHTTPClientTransport) connectGetSSE(ctx context.Context) error {
+func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error {
 	// Check if there's a session ID
 	if t.sessionID == "" {
 		return fmt.Errorf("cannot establish GET SSE connection: session ID is empty")
@@ -489,7 +479,10 @@ func (t *StreamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	// Build GET request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.serverURL.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create GET request: %w", err)
+		return fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
+	}
+	if len(t.path) != 0 {
+		req.URL.Path = t.path
 	}
 
 	// Set necessary headers
@@ -499,10 +492,10 @@ func (t *StreamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 		req.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
 
-	t.logger.Infof("Attempting to establish GET SSE connection, session ID: %s", t.sessionID)
+	t.logger.Debugf("Attempting to establish GET SSE connection, session ID: %s", t.sessionID)
 
 	// Send request
-	resp, err := t.httpClient.Do(req)
+	resp, err := t.httpReqHandler.Handle(ctx, t.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("GET SSE connection request failed: %w", err)
 	}
@@ -519,14 +512,14 @@ func (t *StreamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	}
 
 	// Handle response
-	t.logger.Infof("GET SSE connection established, session ID: %s", t.sessionID)
+	t.logger.Debugf("GET SSE connection established, session ID: %s", t.sessionID)
 
 	// Handle SSE event stream
 	return t.handleGetSSEEvents(ctx, resp.Body)
 }
 
 // Handle GET SSE event stream
-func (t *StreamableHTTPClientTransport) handleGetSSEEvents(ctx context.Context, body io.ReadCloser) error {
+func (t *streamableHTTPClientTransport) handleGetSSEEvents(ctx context.Context, body io.ReadCloser) error {
 	scanner := bufio.NewScanner(body)
 	var eventID, eventData string
 
@@ -569,16 +562,14 @@ func (t *StreamableHTTPClientTransport) handleGetSSEEvents(ctx context.Context, 
 }
 
 // Process SSE event
-func (t *StreamableHTTPClientTransport) processSSEEvent(eventID, eventData string) {
+func (t *streamableHTTPClientTransport) processSSEEvent(eventID, eventData string) {
 	// Ignore empty events
 	if eventData == "" {
 		return
 	}
 
-	t.logger.Infof("Received GET SSE event: ID=%s, data length: %d", eventID, len(eventData))
-
 	// Use the new unified parsing function to parse the message
-	message, msgType, err := ParseJSONRPCMessage([]byte(eventData))
+	message, msgType, err := parseJSONRPCMessage([]byte(eventData))
 	if err != nil {
 		t.logger.Infof("Failed to parse SSE event: %v", err)
 		return
@@ -595,28 +586,31 @@ func (t *StreamableHTTPClientTransport) processSSEEvent(eventID, eventData strin
 
 		if ok && handler != nil {
 			if err := handler(notification); err != nil {
-				t.logger.Infof("Failed to handle notification: %s, error: %v",
-					FormatJSONRPCMessage(notification), err)
+				t.logger.Debugf("Failed to handle notification: %s, error: %v",
+					formatJSONRPCMessage(notification), err)
 			} else {
-				t.logger.Infof("Successfully handled notification: %s",
-					FormatJSONRPCMessage(notification))
+				t.logger.Debugf("Successfully handled notification: %s",
+					formatJSONRPCMessage(notification))
 			}
 		} else {
-			t.logger.Infof("Received notification with no registered handler: %s",
-				FormatJSONRPCMessage(notification))
+			t.logger.Debugf("Received notification with no registered handler: %s",
+				formatJSONRPCMessage(notification))
 		}
 	} else {
 		// In GET SSE connection, we expect to receive only notifications
-		t.logger.Infof("GET SSE connection received non-notification message, type: %s, ignored", msgType)
+		t.logger.Debugf("GET SSE connection received non-notification message, type: %s, ignored", msgType)
 	}
 }
 
-// TerminateSession terminates the session
-func (t *StreamableHTTPClientTransport) TerminateSession(ctx context.Context) error {
+// terminateSession terminates the session
+func (t *streamableHTTPClientTransport) terminateSession(ctx context.Context) error {
 	// Create HTTP DELETE request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, t.serverURL.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		return fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
+	}
+	if len(t.path) != 0 {
+		httpReq.URL.Path = t.path
 	}
 
 	// Set session ID header
@@ -646,7 +640,7 @@ func (t *StreamableHTTPClientTransport) TerminateSession(ctx context.Context) er
 	return nil
 }
 
-// IsStatelessMode returns whether the client is in stateless mode
+// isStatelessMode returns whether the client is in stateless mode
 //
 // The client automatically detects if the server is in stateless mode: when no session ID
 // is provided in the initialize response, the client automatically sets itself to stateless
@@ -654,11 +648,26 @@ func (t *StreamableHTTPClientTransport) TerminateSession(ctx context.Context) er
 //
 // If it returns true, the client is currently running in stateless mode and will not include
 // a session ID in requests or attempt to establish GET SSE connections.
-func (t *StreamableHTTPClientTransport) IsStatelessMode() bool {
-	return t.isStatelessMode
+func (t *streamableHTTPClientTransport) isStatelessMode() bool {
+	return t.isStateless
 }
 
-// SendRequestWithStream sends a request with streaming options
-func (t *StreamableHTTPClientTransport) SendRequestWithStream(ctx context.Context, req *JSONRPCRequest, options *StreamOptions) (*json.RawMessage, error) {
-	return t.sendRequest(ctx, req, options)
+// sendRequestWithStream sends a request with streaming options
+func (t *streamableHTTPClientTransport) sendRequestWithStream(ctx context.Context, req *JSONRPCRequest, options *streamOptions) (*json.RawMessage, error) {
+	return t.send(ctx, req, options)
+}
+
+// establishGetSSEConnection attempts to establish a GET SSE connection if enabled
+func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
+	if !t.enableGetSSE {
+		t.logger.Debug("GET SSE is not enabled, will not establish GET SSE connection")
+		return
+	}
+
+	if t.sessionID == "" {
+		t.logger.Debug("Session ID is empty, cannot establish GET SSE connection")
+		return
+	}
+
+	t.establishGetSSE()
 }

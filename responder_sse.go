@@ -10,8 +10,8 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
-// SSEResponder implements the SSE response handler
-type SSEResponder struct {
+// sseResponder implements the SSE response handler
+type sseResponder struct {
 	// Current event ID (Note: this field seems unused, consider removal if truly not needed for other logic)
 	eventID string
 
@@ -22,9 +22,9 @@ type SSEResponder struct {
 	sseWriter *sseutil.Writer
 }
 
-// NewSSEResponder creates a new SSE response handler
-func NewSSEResponder(options ...func(*SSEResponder)) *SSEResponder {
-	responder := &SSEResponder{
+// newSSEResponder creates a new SSE response handler
+func newSSEResponder(options ...func(*sseResponder)) *sseResponder {
+	responder := &sseResponder{
 		isStateless: false, // Default to stateful mode
 		sseWriter:   sseutil.NewWriter(),
 	}
@@ -37,24 +37,24 @@ func NewSSEResponder(options ...func(*SSEResponder)) *SSEResponder {
 	return responder
 }
 
-// WithSSEStatelessMode sets whether to use stateless mode
-func WithSSEStatelessMode(isStateless bool) func(*SSEResponder) {
-	return func(r *SSEResponder) {
+// withSSEStatelessMode sets whether to use stateless mode
+func withSSEStatelessMode(isStateless bool) func(*sseResponder) {
+	return func(r *sseResponder) {
 		r.isStateless = isStateless
 	}
 }
 
-// WithEventID sets the event ID
-func WithEventID(eventID string) func(*SSEResponder) {
-	return func(r *SSEResponder) {
+// withEventID sets the event ID
+func withEventID(eventID string) func(*sseResponder) {
+	return func(r *sseResponder) {
 		if eventID != "" {
 			r.eventID = eventID
 		}
 	}
 }
 
-// Respond sends an SSE response
-func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
+// respond sends an SSE response
+func (r *sseResponder) respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
 	// Check if streaming is supported
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -85,21 +85,21 @@ func (r *SSEResponder) Respond(ctx context.Context, w http.ResponseWriter, req *
 	return r.sseWriter.WriteEvent(w, flusher, sseutil.Event{ID: eventID, Data: respBytes})
 }
 
-// SupportsContentType checks if the specified content type is supported
-func (r *SSEResponder) SupportsContentType(accepts []string) bool {
+// supportsContentType checks if the specified content type is supported
+func (r *sseResponder) supportsContentType(accepts []string) bool {
 	return httputil.ContainsContentType(accepts, httputil.ContentTypeSSE)
 }
 
-// ContainsRequest determines if the request might contain a request (not a notification)
-func (r *SSEResponder) ContainsRequest(body []byte) bool {
+// containsRequest determines if the request might contain a request (not a notification)
+func (r *sseResponder) containsRequest(body []byte) bool {
 	// When SSE is supported, we can handle any request containing an "id" field
 	return true
 }
 
-// SendNotification sends a notification event
+// sendNotification sends a notification event
 // Note: Standard SSE headers should be set by the caller (e.g. handleGet in httpServerHandler) if this is used for GET SSE streams.
-func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
-	// Check if it's a response type, which should be sent using the Respond method
+func (r *sseResponder) sendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
+	// Check if it's a response type, which should be sent using the respond method
 	if _, ok := notification.(*JSONRPCResponse); ok {
 		return "", ErrInvalidResponseType
 	}
@@ -136,6 +136,6 @@ func (r *SSEResponder) SendNotification(w http.ResponseWriter, flusher http.Flus
 }
 
 // Generate the next event ID - This method is now effectively a proxy to sseWriter.
-func (r *SSEResponder) nextEventID() string {
+func (r *sseResponder) nextEventID() string {
 	return r.sseWriter.GenerateEventID()
 }

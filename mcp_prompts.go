@@ -87,19 +87,19 @@ func (pm *PromptMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	if temp.Content != nil && len(temp.Content) > 0 && string(temp.Content) != "null" {
-		// Use mcp.ParseContent (from mcp/tools.go, assuming it's accessible)
+		// Use mcp.parseContent (from mcp/tools.go, assuming it's accessible)
 		// to parse the raw JSON into the correct concrete Content type.
 		var contentMap map[string]interface{}
 		if err := json.Unmarshal(temp.Content, &contentMap); err != nil {
-			return fmt.Errorf("failed to unmarshal content field to map for ParseContent: %w", err)
+			return fmt.Errorf("failed to unmarshal content field to map for parseContent: %w", err)
 		}
 
-		// Assuming ParseContent is a function in the mcp package (e.g., mcp.ParseContent)
+		// Assuming parseContent is a function in the mcp package (e.g., mcp.parseContent)
 		// If it's not directly accessible, this call needs adjustment (e.g., qualifying with package if different and public).
-		// For this example, we assume it can be called directly if in the same package or mcp.ParseContent if ParseContent is public.
-		concreteContent, err := ParseContent(contentMap) // This function is in mcp/tools.go (mcp.ParseContent)
+		// For this example, we assume it can be called directly if in the same package or mcp.parseContent if parseContent is public.
+		concreteContent, err := parseContent(contentMap) // This function is in mcp/tools.go (mcp.parseContent)
 		if err != nil {
-			return fmt.Errorf("failed to parse concrete content using ParseContent: %w", err)
+			return fmt.Errorf("failed to parse concrete content using parseContent: %w", err)
 		}
 		pm.Content = concreteContent
 	} else {
@@ -125,160 +125,4 @@ type ListPromptsResponse struct {
 
 	// Next page cursor (optional)
 	NextCursor string `json:"nextCursor,omitempty"`
-}
-
-// ParseListPromptsResult parses the prompt list response
-func ParseListPromptsResult(result interface{}) (*ListPromptsResponse, error) {
-	// Type assertion to map
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid prompt list response format")
-	}
-
-	// Create result object
-	promptsResponse := &ListPromptsResponse{}
-
-	// Parse next page cursor
-	if cursor, ok := resultMap["nextCursor"].(string); ok {
-		promptsResponse.NextCursor = cursor
-	}
-
-	// Parse prompt list
-	promptsArray, ok := resultMap["prompts"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("missing prompt list in response")
-	}
-
-	prompts := make([]Prompt, 0, len(promptsArray))
-	for _, item := range promptsArray {
-		prompt, err := parsePromptItem(item)
-		if err != nil {
-			continue // or return error
-		}
-		prompts = append(prompts, prompt)
-	}
-	promptsResponse.Prompts = prompts
-
-	return promptsResponse, nil
-}
-
-// parsePromptItem parses a single prompt item
-func parsePromptItem(item interface{}) (Prompt, error) {
-	promptMap, ok := item.(map[string]interface{})
-	if !ok {
-		return Prompt{}, fmt.Errorf("invalid prompt format")
-	}
-
-	// Create prompt object
-	prompt := Prompt{}
-
-	// Extract name
-	if name, ok := promptMap["name"].(string); ok {
-		prompt.Name = name
-	} else {
-		return Prompt{}, fmt.Errorf("prompt missing name")
-	}
-
-	// Extract description
-	if description, ok := promptMap["description"].(string); ok {
-		prompt.Description = description
-	}
-
-	// Parse parameter list
-	if argsArray, ok := promptMap["arguments"].([]interface{}); ok && len(argsArray) > 0 {
-		args := make([]PromptArgument, 0, len(argsArray))
-
-		for _, argItem := range argsArray {
-			argMap, ok := argItem.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			arg := PromptArgument{}
-
-			// Extract parameter name
-			if name, ok := argMap["name"].(string); ok {
-				arg.Name = name
-			} else {
-				continue // Parameter must have a name
-			}
-
-			// Extract parameter description
-			if description, ok := argMap["description"].(string); ok {
-				arg.Description = description
-			}
-
-			// Extract whether required
-			if required, ok := argMap["required"].(bool); ok {
-				arg.Required = required
-			}
-
-			args = append(args, arg)
-		}
-
-		prompt.Arguments = args
-	}
-
-	return prompt, nil
-}
-
-// ParseGetPromptResult parses the get prompt response
-func ParseGetPromptResult(result interface{}) (*GetPromptResponse, error) {
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid get prompt response format")
-	}
-
-	// Create result object
-	promptResponse := &GetPromptResponse{}
-
-	// Extract description
-	if description, ok := resultMap["description"].(string); ok {
-		promptResponse.Description = description
-	}
-
-	// Parse message list
-	messagesArray, ok := resultMap["messages"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("missing message list in response")
-	}
-
-	messages := make([]PromptMessage, 0, len(messagesArray))
-	for _, item := range messagesArray {
-		message, err := parsePromptMessageItem(item)
-		if err != nil {
-			continue
-		}
-		messages = append(messages, message)
-	}
-	promptResponse.Messages = messages
-
-	return promptResponse, nil
-}
-
-// parsePromptMessageItem parses a prompt message item
-func parsePromptMessageItem(item interface{}) (PromptMessage, error) {
-	msgMap, ok := item.(map[string]interface{})
-	if !ok {
-		return PromptMessage{}, fmt.Errorf("invalid message format")
-	}
-
-	// Create message object
-	message := PromptMessage{}
-
-	// Extract role
-	if roleStr, ok := msgMap["role"].(string); ok {
-		message.Role = Role(roleStr)
-	} else {
-		return PromptMessage{}, fmt.Errorf("message missing role")
-	}
-
-	// Extract content
-	if content, ok := msgMap["content"]; ok {
-		message.Content = content.(Content)
-	} else {
-		return PromptMessage{}, fmt.Errorf("message missing content")
-	}
-
-	return message, nil
 }

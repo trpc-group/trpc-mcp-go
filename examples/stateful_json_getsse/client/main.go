@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
-// Handler function for server notifications.
+// handler function for server notifications.
 func handleNotification(notification *mcp.JSONRPCNotification) error {
 	paramsMap := notification.Params.AdditionalFields // Use AdditionalFields here.
 
@@ -20,7 +20,11 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 		return fmt.Errorf("'data' field is invalid or missing")
 	}
 
-	notificationType, _ := dataMap["type"].(string)
+	notificationType, typeOk := dataMap["type"].(string)
+	if !typeOk {
+		log.Printf("Received notification [%s] (Level: %s), but 'type' field in data is invalid or missing: %+v", notification.Method, level, dataMap)
+		return fmt.Errorf("'type' field in notification data is invalid or missing")
+	}
 
 	log.Printf("Received notification [%s] (Level: %s, Type: %s): %+v.", notification.Method, level, notificationType, dataMap)
 
@@ -75,7 +79,7 @@ func main() {
 
 	// Initialize client.
 	log.Printf("Initializing client...")
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 	}
@@ -94,7 +98,7 @@ func main() {
 
 	// Get available tools list.
 	log.Printf("Listing tools...")
-	tools, err := mcpClient.ListTools(ctx)
+	tools, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
@@ -106,9 +110,10 @@ func main() {
 
 	// Call greet tool.
 	log.Printf("Calling greet tool...")
-	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
-		"name": "JSON+GETSSE client user",
-	})
+	callToolReq := mcp.CallToolRequest{}
+	callToolReq.Params.Name = "greet"
+	callToolReq.Params.Arguments = map[string]interface{}{"name": "JSON+GETSSE client user"}
+	callResult, err := mcpClient.CallTool(ctx, &callToolReq)
 	if err != nil {
 		log.Fatalf("Failed to call tool: %v", err)
 	}
@@ -125,8 +130,18 @@ func main() {
 
 	// Call counter tool, demonstrate session state keeping.
 	log.Printf("Calling counter tool first time...")
-	counterResult1, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 1,
+	counterResult1, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 1,
+			},
+			Meta: &struct {
+				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
+			}{
+				ProgressToken: 123,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -142,8 +157,13 @@ func main() {
 
 	// Call counter tool again, verify state keeping.
 	log.Printf("Calling counter tool second time...")
-	counterResult2, err := mcpClient.CallTool(ctx, "counter", map[string]interface{}{
-		"increment": 2,
+	counterResult2, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "counter",
+			Arguments: map[string]interface{}{
+				"increment": 2,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call counter tool: %v", err)
@@ -159,9 +179,14 @@ func main() {
 
 	// Call notification tool, demonstrate server push notification feature.
 	log.Printf("Calling sendNotification tool, you will receive a notification after a delay...")
-	notifyResult, err := mcpClient.CallTool(ctx, "sendNotification", map[string]interface{}{
-		"message": "This is a test notification message sent from JSON+GETSSE client",
-		"delay":   2,
+	notifyResult, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "sendNotification",
+			Arguments: map[string]interface{}{
+				"message": "This is a test notification message sent from JSON+GETSSE client",
+				"delay":   2,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call notification tool: %v", err)

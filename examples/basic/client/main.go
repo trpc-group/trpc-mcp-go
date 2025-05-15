@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 
 	// Initialize client.
 	log.Println("===== Initialize client =====")
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Printf("Initialization failed: %v\n", err)
 		os.Exit(1)
@@ -54,7 +54,7 @@ func main() {
 
 	// List tools.
 	log.Println("===== List available tools =====")
-	listToolsResp, err := mcpClient.ListTools(ctx)
+	listToolsResp, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
 	tools := listToolsResp.Tools
 	if err != nil {
 		log.Printf("Failed to list tools: %v", err)
@@ -71,9 +71,12 @@ func main() {
 		// Call tool (if any).
 		if len(tools) > 0 {
 			log.Println("===== Call tool: %s =====", tools[0].Name)
-			callToolResp, err := mcpClient.CallTool(ctx, tools[0].Name, map[string]interface{}{
+			callToolReq := &mcp.CallToolRequest{}
+			callToolReq.Params.Name = tools[0].Name
+			callToolReq.Params.Arguments = map[string]interface{}{
 				"name": "MCP User",
-			})
+			}
+			callToolResp, err := mcpClient.CallTool(ctx, callToolReq)
 			if err != nil {
 				log.Printf("Failed to call tool: %v", err)
 			} else {
@@ -91,7 +94,7 @@ func main() {
 
 	// List prompts.
 	log.Println("===== List prompts =====")
-	promptsResult, err := mcpClient.ListPrompts(ctx)
+	promptsResult, err := mcpClient.ListPrompts(ctx, &mcp.ListPromptsRequest{})
 	if err != nil {
 		log.Printf("Failed to list prompts: %v", err)
 	} else {
@@ -122,7 +125,10 @@ func main() {
 			}
 
 			log.Printf("===== Get prompt: %s =====", promptsResult.Prompts[0].Name)
-			promptContent, err := mcpClient.GetPrompt(ctx, promptsResult.Prompts[0].Name, arguments)
+			getPromptReq := &mcp.GetPromptRequest{}
+			getPromptReq.Params.Name = promptsResult.Prompts[0].Name
+			getPromptReq.Params.Arguments = arguments
+			promptContent, err := mcpClient.GetPrompt(ctx, getPromptReq)
 			if err != nil {
 				log.Printf("Failed to get prompt: %v", err)
 			} else {
@@ -151,7 +157,7 @@ func main() {
 
 	// List resources.
 	log.Printf("===== List resources =====")
-	resourcesResult, err := mcpClient.ListResources(ctx)
+	resourcesResult, err := mcpClient.ListResources(ctx, &mcp.ListResourcesRequest{})
 	if err != nil {
 		log.Printf("Failed to list resources: %v", err)
 	} else {
@@ -163,7 +169,9 @@ func main() {
 		// Read the first resource (if any).
 		if len(resourcesResult.Resources) > 0 {
 			log.Printf("===== Read resource: %s =====", resourcesResult.Resources[0].Name)
-			resourceContent, err := mcpClient.ReadResource(ctx, resourcesResult.Resources[0].URI)
+			readResourceReq := &mcp.ReadResourceRequest{}
+			readResourceReq.Params.URI = resourcesResult.Resources[0].URI
+			resourceContent, err := mcpClient.ReadResource(ctx, readResourceReq)
 			if err != nil {
 				log.Printf("Failed to read resource: %v", err)
 			} else {

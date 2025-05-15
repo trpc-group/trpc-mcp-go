@@ -78,14 +78,14 @@ func main() {
 	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
-	// 1. Stateful mode (using SessionManager)
+	// 1. Stateful mode (using sessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. GET SSE is not supported
 	mcpServer := mcp.NewServer(
 		"Stateful-JSON-Server",                 // Server name
 		"1.0.0",                                // Server version
 		mcp.WithServerAddress(":3003"),         // Server address and port
-		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithServerPath("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
 		mcp.WithPostSSEEnabled(false),          // Disable SSE
 		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
@@ -121,7 +121,7 @@ func main() {
 	// Register session management route, allow viewing active sessions.
 	http.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
-			// We cannot directly get all active sessions here because SessionManager does not provide such a method.
+			// We cannot directly get all active sessions here because sessionManager does not provide such a method.
 			// But we can provide a session monitor page.
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			fmt.Fprintf(w, "Session manager status: active\n")

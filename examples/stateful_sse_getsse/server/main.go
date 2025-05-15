@@ -509,14 +509,14 @@ func main() {
 	sessionManager := mcp.NewSessionManager(3600)
 
 	// Create MCP server, configured as:
-	// 1. Stateful mode (Stateful, using SessionManager)
+	// 1. Stateful mode (Stateful, using sessionManager)
 	// 2. Use SSE response (streaming)
 	// 3. Support independent GET SSE
 	mcpServer = mcp.NewServer(
 		"Stateful-SSE-GETSSE-Server",           // Server name
 		"1.0.0",                                // Server version
 		mcp.WithServerAddress(":3006"),         // Server address and port
-		mcp.WithPathPrefix("/mcp"),             // Set API path
+		mcp.WithServerPath("/mcp"),             // Set API path
 		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
 		mcp.WithPostSSEEnabled(true),           // Enable SSE
 		mcp.WithGetSSEEnabled(true),            // Enable GET SSE

@@ -69,19 +69,19 @@ func TestToolManager_RegisterTool(t *testing.T) {
 	tool2 := NewMockTool("test-tool-2", "Test Tool 2", nil)
 
 	// Test registering a tool
-	err := manager.RegisterTool(tool1)
+	err := manager.registerTool(tool1)
 	assert.NoError(t, err)
 	assert.Len(t, manager.tools, 1)
 	assert.Contains(t, manager.tools, "test-tool-1")
 
 	// Test registering another tool
-	err = manager.RegisterTool(tool2)
+	err = manager.registerTool(tool2)
 	assert.NoError(t, err)
 	assert.Len(t, manager.tools, 2)
 	assert.Contains(t, manager.tools, "test-tool-2")
 
 	// Test duplicate registration
-	err = manager.RegisterTool(tool1)
+	err = manager.registerTool(tool1)
 	assert.Error(t, err)
 	assert.Len(t, manager.tools, 2)
 }
@@ -93,16 +93,16 @@ func TestToolManager_GetTool(t *testing.T) {
 	// Create and register tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
 
-	err := manager.RegisterTool(tool)
+	err := manager.registerTool(tool)
 	require.NoError(t, err)
 
 	// Test getting an existing tool
-	result, exists := manager.GetTool("test-tool")
+	result, exists := manager.getTool("test-tool")
 	assert.True(t, exists)
 	assert.Equal(t, tool, result)
 
 	// Test getting a non-existent tool
-	result, exists = manager.GetTool("non-existent-tool")
+	result, exists = manager.getTool("non-existent-tool")
 	assert.False(t, exists)
 	assert.Nil(t, result)
 }
@@ -112,7 +112,7 @@ func TestToolManager_GetTools(t *testing.T) {
 	manager := newToolManager()
 
 	// Test empty list
-	tools := manager.GetTools("")
+	tools := manager.getTools("")
 	assert.Empty(t, tools)
 
 	// Register multiple tools
@@ -122,11 +122,11 @@ func TestToolManager_GetTools(t *testing.T) {
 
 	tool2 := NewMockTool("tool2", "Tool 2", nil)
 
-	manager.RegisterTool(tool1)
-	manager.RegisterTool(tool2)
+	manager.registerTool(tool1)
+	manager.registerTool(tool2)
 
 	// Test getting tool list
-	tools = manager.GetTools("")
+	tools = manager.getTools("")
 	assert.Len(t, tools, 2)
 
 	// Verify tool information
@@ -158,14 +158,14 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	// Create and register tool
 	tool := NewMockTool("test-exec-tool", "Test Execution Tool", map[string]interface{}{})
 
-	err := manager.RegisterTool(tool)
+	err := manager.registerTool(tool)
 	require.NoError(t, err)
 
 	// Test executing the tool
 	ctx := context.Background()
 
 	// Create request
-	req := NewJSONRPCRequest("call-1", MethodToolsCall, map[string]interface{}{
+	req := newJSONRPCRequest("call-1", MethodToolsCall, map[string]interface{}{
 		"name": "test-exec-tool",
 		"arguments": map[string]interface{}{
 			"param1": "value1",
@@ -173,40 +173,35 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	})
 
 	// Process request
-	resp, err := manager.HandleCallTool(ctx, req, nil)
+	result, err := manager.handleCallTool(ctx, req, nil)
 	assert.NoError(t, err)
-	assert.NotNil(t, resp)
+	assert.NotNil(t, result)
 
-	// Type assert to JSONRPCResponse
-	successResp, ok := resp.(JSONRPCResponse)
-	assert.True(t, ok, "Expected JSONRPCResponse but got different type")
+	// Type assert to CallToolResult
+	callResult, ok := result.(*CallToolResult)
+	assert.True(t, ok, "Expected *CallToolResult but got %T", result)
 
-	// Verify response content
-	result, ok := successResp.Result.(map[string]interface{})
-	assert.True(t, ok)
-
-	// Verify content field
-	content, ok := result["content"].([]interface{})
-	assert.True(t, ok)
-	assert.Len(t, content, 1)
+	// Verify content
+	assert.NotNil(t, callResult.Content)
+	assert.Len(t, callResult.Content, 1)
 
 	// Verify first content item
-	contentItem, ok := content[0].(map[string]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, "text", contentItem["type"])
-	assert.Equal(t, "Mock tool execution result", contentItem["text"])
+	content, ok := callResult.Content[0].(TextContent)
+	assert.True(t, ok, "Expected TextContent but got %T", callResult.Content[0])
+	assert.Equal(t, "text", content.Type)
+	assert.Equal(t, "Mock tool execution result", content.Text)
 
 	// Test executing a non-existent tool
-	req = NewJSONRPCRequest("call-2", MethodToolsCall, map[string]interface{}{
+	req = newJSONRPCRequest("call-2", MethodToolsCall, map[string]interface{}{
 		"name": "non-existent-tool",
 	})
 
-	resp, err = manager.HandleCallTool(ctx, req, nil)
+	result, err = manager.handleCallTool(ctx, req, nil)
 	assert.NoError(t, err)
-	assert.NotNil(t, resp)
+	assert.NotNil(t, result)
 
 	// Type assert to JSONRPCError
-	errorResp, ok := resp.(JSONRPCError)
-	assert.True(t, ok, "Expected JSONRPCError but got different type")
+	errorResp, ok := result.(*JSONRPCError)
+	assert.True(t, ok, "Expected *JSONRPCError but got %T", result)
 	assert.Equal(t, ErrCodeMethodNotFound, errorResp.Error.Code)
 }

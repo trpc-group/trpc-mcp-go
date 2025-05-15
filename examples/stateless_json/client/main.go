@@ -6,7 +6,7 @@ import (
 
 	"log"
 
-	"trpc.group/trpc-go/trpc-mcp-go"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 
 	// Initialize client.
 	log.Printf("Initializing client...")
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Fatalf("Initialization failed: %v", err)
 	}
@@ -43,7 +43,7 @@ func main() {
 
 	// Get an available tools list.
 	log.Printf("Listing tools...")
-	listToolsResp, err := mcpClient.ListTools(ctx)
+	listToolsResp, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
 		log.Fatalf("Failed to get tools list: %v", err)
 	}
@@ -55,8 +55,13 @@ func main() {
 
 	// Call greet tool.
 	log.Printf("Calling greet tool...")
-	callResult, err := mcpClient.CallTool(ctx, "greet", map[string]interface{}{
-		"name": "Client user",
+	callResult, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "greet",
+			Arguments: map[string]interface{}{
+				"name": "Client user",
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to call tool: %v", err)

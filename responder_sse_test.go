@@ -23,15 +23,15 @@ func TestSSEResponder_Respond(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Create SSE responder
-	responder := NewSSEResponder()
+	responder := newSSEResponder()
 
 	// Create test response
-	testResponse := NewJSONRPCResponse("test-id", map[string]interface{}{
+	testResponse := newJSONRPCResponse("test-id", map[string]interface{}{
 		"result": "test-result",
 	})
 
 	// Send response
-	err := responder.Respond(context.Background(), w, nil, testResponse, nil)
+	err := responder.respond(context.Background(), w, nil, testResponse, nil)
 
 	// Verify no error
 	assert.NoError(t, err)
@@ -50,7 +50,7 @@ func TestSSEResponder_SendNotification(t *testing.T) {
 	flusher := &MockFlusher{}
 
 	// Create SSE responder
-	responder := NewSSEResponder()
+	responder := newSSEResponder()
 
 	// Create test notification
 	testNotification := NewJSONRPCNotificationFromMap("test-method", map[string]interface{}{
@@ -58,7 +58,7 @@ func TestSSEResponder_SendNotification(t *testing.T) {
 	})
 
 	// Send notification
-	eventID, err := responder.SendNotification(w, flusher, testNotification)
+	eventID, err := responder.sendNotification(w, flusher, testNotification)
 
 	// Verify no error
 	assert.NoError(t, err)
@@ -79,24 +79,24 @@ func TestSSEResponder_SendNotification_WithResponse(t *testing.T) {
 	flusher := &MockFlusher{}
 
 	// Create SSE responder
-	responder := NewSSEResponder()
+	responder := newSSEResponder()
 
-	// Create test response to pass to SendNotification
-	testResponse := NewJSONRPCResponse("test-id", map[string]interface{}{
+	// Create test response to pass to sendNotification
+	testResponse := newJSONRPCResponse("test-id", map[string]interface{}{
 		"result": "test-result",
 	})
 
 	// Send response as notification (should return error)
-	eventID, err := responder.SendNotification(w, flusher, testResponse)
+	eventID, err := responder.sendNotification(w, flusher, testResponse)
 
 	// Verify error occurred
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "should be sent using the Respond method")
+	assert.Contains(t, err.Error(), "invalid response type")
 	assert.Empty(t, eventID)
 }
 
 func TestSSEResponder_NextEventID(t *testing.T) {
-	responder := NewSSEResponder()
+	responder := newSSEResponder()
 
 	// Generate multiple event IDs, ensure they are unique
 	ids := make(map[string]bool)
@@ -114,13 +114,13 @@ func TestSSEResponder_ComprehensiveTest(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Create SSE responder
-	responder := NewSSEResponder()
+	responder := newSSEResponder()
 
 	// Test sending response
-	testResponse := NewJSONRPCResponse("resp-id", map[string]interface{}{
+	testResponse := newJSONRPCResponse("resp-id", map[string]interface{}{
 		"result": "success",
 	})
-	err := responder.Respond(context.Background(), w, nil, testResponse, nil)
+	err := responder.respond(context.Background(), w, nil, testResponse, nil)
 	assert.NoError(t, err)
 
 	// Reset recorder
@@ -133,7 +133,7 @@ func TestSSEResponder_ComprehensiveTest(t *testing.T) {
 		"percent": 50,
 		"message": "halfway done",
 	})
-	notificationEventID, err := responder.SendNotification(w, flusher, testNotification)
+	notificationEventID, err := responder.sendNotification(w, flusher, testNotification)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, notificationEventID)
 	assert.True(t, flusher.flushCalled)

@@ -104,7 +104,7 @@ func main() {
 		"Stateless-SSE-No-GETSSE-Server", // Server name
 		"1.0.0",                          // Server version
 		mcp.WithServerAddress(":3002"),   // Server address and port
-		mcp.WithPathPrefix("/mcp"),       // Set API path
+		mcp.WithServerPath("/mcp"),       // Set API path
 		mcp.WithStatelessMode(true),      // Enable stateless mode
 		mcp.WithPostSSEEnabled(true),     // Enable SSE
 		mcp.WithGetSSEEnabled(false),     // Disable GET SSE

@@ -15,7 +15,7 @@ func TestNewSessionManager(t *testing.T) {
 
 	// Verify object created successfully
 	assert.NotNil(t, manager)
-	assert.Empty(t, manager.GetActiveSessions())
+	assert.Empty(t, manager.getActiveSessions())
 }
 
 func TestSessionManager_CreateSession(t *testing.T) {
@@ -23,7 +23,7 @@ func TestSessionManager_CreateSession(t *testing.T) {
 	manager := NewSessionManager(3600)
 
 	// Create session
-	session := manager.CreateSession()
+	session := manager.createSession()
 
 	// Verify session
 	assert.NotEmpty(t, session.GetID())
@@ -31,7 +31,7 @@ func TestSessionManager_CreateSession(t *testing.T) {
 	assert.WithinDuration(t, time.Now(), session.GetLastActivity(), 1*time.Second)
 
 	// Verify session is stored in the manager
-	sessions := manager.GetActiveSessions()
+	sessions := manager.getActiveSessions()
 	assert.Len(t, sessions, 1)
 	assert.Contains(t, sessions, session.GetID())
 }
@@ -67,7 +67,7 @@ func TestSessionManager_GetSession(t *testing.T) {
 	}
 
 	// Create a session for testing
-	existingSession := manager.CreateSession()
+	existingSession := manager.createSession()
 
 	// Record initial access time
 	initialTime := existingSession.GetLastActivity()
@@ -83,7 +83,7 @@ func TestSessionManager_GetSession(t *testing.T) {
 				sessionID = existingSession.GetID()
 			}
 
-			session, exists := manager.GetSession(sessionID)
+			session, exists := manager.getSession(sessionID)
 
 			if tc.shouldExist {
 				assert.True(t, exists)
@@ -108,32 +108,32 @@ func TestSessionManager_TerminateSession(t *testing.T) {
 	manager := NewSessionManager(3600)
 
 	// Create a session
-	session := manager.CreateSession()
+	session := manager.createSession()
 
 	// Verify session exists
-	sessions := manager.GetActiveSessions()
+	sessions := manager.getActiveSessions()
 	assert.Len(t, sessions, 1)
 	assert.Contains(t, sessions, session.GetID())
 
 	// Terminate session
-	success := manager.TerminateSession(session.GetID())
+	success := manager.terminateSession(session.GetID())
 
 	// Verify session has been terminated
 	assert.True(t, success)
-	sessions = manager.GetActiveSessions()
+	sessions = manager.getActiveSessions()
 	assert.Empty(t, sessions)
 	assert.NotContains(t, sessions, session.GetID())
 
 	// Terminate non-existent session
-	success = manager.TerminateSession("non-existent-session")
+	success = manager.terminateSession("non-existent-session")
 	assert.False(t, success)
-	sessions = manager.GetActiveSessions()
+	sessions = manager.getActiveSessions()
 	assert.Empty(t, sessions)
 }
 
 func TestSession_UpdateActivity(t *testing.T) {
 	// Create session
-	session := NewSession()
+	session := newSession()
 	initialTime := session.GetLastActivity()
 
 	// Wait a short time
@@ -148,7 +148,7 @@ func TestSession_UpdateActivity(t *testing.T) {
 
 func TestSession_DataOperations(t *testing.T) {
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Test storing and retrieving data
 	key := "testKey"
@@ -178,10 +178,10 @@ func TestSession_DataOperations(t *testing.T) {
 
 func TestSessionContext(t *testing.T) {
 	// Create session
-	session := NewSession()
+	session := newSession()
 
 	// Test storing and retrieving from context
-	ctx := SetSessionToContext(context.Background(), session)
+	ctx := setSessionToContext(context.Background(), session)
 
 	// Get from context
 	retrievedSession, ok := GetSessionFromContext(ctx)

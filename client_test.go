@@ -40,7 +40,7 @@ func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 	mcpServer := NewServer(
 		"Test-Server",          // Server name
 		"1.0.0",                // Server version
-		WithPathPrefix("/mcp"), // Set API path
+		WithServerPath("/mcp"), // Set API path
 	)
 
 	// Register test tool
@@ -102,14 +102,14 @@ func TestClient_Initialize(t *testing.T) {
 
 	// Test initialization
 	ctx := context.Background()
-	resp, err := client.Initialize(ctx)
+	resp, err := client.Initialize(ctx, &InitializeRequest{})
 
 	// Verify results
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "Test-Server", resp.ServerInfo.Name)
 	assert.Equal(t, "1.0.0", resp.ServerInfo.Version)
-	assert.Equal(t, ProtocolVersion_2024_11_05, resp.ProtocolVersion)
+	assert.Equal(t, ProtocolVersion_2025_03_26, resp.ProtocolVersion)
 	assert.NotNil(t, resp.Capabilities)
 
 	// Verify client state
@@ -124,11 +124,11 @@ func TestClient_ListTools(t *testing.T) {
 
 	// Initialize client
 	ctx := context.Background()
-	_, err := client.Initialize(ctx)
+	_, err := client.Initialize(ctx, &InitializeRequest{})
 	require.NoError(t, err)
 
 	// Test listing tools
-	toolsResult, err := client.ListTools(ctx)
+	toolsResult, err := client.ListTools(ctx, &ListToolsRequest{})
 
 	// Verify results
 	assert.NoError(t, err)
@@ -144,12 +144,17 @@ func TestClient_CallTool(t *testing.T) {
 
 	// Initialize client
 	ctx := context.Background()
-	_, err := client.Initialize(ctx)
+	_, err := client.Initialize(ctx, &InitializeRequest{})
 	require.NoError(t, err)
 
 	// Test calling tool
-	toolResult, err := client.CallTool(ctx, "test-tool", map[string]interface{}{
-		"name": "Test User",
+	toolResult, err := client.CallTool(ctx, &CallToolRequest{
+		Params: CallToolParams{
+			Name: "test-tool",
+			Arguments: map[string]interface{}{
+				"name": "Test User",
+			},
+		},
 	})
 
 	// Verify results
@@ -173,7 +178,7 @@ func TestClient_GetSessionID(t *testing.T) {
 
 	// Initialize client
 	ctx := context.Background()
-	_, err := client.Initialize(ctx)
+	_, err := client.Initialize(ctx, &InitializeRequest{})
 	require.NoError(t, err)
 
 	// Session ID should not be empty after initialization

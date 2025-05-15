@@ -214,7 +214,7 @@ func NewInitializeRequest(protocolVersion string, clientInfo Implementation, cap
 		"clientInfo":      clientInfo,
 		"capabilities":    capabilities,
 	}
-	return NewJSONRPCRequest(1, MethodInitialize, params)
+	return newJSONRPCRequest(1, MethodInitialize, params)
 }
 
 // NewInitializeResponse creates an initialization response
@@ -225,10 +225,10 @@ func NewInitializeResponse(reqID interface{}, protocolVersion string, serverInfo
 		Capabilities:    capabilities,
 		Instructions:    instructions,
 	}
-	return NewJSONRPCResponse(reqID, result)
+	return newJSONRPCResponse(reqID, result)
 }
 
 // NewInitializedNotification creates an initialized notification
 func NewInitializedNotification() *JSONRPCNotification {
-	return NewJSONRPCNotification(Notification{Method: MethodNotificationsInitialized, Params: NotificationParams{}})
+	return newJSONRPCNotification(Notification{Method: MethodNotificationsInitialized, Params: NotificationParams{}})
 }

@@ -245,10 +245,13 @@ func NewSSEProgressTool() *mcp.Tool {
 				}
 			}
 
-			// Return the final result.
+			// Return the final result with the message
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
-					mcp.NewTextContent(message),
+					mcp.TextContent{
+						Type: "text",
+						Text: message,
+					},
 				},
 			}, nil
 		},
