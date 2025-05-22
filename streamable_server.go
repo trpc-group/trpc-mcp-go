@@ -11,6 +11,11 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
 
+const (
+	// defaultSessionExpirySeconds is the default session expiration time (seconds)
+	defaultSessionExpirySeconds = 3600 // 1 hour
+)
+
 // requestHandler interface defines a component that handles requests
 type requestHandler interface {
 	// handleRequest handle a request
@@ -75,9 +80,9 @@ func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHan
 		requestHandler:         handler,
 		enableSession:          true,  // Default: sessions enabled
 		isStateless:            false, // Default: stateful mode
-		notificationBufferSize: 10,    // Default notification buffer size
-		enablePostSSE:          true,  // Default: POST SSE enabled
-		enableGetSSE:           true,  // Default: GET SSE enabled
+		notificationBufferSize: defaultNotificationBufferSize,
+		enablePostSSE:          true, // Default: POST SSE enabled
+		enableGetSSE:           true, // Default: GET SSE enabled
 		getSSEConnections:      make(map[string]*getSSEConnection),
 	}
 
@@ -99,7 +104,7 @@ func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHan
 
 	// If sessions are enabled but no session manager is set, create a default one
 	if h.enableSession && h.sessionManager == nil {
-		h.sessionManager = NewSessionManager(3600) // Default: 1 hour expiry
+		h.sessionManager = newSessionManager(defaultSessionExpirySeconds)
 	}
 
 	return h
@@ -157,7 +162,7 @@ func withTransportStatelessMode() func(*httpServerHandler) {
 		h.enableSession = true
 		// Ensure there's still a session manager for creating temporary sessions
 		if h.sessionManager == nil {
-			h.sessionManager = NewSessionManager(3600)
+			h.sessionManager = newSessionManager(defaultSessionExpirySeconds)
 		}
 	}
 }
@@ -198,7 +203,7 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	}
 
 	// Create response context
-	respCtx, cancel := context.WithCancel(ctx)
+	cancel := context.CancelFunc(func() {}) // Placeholder to keep defer cancel() syntax consistent
 	defer cancel()
 
 	var isInitialize bool
@@ -242,141 +247,120 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		}
 	}
 
-	// Create response processor
-	responder := h.responderFactory.createResponder(r, rawMessage)
-
-	// This is a request
+	// Branch: request or notification
 	if base.ID != nil && base.Method != "" {
-		var req JSONRPCRequest
-		if err := json.Unmarshal(rawMessage, &req); err != nil {
-			http.Error(w, "Invalid JSON-RPC request format: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Check response processor type
-		if sseResponder, ok := responder.(*sseResponder); ok {
-			// Use SSE response mode
-			// Check if streaming is supported
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-				return
-			}
-
-			// Set SSE response headers
-			sseutil.SetStandardHeaders(w)
-
-			// Only send session ID in non-stateless mode
-			if !h.isStateless && session != nil {
-				w.Header().Set(httputil.SessionIDHeader, session.GetID())
-			}
-
-			// Create SSE notification sender, inject into request context
-			var sessionID string
-			if session != nil {
-				sessionID = session.GetID()
-			}
-			notificationSender := newSSENotificationSender(w, flusher, sessionID)
-			reqCtx := withNotificationSender(ctx, notificationSender)
-
-			// Add session to context
-			if session != nil {
-				reqCtx = setSessionToContext(reqCtx, session)
-			}
-
-			// Directly sync process request
-			resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
-			if err != nil {
-				h.logger.Infof("Request processing failed: %v", err)
-				errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
-				// Send error response
-				err = sseResponder.respond(ctx, w, r, errorResp, session)
-				if err != nil {
-					h.logger.Infof("Failed to send SSE error response: %v", err)
-				}
-				return
-			}
-			// Send final response
-			jsonrpcResponse := JSONRPCResponse{
-				JSONRPC: JSONRPCVersion,
-				ID:      req.ID,
-				Result:  resp,
-			}
-			err = sseResponder.respond(ctx, w, r, jsonrpcResponse, session)
-			if err != nil {
-				h.logger.Infof("Failed to send SSE final response: %v", err)
-			}
-			return
-		}
-
-		// Use normal JSON response mode
-		// Create a NoOp notification sender for JSON mode
-		noopSender := &noopNotificationSender{}
-		reqCtx := withNotificationSender(ctx, noopSender)
-
-		// Add session to context
-		if session != nil {
-			reqCtx = setSessionToContext(reqCtx, session)
-		}
-
-		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
-		if err != nil {
-			h.logger.Infof("Request processing failed: %v", err)
-			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
-			responder.respond(respCtx, w, r, errorResp, session)
-			return
-		}
-
-		jsonrpcResponse := JSONRPCResponse{
-			JSONRPC: JSONRPCVersion,
-			ID:      req.ID,
-			Result:  resp,
-		}
-
-		responder.respond(respCtx, w, r, jsonrpcResponse, session)
+		h.handlePostRequest(ctx, w, r, rawMessage, base, session)
 		return
 	}
-
-	// Try to parse as notification
 	if base.ID == nil && base.Method != "" {
-		var notification JSONRPCNotification
-		if err := json.Unmarshal(rawMessage, &notification); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		// Handle special case for initialize request
-		if notification.Method == MethodNotificationsInitialized {
-			// This is initialized notification, if it's the first request, we need to create a session
-			if h.enableSession && session == nil {
-				h.logger.Info("Warning: Received initialized notification but no active session")
-			}
-
-			// Directly return 202 Accepted, instead of using responder.respond
-			h.sendNotificationResponse(w, session)
-			return
-		}
-
-		// Add session to context
-		notificationCtx := ctx
-		if session != nil {
-			notificationCtx = setSessionToContext(ctx, session)
-		}
-
-		// Handle other notifications
-		if err := h.requestHandler.handleNotification(notificationCtx, &notification, session); err != nil {
-			h.logger.Infof("Notification processing failed: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		// Return 202 Accepted, use helper function instead of responder.respond
-		h.sendNotificationResponse(w, session)
+		h.handlePostNotification(ctx, w, r, rawMessage, base, session)
 		return
 	}
 
 	// Unable to parse request
 	http.Error(w, "Invalid JSON-RPC message", http.StatusBadRequest)
+}
+
+// handlePostRequest handles JSON-RPC requests
+func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, rawMessage json.RawMessage, base baseMessage, session Session) {
+	respCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var req JSONRPCRequest
+	if err := json.Unmarshal(rawMessage, &req); err != nil {
+		http.Error(w, "Invalid JSON-RPC request format: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	responder := h.responderFactory.createResponder(r, rawMessage)
+
+	// Check response processor type
+	if sseResponder, ok := responder.(*sseResponder); ok {
+		// Use SSE response mode
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+			return
+		}
+		sseutil.SetStandardHeaders(w)
+		if !h.isStateless && session != nil {
+			w.Header().Set(httputil.SessionIDHeader, session.GetID())
+		}
+		var sessionID string
+		if session != nil {
+			sessionID = session.GetID()
+		}
+		notificationSender := newSSENotificationSender(w, flusher, sessionID)
+		reqCtx := withNotificationSender(ctx, notificationSender)
+		if session != nil {
+			reqCtx = setSessionToContext(reqCtx, session)
+		}
+		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
+		if err != nil {
+			h.logger.Infof("Request processing failed: %v", err)
+			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+			err = sseResponder.respond(ctx, w, r, errorResp, session)
+			if err != nil {
+				h.logger.Infof("Failed to send SSE error response: %v", err)
+			}
+			return
+		}
+		jsonrpcResponse := JSONRPCResponse{
+			JSONRPC: JSONRPCVersion,
+			ID:      req.ID,
+			Result:  resp,
+		}
+		err = sseResponder.respond(ctx, w, r, jsonrpcResponse, session)
+		if err != nil {
+			h.logger.Infof("Failed to send SSE final response: %v", err)
+		}
+		return
+	}
+	// Use normal JSON response mode
+	noopSender := &noopNotificationSender{}
+	reqCtx := withNotificationSender(ctx, noopSender)
+	if session != nil {
+		reqCtx = setSessionToContext(reqCtx, session)
+	}
+	resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
+	if err != nil {
+		h.logger.Infof("Request processing failed: %v", err)
+		errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+		responder.respond(respCtx, w, r, errorResp, session)
+		return
+	}
+	jsonrpcResponse := JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      req.ID,
+		Result:  resp,
+	}
+	responder.respond(respCtx, w, r, jsonrpcResponse, session)
+}
+
+// handlePostNotification handles JSON-RPC notifications
+func (h *httpServerHandler) handlePostNotification(ctx context.Context, w http.ResponseWriter, r *http.Request, rawMessage json.RawMessage, base baseMessage, session Session) {
+	var notification JSONRPCNotification
+	if err := json.Unmarshal(rawMessage, &notification); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if notification.Method == MethodNotificationsInitialized {
+		if h.enableSession && session == nil {
+			h.logger.Info("Warning: Received initialized notification but no active session")
+		}
+		h.sendNotificationResponse(w, session)
+		return
+	}
+	notificationCtx := ctx
+	if session != nil {
+		notificationCtx = setSessionToContext(ctx, session)
+	}
+	if err := h.requestHandler.handleNotification(notificationCtx, &notification, session); err != nil {
+		h.logger.Infof("Notification processing failed: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	h.sendNotificationResponse(w, session)
 }
 
 // handleDelete handles DELETE requests
@@ -425,7 +409,11 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 			localCancelFunc() // This is the cancelConn from WithCancel for the current handleGet instance
 			h.logger.Infof("Session [%s]: handleGet defer: localCancelFunc() called.", sessionIDHeader)
 		} else {
-			h.logger.Infof("Session [%s]: handleGet defer: localCancelFunc was nil (should not happen if connCtx was created).", sessionIDHeader)
+			h.logger.Infof(
+				"Session [%s]: handleGet defer: localCancelFunc was nil "+
+					"(should not happen if connCtx was created).",
+				sessionIDHeader,
+			)
 		}
 	}()
 
@@ -526,7 +514,7 @@ func (h *httpServerHandler) sendNotificationToGetSSE(sessionID string, notificat
 	defer conn.writeLock.Unlock()
 
 	// Use SSE responder to send notification
-	eventID, err := conn.sseResponder.sendNotification(conn.writer, conn.flusher, notification)
+	eventID, err := conn.sseResponder.sendNotification(conn.writer, notification)
 	if err != nil {
 		return fmt.Errorf("failed to send notification via SSE: %w", err)
 	}

@@ -175,45 +175,59 @@ func parseJSONRPCMessageType(data []byte) (JSONRPCMessageType, error) {
 
 // parseJSONRPCMessage parses any type of JSON-RPC message
 func parseJSONRPCMessage(data []byte) (interface{}, JSONRPCMessageType, error) {
-	// Determine message type
 	msgType, err := parseJSONRPCMessageType(data)
 	if err != nil {
 		return nil, JSONRPCMessageTypeUnknown, err
 	}
 
-	// Parse into specific structure based on type
 	switch msgType {
 	case JSONRPCMessageTypeResponse:
-		var resp JSONRPCResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
-		}
-		return &resp, msgType, nil
-
+		return parseJSONRPCResponse(data, msgType)
 	case JSONRPCMessageTypeError:
-		var errResp JSONRPCError
-		if err := json.Unmarshal(data, &errResp); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
-		}
-		return &errResp, msgType, nil
-
+		return parseJSONRPCError(data, msgType)
 	case JSONRPCMessageTypeNotification:
-		var notification JSONRPCNotification
-		if err := json.Unmarshal(data, &notification); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCFormat, err)
-		}
-		return &notification, msgType, nil
-
+		return parseJSONRPCNotification(data, msgType)
 	case JSONRPCMessageTypeRequest:
-		var req JSONRPCRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCRequest, err)
-		}
-		return &req, msgType, nil
-
+		return parseJSONRPCRequest(data, msgType)
 	default:
 		return nil, msgType, errors.ErrInvalidJSONRPCFormat
 	}
+}
+
+// parseJSONRPCResponse parses a JSON-RPC response
+func parseJSONRPCResponse(data []byte, msgType JSONRPCMessageType) (interface{}, JSONRPCMessageType, error) {
+	var resp JSONRPCResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
+	}
+	return &resp, msgType, nil
+}
+
+// parseJSONRPCError parses a JSON-RPC error
+func parseJSONRPCError(data []byte, msgType JSONRPCMessageType) (interface{}, JSONRPCMessageType, error) {
+	var errResp JSONRPCError
+	if err := json.Unmarshal(data, &errResp); err != nil {
+		return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCResponse, err)
+	}
+	return &errResp, msgType, nil
+}
+
+// parseJSONRPCNotification parses a JSON-RPC notification
+func parseJSONRPCNotification(data []byte, msgType JSONRPCMessageType) (interface{}, JSONRPCMessageType, error) {
+	var notification JSONRPCNotification
+	if err := json.Unmarshal(data, &notification); err != nil {
+		return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCFormat, err)
+	}
+	return &notification, msgType, nil
+}
+
+// parseJSONRPCRequest parses a JSON-RPC request
+func parseJSONRPCRequest(data []byte, msgType JSONRPCMessageType) (interface{}, JSONRPCMessageType, error) {
+	var req JSONRPCRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return nil, msgType, fmt.Errorf("%w: %v", errors.ErrInvalidJSONRPCRequest, err)
+	}
+	return &req, msgType, nil
 }
 
 // formatJSONRPCMessage returns a description of a JSON-RPC message (for logging)

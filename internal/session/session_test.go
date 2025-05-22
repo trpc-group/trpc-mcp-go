@@ -171,7 +171,7 @@ func TestSession_DataOperations(t *testing.T) {
 	assert.Equal(t, newValue, retrievedValue)
 }
 
-func TestSessionManager_GetActiveSessions(t *testing.T) {
+func TestGetActiveSessions(t *testing.T) {
 	// Create session manager
 	manager := NewSessionManager(3600)
 

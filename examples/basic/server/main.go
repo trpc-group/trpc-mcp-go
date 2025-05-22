@@ -118,7 +118,10 @@ func NewAdvancedGreetTool() *mcp.Tool {
 			switch format {
 			case "json":
 				// JSON format is no longer supported, fallback to text.
-				jsonMessage := fmt.Sprintf("JSON format: {\"greeting\":\"Hello, %s!\",\"timestamp\":\"2025-05-14T12:00:00Z\"}", name)
+				jsonMessage := fmt.Sprintf(
+					"JSON format: {\"greeting\":\"Hello, %s!\",\"timestamp\":\"2025-05-14T12:00:00Z\"}",
+					name,
+				)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						mcp.NewTextContent(jsonMessage),
@@ -126,7 +129,10 @@ func NewAdvancedGreetTool() *mcp.Tool {
 				}, nil
 			case "html":
 				// HTML format is no longer supported, fallback to text.
-				htmlContent := fmt.Sprintf("<h1>Greeting</h1><p>Hello, <strong>%s</strong>!</p>", name)
+				htmlContent := fmt.Sprintf(
+					"<h1>Greeting</h1><p>Hello, <strong>%s</strong>!</p>",
+					name,
+				)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						mcp.NewTextContent(htmlContent),

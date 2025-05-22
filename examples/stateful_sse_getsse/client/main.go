@@ -23,7 +23,10 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 	if dataMap, ok := paramsMap["data"].(map[string]interface{}); ok {
 		notificationType, _ := dataMap["type"].(string)
 
-		log.Printf("Received notification [%s] (Level: %s, Type: %s): %+v", notification.Method, level, notificationType, dataMap)
+		log.Printf(
+			"Received notification [%s] (Level: %s, Type: %s): %+v",
+			notification.Method, level, notificationType, dataMap,
+		)
 
 		// Process based on notificationType
 		switch notificationType {
@@ -40,7 +43,10 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 		case "process_progress":
 			// Handle process progress notification
 			if message, exists := dataMap["message"].(string); exists {
-				log.Printf("  Process progress: %s (Step: %v/%v, Progress: %.2f%%)", message, dataMap["step"], dataMap["total"], dataMap["progress"])
+				log.Printf(
+					"  Process progress: %s (Step: %v/%v, Progress: %.2f%%)",
+					message, dataMap["step"], dataMap["total"], dataMap["progress"],
+				)
 			}
 		case "chat_message":
 			// Handle chat message notification
@@ -118,30 +124,21 @@ func handleProgressNotification(notification *mcp.JSONRPCNotification) error {
 	return nil
 }
 
-func main() {
-	// Print client start message.
-	log.Printf("Starting Stateful SSE+GET SSE mode client...")
-
-	// Create context
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	// Create client info
+// initializeClient initializes the client
+func initializeClient(ctx context.Context) (*mcp.Client, error) {
 	clientInfo := mcp.Implementation{
 		Name:    "Stateful-SSE-GETSSE-Client",
 		Version: "1.0.0",
 	}
 
-	// Create client, connect to server
 	mcpClient, err := mcp.NewClient(
 		"http://localhost:3006/mcp",
 		clientInfo,
-		mcp.WithClientGetSSEEnabled(true), // Enable GET SSE
+		mcp.WithClientGetSSEEnabled(true),
 	)
 	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+		return nil, fmt.Errorf("failed to create client: %v", err)
 	}
-	defer mcpClient.Close()
 
 	// Register notification handlers
 	mcpClient.RegisterNotificationHandler("notifications/message", handleNotification)
@@ -151,7 +148,8 @@ func main() {
 	log.Printf("Initializing client...")
 	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
-		log.Fatalf("Initialization failed: %v", err)
+		mcpClient.Close()
+		return nil, fmt.Errorf("initialization failed: %v", err)
 	}
 
 	log.Printf("Initialization successful: Server=%s %s, Protocol=%s",
@@ -166,11 +164,25 @@ func main() {
 		log.Printf("Session established, ID: %s", sessionID)
 	}
 
-	// Get available tools list
+	return mcpClient, nil
+}
+
+// printContent prints the content
+func printContent(content interface{}) {
+	if textContent, ok := content.(mcp.TextContent); ok {
+		log.Printf("- Text: %s", textContent.Text)
+	} else {
+		log.Printf("- Other content type: %+v", content)
+	}
+}
+
+// handleToolCall handles tool calls
+func handleToolCall(ctx context.Context, client *mcp.Client) error {
+	// Get tool list
 	log.Printf("Listing tools...")
-	toolsResult, err := mcpClient.ListTools(ctx, &mcp.ListToolsRequest{})
+	toolsResult, err := client.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
-		log.Fatalf("Failed to get tools list: %v", err)
+		return fmt.Errorf("failed to get tools list: %v", err)
 	}
 
 	log.Printf("Server provides %d tools", len(toolsResult.Tools))
@@ -178,31 +190,27 @@ func main() {
 		log.Printf("- Tool: %s (%s)", tool.Name, tool.Description)
 	}
 
-	// Call greeting tool
+	// Call greet tool
 	log.Printf("Calling greet tool...")
 	callToolReq := &mcp.CallToolRequest{}
 	callToolReq.Params.Name = "greet"
 	callToolReq.Params.Arguments = map[string]interface{}{
 		"name": "SSE+GETSSE Client User",
 	}
-	callResult, err := mcpClient.CallTool(ctx, callToolReq)
+	callResult, err := client.CallTool(ctx, callToolReq)
 	if err != nil {
-		log.Fatalf("Tool call failed: %v", err)
+		return fmt.Errorf("tool call failed: %v", err)
 	}
 
 	// Display call result
 	log.Printf("Greeting tool call result:")
 	for _, content := range callResult.Content {
-		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Printf("- Text: %s", textContent.Text)
-		} else {
-			log.Printf("- Other content type: %+v", content)
-		}
+		printContent(content)
 	}
 
-	// Call counter tool, demonstrating session state retention.
+	// Call counter tool
 	log.Printf("Calling counter tool for the first time...")
-	counterResult1, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+	counterResult1, err := client.CallTool(ctx, &mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "counter",
 			Arguments: map[string]interface{}{
@@ -211,21 +219,24 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("Counter tool call failed: %v", err)
+		return fmt.Errorf("counter tool call failed: %v", err)
 	}
 
 	// Display counter result
 	log.Printf("Counter result (first call):")
 	for _, content := range counterResult1.Content {
-		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Printf("- Text: %s", textContent.Text)
-		}
+		printContent(content)
 	}
 
+	return nil
+}
+
+// handleChatOperations handles chat room operations
+func handleChatOperations(ctx context.Context, client *mcp.Client) error {
 	// Join chat room
 	log.Printf("Calling chatJoin tool to join chat room...")
 	userName := fmt.Sprintf("User_%d", time.Now().Unix()%1000)
-	chatJoinResult, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+	chatJoinResult, err := client.CallTool(ctx, &mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "chatJoin",
 			Arguments: map[string]interface{}{
@@ -234,20 +245,18 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("Failed to join chat room: %v", err)
+		return fmt.Errorf("failed to join chat room: %v", err)
 	}
 
-	// Display chat room join result
+	// Display join result
 	log.Printf("Chat room join result:")
 	for _, content := range chatJoinResult.Content {
-		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Printf("- Text: %s", textContent.Text)
-		}
+		printContent(content)
 	}
 
 	// Send chat message
 	log.Printf("Calling chatSend tool to send chat message...")
-	chatSendResult, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+	chatSendResult, err := client.CallTool(ctx, &mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "chatSend",
 			Arguments: map[string]interface{}{
@@ -256,22 +265,23 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("Failed to send chat message: %v", err)
+		return fmt.Errorf("failed to send chat message: %v", err)
 	}
 
-	// Display chat message send result
+	// Display send result
 	log.Printf("Chat message send result:")
 	for _, content := range chatSendResult.Content {
-		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Printf("- Text: %s", textContent.Text)
-		}
+		printContent(content)
 	}
 
-	// Call delayed response tool, demonstrating SSE streaming response advantage
-	log.Printf("Calling delayedResponse tool to experience streaming response...")
+	return nil
+}
 
-	// Use streaming API to call the tool
-	_, err = mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+// handleDelayedOperations handles delayed operations
+func handleDelayedOperations(ctx context.Context, client *mcp.Client) error {
+	// Call delayed response tool
+	log.Printf("Calling delayedResponse tool to experience streaming response...")
+	_, err := client.CallTool(ctx, &mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "delayedResponse",
 			Arguments: map[string]interface{}{
@@ -280,16 +290,14 @@ func main() {
 			},
 		},
 	})
-
 	if err != nil {
-		log.Fatalf("Delayed response tool call failed: %v", err)
+		return fmt.Errorf("delayed response tool call failed: %v", err)
 	}
-
 	log.Printf("Delayed response tool streaming call completed")
 
-	// Call notification tool, demonstrating server push notification functionality
+	// Call notification tool
 	log.Printf("Calling sendNotification tool, will receive notification after delay...")
-	notifyResult, err := mcpClient.CallTool(ctx, &mcp.CallToolRequest{
+	notifyResult, err := client.CallTool(ctx, &mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "sendNotification",
 			Arguments: map[string]interface{}{
@@ -299,24 +307,58 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("Notification tool call failed: %v", err)
+		return fmt.Errorf("notification tool call failed: %v", err)
 	}
 
-	// Display call result
+	// Display notification result
 	log.Printf("Notification tool call result:")
 	for _, content := range notifyResult.Content {
-		if textContent, ok := content.(mcp.TextContent); ok {
-			log.Printf("- Text: %s", textContent.Text)
-		}
+		printContent(content)
+	}
+
+	return nil
+}
+
+func main() {
+	// Print client startup message
+	log.Printf("Starting Stateful SSE+GET SSE mode client...")
+
+	// Create context
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Initialize client
+	client, err := initializeClient(ctx)
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+	defer client.Close()
+
+	// Handle tool calls
+	if err := handleToolCall(ctx, client); err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	// Handle chat room operations
+	if err := handleChatOperations(ctx, client); err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	// Handle delayed operations
+	if err := handleDelayedOperations(ctx, client); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
 
 	// Print session information
-	log.Printf("\nSession information: ID=%s", mcpClient.GetSessionID())
-	log.Printf("Client has full SSE functionality enabled, including GET SSE connection, waiting for notifications and messages...")
+	log.Printf("\nSession information: ID=%s", client.GetSessionID())
+	log.Printf(
+		"Client has full SSE functionality enabled, including GET SSE connection, " +
+			"waiting for notifications and messages...",
+	)
 	log.Printf("Tip: You can check server session status via curl http://localhost:3006/sessions")
 	log.Printf("Press Ctrl+C to exit...")
 
-	// Set up signal handling to keep client running until user presses Ctrl+C
+	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh

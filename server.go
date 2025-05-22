@@ -14,6 +14,15 @@ var (
 	ErrFilteredNotificationFailed = errors.New("failed to send filtered notification")
 )
 
+const (
+	// defaultServerAddress is the default address for the server
+	defaultServerAddress = "localhost:3000"
+	// defaultServerPath is the default API path prefix
+	defaultServerPath = "/mcp"
+	// defaultNotificationBufferSize is the default size of the notification buffer
+	defaultNotificationBufferSize = 10
+)
+
 // serverConfig stores all server configuration options
 type serverConfig struct {
 	// Basic configuration
@@ -48,13 +57,13 @@ type Server struct {
 func NewServer(name, version string, options ...ServerOption) *Server {
 	// Create default configuration
 	config := &serverConfig{
-		addr:                   "localhost:3000", // default address
-		path:                   "/mcp",
+		addr:                   defaultServerAddress,
+		path:                   defaultServerPath,
 		EnableSession:          true,
 		isStateless:            false,
 		postSSEEnabled:         true,
 		getSSEEnabled:          true,
-		notificationBufferSize: 10,
+		notificationBufferSize: defaultNotificationBufferSize,
 	}
 
 	// Create server with provided serverInfo
@@ -128,7 +137,8 @@ func (s *Server) initComponents() {
 
 	// Inject logger into httpServerHandler if provided.
 	if s.logger != nil {
-		httpOptions = append(httpOptions, withServerTransportLogger(s.logger)) // This is the httpServerHandler option version.
+		// This is the httpServerHandler option version.
+		httpOptions = append(httpOptions, withServerTransportLogger(s.logger))
 	}
 
 	// Create HTTP handler.
@@ -146,14 +156,6 @@ type ServerOption func(*Server)
 func WithServerLogger(logger Logger) ServerOption {
 	return func(s *Server) {
 		s.logger = logger
-	}
-}
-
-// WithSessionManager sets the session manager
-func WithSessionManager(manager sessionManager) ServerOption {
-	return func(s *Server) {
-		s.config.sessionManager = manager
-		s.config.EnableSession = true
 	}
 }
 
@@ -225,16 +227,20 @@ func (s *Server) RegisterTool(tool *Tool) error {
 
 // RegisterResource registers a resource
 //
-// The resource feature is automatically enabled when the first resource is registered, no additional configuration is needed.
-// When the resource feature is enabled but no resources are registered, client requests will return an empty list rather than an error.
+// The resource feature is automatically enabled when the first resource is registered,
+// no additional configuration is needed.
+// When the resource feature is enabled but no resources are registered, client requests
+// will return an empty list rather than an error.
 func (s *Server) RegisterResource(resource *Resource) error {
 	return s.resourceManager.registerResource(resource)
 }
 
 // RegisterPrompt registers a prompt
 //
-// The prompt feature is automatically enabled when the first prompt is registered, no additional configuration is needed.
-// When the prompt feature is enabled but no prompts are registered, client requests will return an empty list rather than an error.
+// The prompt feature is automatically enabled when the first prompt is registered,
+// no additional configuration is needed.
+// When the prompt feature is enabled but no prompts are registered, client requests
+// will return an empty list rather than an error.
 func (s *Server) RegisterPrompt(prompt *Prompt) error {
 	return s.promptManager.registerPrompt(prompt)
 }
@@ -253,7 +259,20 @@ func (s *Server) NewNotification(method string, params map[string]interface{}) *
 	return NewJSONRPCNotificationFromMap(method, params)
 }
 
-// BroadcastNotification broadcasts a notification to all active sessions
+// Send notification to multiple sessions and count failures
+func (s *Server) sendNotificationToSessions(sessions []string, notification *JSONRPCNotification) (successCount, failedCount int, lastError error) {
+	for _, sessionID := range sessions {
+		if err := s.httpHandler.sendNotification(sessionID, notification); err != nil {
+			failedCount++
+			lastError = err
+		} else {
+			successCount++
+		}
+	}
+	return
+}
+
+// BroadcastNotification with logic unchanged, now using helper
 func (s *Server) BroadcastNotification(method string, params map[string]interface{}) (int, error) {
 	notification := NewJSONRPCNotificationFromMap(method, params)
 
@@ -263,16 +282,7 @@ func (s *Server) BroadcastNotification(method string, params map[string]interfac
 		return 0, fmt.Errorf("failed to get active sessions: %w", err)
 	}
 
-	var failedCount int
-	var lastError error
-
-	// Send it to each session
-	for _, sessionID := range sessions {
-		if err := s.httpHandler.sendNotification(sessionID, notification); err != nil {
-			failedCount++
-			lastError = err
-		}
-	}
+	successCount, failedCount, lastError := s.sendNotificationToSessions(sessions, notification)
 
 	// If all sending failed, return the last error
 	if failedCount == len(sessions) && lastError != nil {
@@ -280,7 +290,48 @@ func (s *Server) BroadcastNotification(method string, params map[string]interfac
 	}
 
 	// Return the number of successful sends
-	return len(sessions) - failedCount, nil
+	return successCount, nil
+}
+
+// Send notification to filtered sessions and count results
+func (s *Server) sendNotificationToFilteredSessions(sessions []string, notification *JSONRPCNotification, filter func(sessionID string) bool) (successCount, failedCount int, lastError error) {
+	for _, sessionID := range sessions {
+		if filter != nil && !filter(sessionID) {
+			continue
+		}
+		if err := s.httpHandler.sendNotification(sessionID, notification); err != nil {
+			failedCount++
+			lastError = err
+		} else {
+			successCount++
+		}
+	}
+	return
+}
+
+// SendFilteredNotification with logic unchanged, now using helper
+func (s *Server) SendFilteredNotification(
+	method string,
+	params map[string]interface{},
+	filter func(sessionID string) bool,
+) (int, int, error) {
+	notification := NewJSONRPCNotificationFromMap(method, params)
+
+	// Get active sessions
+	sessions, err := s.getActiveSessions()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get active sessions: %w", err)
+	}
+
+	successCount, failedCount, lastError := s.sendNotificationToFilteredSessions(sessions, notification, filter)
+
+	// If all sending failed, and we attempted at least one send, return the last error
+	if failedCount > 0 && successCount == 0 && lastError != nil {
+		return 0, failedCount, fmt.Errorf("%w: %w", ErrFilteredNotificationFailed, lastError)
+	}
+
+	// Return the count of successful and failed sends
+	return successCount, failedCount, nil
 }
 
 // getActiveSessions gets all active session IDs
@@ -298,48 +349,6 @@ func (s *Server) getActiveSessions() ([]string, error) {
 // Returns an error if the server is in stateless mode.
 func (s *Server) GetActiveSessions() ([]string, error) {
 	return s.getActiveSessions()
-}
-
-// SendFilteredNotification sends a notification to sessions passing a filter
-func (s *Server) SendFilteredNotification(
-	method string,
-	params map[string]interface{},
-	filter func(sessionID string) bool,
-) (int, int, error) {
-	notification := NewJSONRPCNotificationFromMap(method, params)
-
-	// Get active sessions
-	sessions, err := s.getActiveSessions()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get active sessions: %w", err)
-	}
-
-	var successCount, failedCount int
-	var lastError error
-
-	// Filter and send to each session
-	for _, sessionID := range sessions {
-		// Apply filter
-		if filter != nil && !filter(sessionID) {
-			continue
-		}
-
-		// Send notification
-		if err := s.httpHandler.sendNotification(sessionID, notification); err != nil {
-			failedCount++
-			lastError = err
-		} else {
-			successCount++
-		}
-	}
-
-	// If all sending failed, and we attempted at least one send, return the last error
-	if failedCount > 0 && successCount == 0 && lastError != nil {
-		return 0, failedCount, fmt.Errorf("%w: %w", ErrFilteredNotificationFailed, lastError)
-	}
-
-	// Return the count of successful and failed sends
-	return successCount, failedCount, nil
 }
 
 // Handler  returns the http.Handler for the server.

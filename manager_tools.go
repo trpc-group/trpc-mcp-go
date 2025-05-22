@@ -71,15 +71,19 @@ func (m *toolManager) getTools(protocolVersion string) []*Tool {
 	defer m.mu.RUnlock()
 
 	tools := make([]*Tool, 0, len(m.tools))
-	for _, tool := range m.tools {
-		tools = append(tools, tool)
+	for _, toolPtr := range m.tools {
+		tools = append(tools, toolPtr)
 	}
 
 	return tools
 }
 
 // handleListTools handles tools/list requests
-func (m *toolManager) handleListTools(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+func (m *toolManager) handleListTools(
+	ctx context.Context,
+	req *JSONRPCRequest,
+	session Session,
+) (JSONRPCMessage, error) {
 	// Get all tools
 	toolPtrs := m.getTools("")
 
@@ -100,7 +104,11 @@ func (m *toolManager) handleListTools(ctx context.Context, req *JSONRPCRequest, 
 }
 
 // handleCallTool handles tools/call requests
-func (m *toolManager) handleCallTool(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+func (m *toolManager) handleCallTool(
+	ctx context.Context,
+	req *JSONRPCRequest,
+	session Session,
+) (JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
 		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
@@ -121,7 +129,12 @@ func (m *toolManager) handleCallTool(ctx context.Context, req *JSONRPCRequest, s
 	// Get tool
 	tool, ok := m.getTool(toolName)
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrToolNotFound, toolName), nil), nil
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeMethodNotFound,
+			fmt.Sprintf("%v: %s", errors.ErrToolNotFound, toolName),
+			nil,
+		), nil
 	}
 
 	// Create tool call request
@@ -133,11 +146,14 @@ func (m *toolManager) handleCallTool(ctx context.Context, req *JSONRPCRequest, s
 		Name: toolName,
 	}
 
-	// Get tool arguments
+	// Get and validate tool arguments
 	if args, ok := paramsMap["arguments"]; ok && args != nil {
-		if argsMap, ok := args.(map[string]interface{}); ok {
-			params.Arguments = argsMap
+		argsMap, ok := args.(map[string]interface{})
+		if !ok {
+			errMsg := fmt.Sprintf("%v: arguments must be an object, got %T", errors.ErrInvalidParams, args)
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errMsg, nil), nil
 		}
+		params.Arguments = argsMap
 	}
 
 	toolReq.Params = params
@@ -159,7 +175,8 @@ func (m *toolManager) handleCallTool(ctx context.Context, req *JSONRPCRequest, s
 	// Execute tool
 	result, err := tool.ExecuteFunc(ctx, toolReq)
 	if err != nil {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, fmt.Sprintf("%v: %v", errors.ErrToolExecutionFailed, err), nil), nil
+		errMsg := fmt.Sprintf("tool execution failed (tool: %s): %v", tool.Name, err)
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, errMsg, nil), nil
 	}
 
 	return result, nil

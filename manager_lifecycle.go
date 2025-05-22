@@ -132,60 +132,69 @@ func (m *lifecycleManager) updateCapabilities() {
 
 // handleInitialize handles initialize requests
 func (m *lifecycleManager) handleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
-	// Parse request parameters
-	if req.Params == nil {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+	if errResp := m.checkInitializeParams(req); errResp != nil {
+		return errResp, nil
 	}
 
-	// Convert params to map for easier access
+	paramsMap := req.Params.(map[string]interface{})
+	protocolVersion := paramsMap["protocolVersion"].(string)
+	supportedVersion := m.selectSupportedVersion(protocolVersion)
+	m.logProtocolVersion(protocolVersion, supportedVersion)
+	m.saveSessionState(session, supportedVersion)
+	m.updateCapabilities()
+	response := m.buildInitializeResponse(supportedVersion)
+	return response, nil
+}
+
+// checkInitializeParams validates the request parameters for initialization
+func (m *lifecycleManager) checkInitializeParams(req *JSONRPCRequest) JSONRPCMessage {
+	if req.Params == nil {
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
+	}
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil)
 	}
-
-	// Get protocol version
-	protocolVersion, ok := paramsMap["protocolVersion"].(string)
-	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+	if _, ok := paramsMap["protocolVersion"].(string); !ok {
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
 	}
+	return nil
+}
 
-	// Check if protocol version is supported
-	var supportedVersion string
-	isVersionSupported := false
-
-	// Check if the requested version is in the supported version list
+// selectSupportedVersion returns the supported protocol version
+func (m *lifecycleManager) selectSupportedVersion(protocolVersion string) string {
 	for _, version := range m.supportedVersions {
 		if version == protocolVersion {
-			isVersionSupported = true
-			supportedVersion = protocolVersion
-			break
+			return protocolVersion
 		}
 	}
+	return m.defaultProtocolVersion
+}
 
-	// If not supported, use default version
-	if !isVersionSupported {
-		supportedVersion = m.defaultProtocolVersion
-		m.logger.Infof("Client requested protocol version %s is not supported, using %s", protocolVersion, supportedVersion)
+// logProtocolVersion logs protocol version selection
+func (m *lifecycleManager) logProtocolVersion(requested, selected string) {
+	if requested != selected {
+		m.logger.Infof("Client requested protocol version %s is not supported, using %s", requested, selected)
 	} else {
-		m.logger.Infof("Using protocol version: %s", supportedVersion)
+		m.logger.Infof("Using protocol version: %s", selected)
 	}
+}
 
-	// If there is a session, mark its initialization state and save protocol version
+// saveSessionState marks session initialization and saves protocol version
+func (m *lifecycleManager) saveSessionState(session Session, protocolVersion string) {
 	if session != nil {
 		m.mu.Lock()
 		m.sessionStates[session.GetID()] = false // Initialization started but not completed
 		m.mu.Unlock()
-
 		// Save protocol version to session data
-		session.SetData("protocolVersion", supportedVersion)
+		session.SetData("protocolVersion", protocolVersion)
 	}
+}
 
-	// Update server capability information
-	m.updateCapabilities()
-
-	// Create initialization response
-	response := InitializeResult{
-		ProtocolVersion: supportedVersion,
+// buildInitializeResponse creates the initialization response
+func (m *lifecycleManager) buildInitializeResponse(protocolVersion string) InitializeResult {
+	return InitializeResult{
+		ProtocolVersion: protocolVersion,
 		ServerInfo: Implementation{
 			Name:    m.serverInfo.Name,
 			Version: m.serverInfo.Version,
@@ -193,8 +202,6 @@ func (m *lifecycleManager) handleInitialize(ctx context.Context, req *JSONRPCReq
 		Capabilities: convertToServerCapabilities(m.capabilities),
 		Instructions: "MCP server is ready",
 	}
-
-	return response, nil
 }
 
 // convertToServerCapabilities converts a map to ServerCapabilities structure

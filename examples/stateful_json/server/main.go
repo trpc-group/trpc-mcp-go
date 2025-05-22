@@ -29,11 +29,13 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	if ok && session != nil {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server. Your session ID is: %s",
-			name, session.GetID()[:8]+"...")))
+			name, session.GetID()[:8]+"...",
+		)))
 	} else {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON server, but session info could not be obtained.",
-			name)))
+			name,
+		)))
 	}
 
 	return &mcp.CallToolResult{Content: content}, nil
@@ -66,29 +68,27 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	session.SetData("counter", count)
 
 	// Return result.
-	return mcp.NewTextResult(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-		count, session.GetID()[:8]+"...")), nil
+	return mcp.NewTextResult(fmt.Sprintf(
+		"Counter current value: %d (Session ID: %s)",
+		count, session.GetID()[:8]+"...",
+	)), nil
 }
 
 func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful JSON No GET SSE mode MCP server...")
 
-	// Create session manager (valid for 1 hour).
-	sessionManager := mcp.NewSessionManager(3600)
-
 	// Create MCP server, configured as:
 	// 1. Stateful mode (using sessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. GET SSE is not supported
 	mcpServer := mcp.NewServer(
-		"Stateful-JSON-Server",                 // Server name
-		"1.0.0",                                // Server version
-		mcp.WithServerAddress(":3003"),         // Server address and port
-		mcp.WithServerPath("/mcp"),             // Set API path
-		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithPostSSEEnabled(false),          // Disable SSE
-		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
+		"Stateful-JSON-Server",         // Server name
+		"1.0.0",                        // Server version
+		mcp.WithServerAddress(":3003"), // Server address and port
+		mcp.WithServerPath("/mcp"),     // Set API path
+		mcp.WithPostSSEEnabled(false),  // Disable SSE
+		mcp.WithGetSSEEnabled(false),   // Disable GET SSE
 	)
 
 	// Register a greeting tool.
@@ -127,7 +127,9 @@ func main() {
 			fmt.Fprintf(w, "Session manager status: active\n")
 			fmt.Fprintf(w, "Session expiration time: %d seconds\n", 3600)
 			fmt.Fprintf(w, "Note: Session manager does not provide a way to list all active sessions.\n")
-			fmt.Fprintf(w, "In a real server, it is recommended to implement session monitoring functionality.\n")
+			fmt.Fprintf(w,
+				"In a real server, it is recommended to implement session monitoring functionality.\n",
+			)
 		} else {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			fmt.Fprintf(w, "Method not supported: %s", r.Method)

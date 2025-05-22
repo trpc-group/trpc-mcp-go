@@ -86,17 +86,21 @@ func (pm *PromptMessage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("failed to unmarshal prompt message structure: %w", err)
 	}
 
-	if temp.Content != nil && len(temp.Content) > 0 && string(temp.Content) != "null" {
-		// Use mcp.parseContent (from mcp/tools.go, assuming it's accessible)
-		// to parse the raw JSON into the correct concrete Content type.
-		var contentMap map[string]interface{}
-		if err := json.Unmarshal(temp.Content, &contentMap); err != nil {
-			return fmt.Errorf("failed to unmarshal content field to map for parseContent: %w", err)
+	if temp.Content != nil && len(temp.Content) > 0 {
+		// Check for JSON null value first
+		if string(temp.Content) == "null" {
+			pm.Content = nil
+			return nil
 		}
 
-		// Assuming parseContent is a function in the mcp package (e.g., mcp.parseContent)
-		// If it's not directly accessible, this call needs adjustment (e.g., qualifying with package if different and public).
-		// For this example, we assume it can be called directly if in the same package or mcp.parseContent if parseContent is public.
+		// Parse the content as a map for further processing
+		var contentMap map[string]interface{}
+		if err := json.Unmarshal(temp.Content, &contentMap); err != nil {
+			return fmt.Errorf("failed to unmarshal content field: %w", err)
+		}
+
+		// If not directly accessible, adjust the call (e.g., qualify with package if needed).
+		// We assume it can be called directly in same package or as mcp.parseContent if public.
 		concreteContent, err := parseContent(contentMap) // This function is in mcp/tools.go (mcp.parseContent)
 		if err != nil {
 			return fmt.Errorf("failed to parse concrete content using parseContent: %w", err)

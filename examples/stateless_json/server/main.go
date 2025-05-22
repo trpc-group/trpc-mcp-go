@@ -24,7 +24,10 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 
 	// Create response content.
 	content := []mcp.Content{
-		mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless JSON server.", name)),
+		mcp.NewTextContent(fmt.Sprintf(
+			"Hello, %s! This is a greeting from the stateless JSON server.",
+			name,
+		)),
 	}
 
 	return &mcp.CallToolResult{Content: content}, nil
@@ -75,7 +78,9 @@ func main() {
 
 	// Start server.
 	log.Printf("MCP server started at :3001, path /mcp")
-	log.Printf("This is a stateless, pure JSON response server - no session ID will be returned, SSE is not used.")
+	log.Printf(
+		"This is a stateless, pure JSON response server - no session ID will be returned, SSE is not used.",
+	)
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

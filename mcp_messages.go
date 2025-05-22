@@ -21,7 +21,8 @@ type ClientCapabilities struct {
 	Sampling *SamplingCapability `json:"sampling,omitempty"`
 
 	// Experimental indicates non-standard experimental capabilities that the client supports
-	// Corresponds to schema: "experimental": {"description": "Experimental, non-standard capabilities that the client supports."}
+	// Corresponds to schema: "experimental": {"description": "Experimental, non-standard capabilities
+	// that the client supports."}
 	Experimental map[string]interface{} `json:"experimental,omitempty"`
 }
 
@@ -41,15 +42,18 @@ type ServerCapabilities struct {
 	Tools *ToolsCapability `json:"tools,omitempty"`
 
 	// Logging indicates whether the server supports sending log messages
-	// Corresponds to schema: "logging": {"description": "Present if the server supports sending log messages to the client."}
+	// Corresponds to schema: "logging": {"description": "Present if the server supports sending log
+	// messages to the client."}
 	Logging *LoggingCapability `json:"logging,omitempty"`
 
 	// Completions indicates whether the server supports argument autocompletion suggestions
-	// Corresponds to schema: "completions": {"description": "Present if the server supports argument autocompletion suggestions."}
+	// Corresponds to schema: "completions": {"description": "Present if the server supports argument
+	// autocompletion suggestions."}
 	Completions *CompletionsCapability `json:"completions,omitempty"`
 
 	// Experimental indicates non-standard experimental capabilities that the server supports
-	// Corresponds to schema: "experimental": {"description": "Experimental, non-standard capabilities that the server supports."}
+	// Corresponds to schema: "experimental": {"description": "Experimental, non-standard capabilities
+	// that the server supports."}
 	Experimental map[string]interface{} `json:"experimental,omitempty"`
 }
 
@@ -58,7 +62,8 @@ type ServerCapabilities struct {
 // RootsCapability describes client root directory capabilities
 type RootsCapability struct {
 	// ListChanged indicates whether the client supports notifications for changes to the roots list
-	// Corresponds to schema: "listChanged": {"description": "Whether the client supports notifications for changes to the roots list."}
+	// Corresponds to schema: "listChanged": {"description": "Whether the client supports notifications
+	// for changes to the roots list."}
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
@@ -70,7 +75,8 @@ type SamplingCapability struct {
 // PromptsCapability describes server prompt capabilities
 type PromptsCapability struct {
 	// ListChanged indicates whether the server supports notifications for changes to the prompt list
-	// Corresponds to schema: "listChanged": {"description": "Whether this server supports notifications for changes to the prompt list."}
+	// Corresponds to schema: "listChanged": {"description": "Whether this server supports notifications
+	// for changes to the prompt list."}
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
@@ -81,14 +87,15 @@ type ResourcesCapability struct {
 	Subscribe bool `json:"subscribe,omitempty"`
 
 	// ListChanged indicates whether the server supports notifications for changes to the resource list
-	// Corresponds to schema: "listChanged": {"description": "Whether this server supports notifications for changes to the resource list."}
+	// Corresponds to schema: "listChanged": {"description": "Whether this server supports notifications
+	// for changes to the resource list."}
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 // ToolsCapability describes server tool capabilities
 type ToolsCapability struct {
 	// ListChanged indicates whether the server supports notifications for changes to the tool list
-	// Corresponds to schema: "listChanged": {"description": "Whether this server supports notifications for changes to the tool list."}
+	// Whether this server supports notifications for changes to the tool list.
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
@@ -108,7 +115,7 @@ type CompletionsCapability struct {
 // Corresponds to schema.json InitializeRequest.params
 type InitializeParams struct {
 	// ProtocolVersion is the latest version of the protocol that the client supports
-	// Corresponds to schema: "protocolVersion": {"description": "The latest version of the Model Context Protocol that the client supports."}
+	// The latest version of the Model Context Protocol that the client supports.
 	ProtocolVersion string `json:"protocolVersion"`
 
 	// ClientInfo is the client implementation information
@@ -133,7 +140,7 @@ type InitializeResult struct {
 	Result
 
 	// ProtocolVersion is the version of the protocol that the server wants to use
-	// Corresponds to schema: "protocolVersion": {"description": "The version of the Model Context Protocol that the server wants to use."}
+	// The version of the Model Context Protocol that the server wants to use.
 	ProtocolVersion string `json:"protocolVersion"`
 
 	// ServerInfo is the server implementation information
@@ -145,7 +152,7 @@ type InitializeResult struct {
 	Capabilities ServerCapabilities `json:"capabilities"`
 
 	// Instructions describe how to use the server and its features
-	// Corresponds to schema: "instructions": {"description": "Instructions describing how to use the server and its features."}
+	// Instructions describing how to use the server and its features.
 	Instructions string `json:"instructions,omitempty"`
 }
 
@@ -208,7 +215,11 @@ func IsProtocolVersionSupported(version string) bool {
 // Helper functions
 
 // NewInitializeRequest creates an initialization request
-func NewInitializeRequest(protocolVersion string, clientInfo Implementation, capabilities ClientCapabilities) *JSONRPCRequest {
+func NewInitializeRequest(
+	protocolVersion string,
+	clientInfo Implementation,
+	capabilities ClientCapabilities,
+) *JSONRPCRequest {
 	params := map[string]interface{}{
 		"protocolVersion": protocolVersion,
 		"clientInfo":      clientInfo,
@@ -218,7 +229,13 @@ func NewInitializeRequest(protocolVersion string, clientInfo Implementation, cap
 }
 
 // NewInitializeResponse creates an initialization response
-func NewInitializeResponse(reqID interface{}, protocolVersion string, serverInfo Implementation, capabilities ServerCapabilities, instructions string) *JSONRPCResponse {
+func NewInitializeResponse(
+	reqID interface{},
+	protocolVersion string,
+	serverInfo Implementation,
+	capabilities ServerCapabilities,
+	instructions string,
+) *JSONRPCResponse {
 	result := InitializeResult{
 		ProtocolVersion: protocolVersion,
 		ServerInfo:      serverInfo,

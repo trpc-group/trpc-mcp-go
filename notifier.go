@@ -88,7 +88,7 @@ func (s *sseNotificationSender) SendCustomNotification(method string, params map
 
 	// Send SSE event using sseutil.Writer instead of direct fmt.Fprintf
 	eventID := s.sseWriter.GenerateEventID()
-	return s.sseWriter.WriteEvent(s.writer, s.flusher, sseutil.Event{
+	return s.sseWriter.WriteEvent(s.writer, sseutil.Event{
 		ID:   eventID,
 		Data: data,
 	})
@@ -107,7 +107,7 @@ func (s *sseNotificationSender) SendNotification(notification *Notification) err
 
 	// Send SSE event using sseutil.Writer instead of direct fmt.Fprintf
 	eventID := s.sseWriter.GenerateEventID()
-	return s.sseWriter.WriteEvent(s.writer, s.flusher, sseutil.Event{
+	return s.sseWriter.WriteEvent(s.writer, sseutil.Event{
 		ID:   eventID,
 		Data: data,
 	})

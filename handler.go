@@ -4,10 +4,17 @@ import (
 	"context"
 )
 
+const (
+	// defaultServerName is the default name for the server
+	defaultServerName = "Go-MCP-Server"
+	// defaultServerVersion is the default version for the server
+	defaultServerVersion = "0.1.0"
+)
+
 // handler interface defines the MCP protocol handler
 type handler interface {
 	// HandleRequest processes requests
-	handleRequest(ctx context.Context, req *JSONRPCRequest, session *Session) (JSONRPCMessage, error)
+	handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
 	// HandleNotification processes notifications
 	handleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
@@ -53,8 +60,8 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 
 	if h.lifecycleManager == nil {
 		h.lifecycleManager = newLifecycleManager(Implementation{
-			Name:    "Go-MCP-Server",
-			Version: "0.1.0",
+			Name:    defaultServerName,
+			Version: defaultServerVersion,
 		})
 	}
 
@@ -94,52 +101,83 @@ func withPromptManager(manager *promptManager) func(*mcpHandler) {
 	}
 }
 
-// handleRequest implements the handler interface's handleRequest method
-//
-// Resource and prompt functionality handling logic:
-// 1. If no resources or prompts are registered, the corresponding functionality is disabled by default, and requests will return "method not found" error
-// 2. If resources or prompts are registered (even if the list is empty), the corresponding functionality is enabled, and requests will return an empty list rather than an error
-// 3. Clients can identify which functionalities the server supports through the capabilities field in the initialization response
-func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
-	// Dispatch request based on method
-	switch req.Method {
-	case MethodInitialize:
-		return h.lifecycleManager.handleInitialize(ctx, req, session)
+// Definition: request dispatch table type
+type requestHandlerFunc func(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
-	case MethodPing: // Using string constant directly
-		// Ping simply returns an empty result
-		return map[string]interface{}{}, nil
-
-	// Tool related
-	case MethodToolsList:
-		return h.toolManager.handleListTools(ctx, req, session)
-	case MethodToolsCall:
-		return h.toolManager.handleCallTool(ctx, req, session)
-
-	// Resource related
-	case MethodResourcesList:
-		return h.resourceManager.handleListResources(ctx, req)
-	case MethodResourcesRead:
-		return h.resourceManager.handleReadResource(ctx, req)
-	case MethodResourcesTemplatesList:
-		return h.resourceManager.handleListTemplates(ctx, req)
-	case MethodResourcesSubscribe:
-		return h.resourceManager.handleSubscribe(ctx, req)
-	case MethodResourcesUnsubscribe:
-		return h.resourceManager.handleUnsubscribe(ctx, req)
-
-	// Prompt related
-	case MethodPromptsList:
-		return h.promptManager.handleListPrompts(ctx, req)
-	case MethodPromptsGet:
-		return h.promptManager.handleGetPrompt(ctx, req)
-	case MethodCompletionComplete:
-		return h.promptManager.handleCompletionComplete(ctx, req)
-
-	default:
-		// Unknown method
-		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+// Initialization: request dispatch table
+func (h *mcpHandler) requestDispatchTable() map[string]requestHandlerFunc {
+	return map[string]requestHandlerFunc{
+		MethodInitialize:             h.handleInitialize,
+		MethodPing:                   h.handlePing,
+		MethodToolsList:              h.handleToolsList,
+		MethodToolsCall:              h.handleToolsCall,
+		MethodResourcesList:          h.handleResourcesList,
+		MethodResourcesRead:          h.handleResourcesRead,
+		MethodResourcesTemplatesList: h.handleResourcesTemplatesList,
+		MethodResourcesSubscribe:     h.handleResourcesSubscribe,
+		MethodResourcesUnsubscribe:   h.handleResourcesUnsubscribe,
+		MethodPromptsList:            h.handlePromptsList,
+		MethodPromptsGet:             h.handlePromptsGet,
+		MethodCompletionComplete:     h.handleCompletionComplete,
 	}
+}
+
+// Refactored handleRequest
+func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	dispatchTable := h.requestDispatchTable()
+	if handler, ok := dispatchTable[req.Method]; ok {
+		return handler(ctx, req, session)
+	}
+	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+}
+
+// Private methods for each case branch
+func (h *mcpHandler) handleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.lifecycleManager.handleInitialize(ctx, req, session)
+}
+
+func (h *mcpHandler) handlePing(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return map[string]interface{}{}, nil
+}
+
+func (h *mcpHandler) handleToolsList(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.toolManager.handleListTools(ctx, req, session)
+}
+
+func (h *mcpHandler) handleToolsCall(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.toolManager.handleCallTool(ctx, req, session)
+}
+
+func (h *mcpHandler) handleResourcesList(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.resourceManager.handleListResources(ctx, req)
+}
+
+func (h *mcpHandler) handleResourcesRead(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.resourceManager.handleReadResource(ctx, req)
+}
+
+func (h *mcpHandler) handleResourcesTemplatesList(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.resourceManager.handleListTemplates(ctx, req)
+}
+
+func (h *mcpHandler) handleResourcesSubscribe(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.resourceManager.handleSubscribe(ctx, req)
+}
+
+func (h *mcpHandler) handleResourcesUnsubscribe(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.resourceManager.handleUnsubscribe(ctx, req)
+}
+
+func (h *mcpHandler) handlePromptsList(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.promptManager.handleListPrompts(ctx, req)
+}
+
+func (h *mcpHandler) handlePromptsGet(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.promptManager.handleGetPrompt(ctx, req)
+}
+
+func (h *mcpHandler) handleCompletionComplete(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	return h.promptManager.handleCompletionComplete(ctx, req)
 }
 
 // handleNotification implements the handler interface's handleNotification method
@@ -154,7 +192,7 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 	}
 }
 
-// OnSessionTerminated implements the sessionEventNotifier interface's OnSessionTerminated method
+// onSessionTerminated implements the sessionEventNotifier interface's OnSessionTerminated method
 func (h *mcpHandler) onSessionTerminated(sessionID string) {
 	// Notify lifecycle manager that session has terminated
 	h.lifecycleManager.onSessionTerminated(sessionID)

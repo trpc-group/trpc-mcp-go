@@ -88,7 +88,10 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 	// Return final result.
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Completed %d-stage greeting to %s!", stages, name)),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Completed %d-stage greeting to %s!",
+				stages, name,
+			)),
 		},
 	}, nil
 }
@@ -122,7 +125,10 @@ func main() {
 
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
-					mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the stateless SSE server.", name)),
+					mcp.NewTextContent(fmt.Sprintf(
+						"Hello, %s! This is a greeting from the stateless SSE server.",
+						name,
+					)),
 				},
 			}, nil
 		},
@@ -168,7 +174,9 @@ func main() {
 
 	// Start server.
 	log.Printf("MCP server started at :3002, path /mcp")
-	log.Printf("This is a stateless, SSE response server - no session ID will be returned, SSE is used, GET SSE is not supported.")
+	log.Printf(
+		"This is a stateless, SSE response server - no session ID will be returned, SSE is used, GET SSE is not supported.",
+	)
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

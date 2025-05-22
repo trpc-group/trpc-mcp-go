@@ -12,12 +12,16 @@ import (
 // resourceManager manages resources
 //
 // Resource functionality follows these enabling mechanisms:
-// 1. By default, resource functionality is disabled
-// 2. When the first resource is registered, resource functionality is automatically enabled without additional configuration
-// 3. When resource functionality is enabled but no resources exist, ListResources will return an empty resource list rather than an error
-// 4. Clients can determine if the server supports resource functionality through the capabilities field in the initialization response
+//  1. By default, resource functionality is disabled
+//  2. When the first resource is registered, resource functionality is automatically enabled without
+//     additional configuration
+//  3. When resource functionality is enabled but no resources exist, ListResources will return an empty
+//     resource list rather than an error
+//  4. Clients can determine if the server supports resource functionality through the capabilities
+//     field in the initialization response
 //
-// This design simplifies API usage, eliminating the need for explicit configuration parameters to enable or disable resource functionality.
+// This design simplifies API usage, eliminating the need for explicit configuration parameters to
+// enable or disable resource functionality.
 type resourceManager struct {
 	// Resource mapping table
 	resources map[string]*Resource
@@ -223,7 +227,12 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 	// Get resource
 	resource, exists := m.getResource(uri)
 	if !exists {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri), nil), nil
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeMethodNotFound,
+			fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri),
+			nil,
+		), nil
 	}
 
 	// Create a dummy text content for now

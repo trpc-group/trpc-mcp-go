@@ -37,7 +37,7 @@ func TestMCPHandler_WithOptions(t *testing.T) {
 	assert.Equal(t, lifecycleManager, handler.lifecycleManager)
 }
 
-func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
+func TestMCPHandler_Initialize(t *testing.T) {
 	// Create handler
 	toolManager := newToolManager()
 	lifecycleManager := newLifecycleManager(Implementation{
@@ -82,7 +82,7 @@ func TestMCPHandler_HandleRequest_Initialize(t *testing.T) {
 	assert.Equal(t, ProtocolVersion_2024_11_05, protocolVersion)
 }
 
-func TestMCPHandler_HandleRequest_UnknownMethod(t *testing.T) {
+func TestMCPHandler_UnknownMethod(t *testing.T) {
 	// Create handler
 	handler := newMCPHandler()
 
@@ -108,7 +108,7 @@ func TestMCPHandler_HandleRequest_UnknownMethod(t *testing.T) {
 	assert.Equal(t, "method not found", errorResp.Error.Message)
 }
 
-func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
+func TestMCPHandler_ToolsList(t *testing.T) {
 	// Create handler
 	handler := newMCPHandler()
 
@@ -164,7 +164,7 @@ func TestMCPHandler_HandleRequest_ToolsList(t *testing.T) {
 	t.Errorf("Unexpected response type: %T", resp)
 }
 
-func TestMCPHandler_HandleRequest_ToolsCall(t *testing.T) {
+func TestMCPHandler_ToolsCall(t *testing.T) {
 	// Create handler
 	handler := newMCPHandler()
 

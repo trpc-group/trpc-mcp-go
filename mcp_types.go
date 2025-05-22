@@ -2,6 +2,17 @@ package mcp
 
 import "encoding/json"
 
+const (
+	// ContentTypeText represents text content type
+	ContentTypeText = "text"
+	// ContentTypeImage represents image content type
+	ContentTypeImage = "image"
+	// ContentTypeAudio represents audio content type
+	ContentTypeAudio = "audio"
+	// ContentTypeEmbeddedResource represents embedded resource content type
+	ContentTypeEmbeddedResource = "embedded_resource"
+)
+
 // MCP protcol Layer
 
 // Request is the base request struct for all MCP requests.
@@ -193,30 +204,33 @@ func (EmbeddedResource) isContent() {}
 // NewTextContent helpe functions for content creation
 func NewTextContent(text string) TextContent {
 	return TextContent{
-		Type: "text",
+		Type: ContentTypeText,
 		Text: text,
 	}
 }
 
+// NewImageContent creates a new image content
 func NewImageContent(data string, mimeType string) ImageContent {
 	return ImageContent{
-		Type:     "image",
+		Type:     ContentTypeImage,
 		Data:     data,
 		MimeType: mimeType,
 	}
 }
 
+// NewAudioContent creates a new audio content
 func NewAudioContent(data string, mimeType string) AudioContent {
 	return AudioContent{
-		Type:     "audio",
+		Type:     ContentTypeAudio,
 		Data:     data,
 		MimeType: mimeType,
 	}
 }
 
+// NewEmbeddedResource creates a new embedded resource
 func NewEmbeddedResource(resource ResourceContents) EmbeddedResource {
 	return EmbeddedResource{
-		Type:     "resource",
+		Type:     ContentTypeEmbeddedResource,
 		Resource: resource,
 	}
 }

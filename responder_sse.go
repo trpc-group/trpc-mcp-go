@@ -54,35 +54,46 @@ func withEventID(eventID string) func(*sseResponder) {
 }
 
 // respond sends an SSE response
-func (r *sseResponder) respond(ctx context.Context, w http.ResponseWriter, req *http.Request, resp interface{}, session Session) error {
-	// Check if streaming is supported
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return ErrStreamingNotSupported
-	}
-
-	// Set standard SSE headers + MCP specific session header
-	sseutil.SetStandardHeaders(w)
-	if !r.isStateless && session != nil {
-		w.Header().Set(httputil.SessionIDHeader, session.GetID())
-	}
-
-	// If response is nil (e.g. for a notification that expects 202), return 202 Accepted
+func (r *sseResponder) respond(
+	ctx context.Context,
+	w http.ResponseWriter,
+	req *http.Request,
+	resp interface{},
+	session Session,
+) error {
+	r.setSSEHeaders(w, session)
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
 		return nil
 	}
+	respBytes, err := r.marshalResponse(resp)
+	if err != nil {
+		return err
+	}
+	return r.sendSSEEvent(w, respBytes)
+}
 
-	// Serialize response
+// setSSEHeaders sets standard SSE headers and session header if needed
+func (r *sseResponder) setSSEHeaders(w http.ResponseWriter, session Session) {
+	sseutil.SetStandardHeaders(w)
+	if !r.isStateless && session != nil {
+		w.Header().Set(httputil.SessionIDHeader, session.GetID())
+	}
+}
+
+// marshalResponse serializes the response to JSON
+func (r *sseResponder) marshalResponse(resp interface{}) ([]byte, error) {
 	respBytes, err := json.Marshal(resp)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrResponseSerialization, err)
+		return nil, fmt.Errorf("%w: %v", ErrResponseSerialization, err)
 	}
+	return respBytes, nil
+}
 
-	// Send SSE event
+// sendSSEEvent sends the SSE event with generated event ID
+func (r *sseResponder) sendSSEEvent(w http.ResponseWriter, respBytes []byte) error {
 	eventID := r.sseWriter.GenerateEventID()
-
-	return r.sseWriter.WriteEvent(w, flusher, sseutil.Event{ID: eventID, Data: respBytes})
+	return r.sseWriter.WriteEvent(w, sseutil.Event{ID: eventID, Data: respBytes})
 }
 
 // supportsContentType checks if the specified content type is supported
@@ -97,8 +108,9 @@ func (r *sseResponder) containsRequest(body []byte) bool {
 }
 
 // sendNotification sends a notification event
-// Note: Standard SSE headers should be set by the caller (e.g. handleGet in httpServerHandler) if this is used for GET SSE streams.
-func (r *sseResponder) sendNotification(w http.ResponseWriter, flusher http.Flusher, notification interface{}) (string, error) {
+// Note: Standard SSE headers should be set by the caller (e.g. handleGet in httpServerHandler)
+// if this is used for GET SSE streams.
+func (r *sseResponder) sendNotification(w http.ResponseWriter, notification interface{}) (string, error) {
 	// Check if it's a response type, which should be sent using the respond method
 	if _, ok := notification.(*JSONRPCResponse); ok {
 		return "", ErrInvalidResponseType
@@ -127,7 +139,7 @@ func (r *sseResponder) sendNotification(w http.ResponseWriter, flusher http.Flus
 		return "", fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
-	err = r.sseWriter.WriteEvent(w, flusher, sseutil.Event{ID: eventID, Data: notifBytes})
+	err = r.sseWriter.WriteEvent(w, sseutil.Event{ID: eventID, Data: notifBytes})
 	if err != nil {
 		return "", err
 	}

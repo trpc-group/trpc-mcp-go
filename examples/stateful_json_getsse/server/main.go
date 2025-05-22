@@ -32,11 +32,13 @@ func handleGreet(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallTo
 	if ok && session != nil {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server. Your session ID is: %s",
-			name, session.GetID()[:8]+"...")))
+			name, session.GetID()[:8]+"...",
+		)))
 	} else {
 		content = append(content, mcp.NewTextContent(fmt.Sprintf(
 			"Hello, %s! This is a greeting from the stateful JSON+GET SSE server, but session info could not be obtained.",
-			name)))
+			name,
+		)))
 	}
 
 	return &mcp.CallToolResult{Content: content}, nil
@@ -74,8 +76,10 @@ func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.Call
 	// Return result.
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-				count, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Counter current value: %d (Session ID: %s)",
+				count, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -112,7 +116,8 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent after %d seconds. Please make sure to subscribe to notifications with GET SSE connection. (Session ID: %s)",
-				delaySeconds, session.GetID()[:8]+"...")),
+				delaySeconds, session.GetID()[:8]+"...",
+			)),
 		},
 	}
 
@@ -161,21 +166,17 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 func main() {
 	log.Printf("Starting Stateful JSON Yes GET SSE mode MCP server...")
 
-	// Create session manager (valid for 1 hour).
-	sessionManager := mcp.NewSessionManager(3600)
-
 	// Create MCP server, configured as:
 	// 1. Stateful mode (using sessionManager)
 	// 2. Only return JSON responses (do not use SSE)
 	// 3. Support GET SSE
 	mcpServer := mcp.NewServer(
-		"Stateful-JSON-Yes-GETSSE-Server",      // Server name
-		"1.0.0",                                // Server version
-		mcp.WithServerAddress(":3004"),         // Server address and port
-		mcp.WithServerPath("/mcp"),             // Set API path
-		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithPostSSEEnabled(false),          // Disable SSE
-		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
+		"Stateful-JSON-Yes-GETSSE-Server", // Server name
+		"1.0.0",                           // Server version
+		mcp.WithServerAddress(":3004"),    // Server address and port
+		mcp.WithServerPath("/mcp"),        // Set API path
+		mcp.WithPostSSEEnabled(false),     // Disable SSE
+		mcp.WithGetSSEEnabled(true),       // Enable GET SSE
 	)
 
 	// Register a greeting tool.
@@ -239,7 +240,10 @@ func main() {
 				)
 
 				if err != nil {
-					log.Printf("Failed to broadcast system status notification: %v (failed sessions: %d)", err, failedCount)
+					log.Printf(
+						"Failed to broadcast system status notification: %v (failed sessions: %d)",
+						err, failedCount,
+					)
 				} else {
 					log.Printf("System status notification broadcast to all sessions")
 				}

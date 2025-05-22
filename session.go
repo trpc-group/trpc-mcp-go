@@ -73,8 +73,8 @@ func (a *sessionManagerAdapter) terminateSession(id string) bool {
 	return a.manager.TerminateSession(id)
 }
 
-// NewSessionManager creates a session manager
-func NewSessionManager(expirySeconds int) sessionManager {
+// newSessionManager creates a session manager
+func newSessionManager(expirySeconds int) sessionManager {
 	return &sessionManagerAdapter{
 		manager: session.NewSessionManager(expirySeconds),
 	}

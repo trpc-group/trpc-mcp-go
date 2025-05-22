@@ -16,17 +16,26 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 	level, _ := paramsMap["level"].(string)
 	dataMap, ok := paramsMap["data"].(map[string]interface{})
 	if !ok {
-		log.Printf("Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v.", notification.Method, level, paramsMap)
+		log.Printf(
+			"Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v.",
+			notification.Method, level, paramsMap,
+		)
 		return fmt.Errorf("'data' field is invalid or missing")
 	}
 
 	notificationType, typeOk := dataMap["type"].(string)
 	if !typeOk {
-		log.Printf("Received notification [%s] (Level: %s), but 'type' field in data is invalid or missing: %+v", notification.Method, level, dataMap)
+		log.Printf(
+			"Received notification [%s] (Level: %s), but 'type' field in data is invalid or missing: %+v",
+			notification.Method, level, dataMap,
+		)
 		return fmt.Errorf("'type' field in notification data is invalid or missing")
 	}
 
-	log.Printf("Received notification [%s] (Level: %s, Type: %s): %+v.", notification.Method, level, notificationType, dataMap)
+	log.Printf(
+		"Received notification [%s] (Level: %s, Type: %s): %+v.",
+		notification.Method, level, notificationType, dataMap,
+	)
 
 	// Handle specific notification types.
 	switch notificationType {

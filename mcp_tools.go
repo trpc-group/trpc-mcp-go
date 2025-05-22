@@ -8,10 +8,12 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// ListToolsRequest represents a request to list available tools
 type ListToolsRequest struct {
 	PaginatedRequest
 }
 
+// PaginatedRequest represents a request with pagination support
 type PaginatedRequest struct {
 	Request
 	Params struct {
@@ -19,6 +21,7 @@ type PaginatedRequest struct {
 	} `json:"params,omitempty"`
 }
 
+// ListToolsResult represents the result of listing tools
 type ListToolsResult struct {
 	PaginatedResult
 	Tools []Tool `json:"tools"`
@@ -76,14 +79,27 @@ type Tool struct {
 	RawInputSchema json.RawMessage `json:"-"`
 
 	// Tool execution function - new version
-	ExecuteFunc func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) `json:"-"`
+	ExecuteFunc func(
+		ctx context.Context,
+		req *CallToolRequest,
+	) (*CallToolResult, error) `json:"-"`
 }
 
-// ToolOption represents tool configuration option
+// ToolOption represents a function that configures a Tool
 type ToolOption func(*Tool)
 
+// PropertyOption represents a function that configures a schema property
+type PropertyOption func(*openapi3.Schema)
+
 // NewTool creates a new tool
-func NewTool(name string, executeFunc func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error), opts ...ToolOption) *Tool {
+func NewTool(
+	name string,
+	executeFunc func(
+		ctx context.Context,
+		req *CallToolRequest,
+	) (*CallToolResult, error),
+	opts ...ToolOption,
+) *Tool {
 	tool := &Tool{
 		Name: name,
 		InputSchema: &openapi3.Schema{
@@ -101,9 +117,6 @@ func NewTool(name string, executeFunc func(ctx context.Context, req *CallToolReq
 	return tool
 }
 
-// PropertyOption represents property configuration option
-type PropertyOption func(*openapi3.Schema)
-
 // WithDescription common option function
 func WithDescription(description string) ToolOption {
 	return func(t *Tool) {
@@ -111,6 +124,7 @@ func WithDescription(description string) ToolOption {
 	}
 }
 
+// WithString adds a string parameter to the tool's input schema
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
@@ -126,6 +140,7 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+// WithNumber adds a number parameter to the tool's input schema
 func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
@@ -141,6 +156,7 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+// WithBoolean adds a boolean parameter to the tool's input schema
 func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
@@ -244,37 +260,49 @@ func parseContent(contentMap map[string]any) (Content, error) {
 
 	switch contentType {
 	case "text":
-		text := extractString(contentMap, "text")
-		if text == "" {
-			return nil, fmt.Errorf("text is missing")
-		}
-		return NewTextContent(text), nil
-
+		return parseTextContent(contentMap)
 	case "image":
-		data := extractString(contentMap, "data")
-		mimeType := extractString(contentMap, "mimeType")
-		if data == "" || mimeType == "" {
-			return nil, fmt.Errorf("image data or mimeType is missing")
-		}
-		return NewImageContent(data, mimeType), nil
-
+		return parseImageContent(contentMap)
 	case "resource":
-		resourceMap := extractMap(contentMap, "resource")
-		if resourceMap == nil {
-			return nil, fmt.Errorf("resource is missing")
-		}
-
-		resourceContents, err := parseResourceContents(resourceMap)
-		if err != nil {
-			return nil, err
-		}
-
-		return NewEmbeddedResource(resourceContents), nil
+		return parseResourceContent(contentMap)
+	default:
+		return nil, fmt.Errorf("unsupported content type: %s", contentType)
 	}
-
-	return nil, fmt.Errorf("unsupported content type: %s", contentType)
 }
 
+// parseTextContent parses text content
+func parseTextContent(contentMap map[string]any) (Content, error) {
+	text := extractString(contentMap, "text")
+	if text == "" {
+		return nil, fmt.Errorf("text is missing")
+	}
+	return NewTextContent(text), nil
+}
+
+// parseImageContent parses image content
+func parseImageContent(contentMap map[string]any) (Content, error) {
+	data := extractString(contentMap, "data")
+	mimeType := extractString(contentMap, "mimeType")
+	if data == "" || mimeType == "" {
+		return nil, fmt.Errorf("image data or mimeType is missing")
+	}
+	return NewImageContent(data, mimeType), nil
+}
+
+// parseResourceContent parses resource content
+func parseResourceContent(contentMap map[string]any) (Content, error) {
+	resourceMap := extractMap(contentMap, "resource")
+	if resourceMap == nil {
+		return nil, fmt.Errorf("resource is missing")
+	}
+	resourceContents, err := parseResourceContents(resourceMap)
+	if err != nil {
+		return nil, err
+	}
+	return NewEmbeddedResource(resourceContents), nil
+}
+
+// extractString extracts a string value from a map by key
 func extractString(data map[string]any, key string) string {
 	if value, ok := data[key]; ok {
 		if str, ok := value.(string); ok {
@@ -284,6 +312,7 @@ func extractString(data map[string]any, key string) string {
 	return ""
 }
 
+// extractMap extracts a map value from a map by key
 func extractMap(data map[string]any, key string) map[string]any {
 	if value, ok := data[key]; ok {
 		if m, ok := value.(map[string]any); ok {

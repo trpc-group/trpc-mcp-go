@@ -15,12 +15,18 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 	level, _ := paramsMap["level"].(string)
 	dataMap, ok := paramsMap["data"].(map[string]interface{})
 	if !ok {
-		log.Printf("Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v", notification.Method, level, paramsMap)
+		log.Printf(
+			"Received notification [%s] (Level: %s), but 'data' field is invalid or missing: %+v",
+			notification.Method, level, paramsMap,
+		)
 		return fmt.Errorf("'data' field is invalid or missing")
 	}
 
 	notificationType, _ := dataMap["type"].(string)
-	log.Printf("Received notification [%s] (Level: %s, Type: %s): %+v", notification.Method, level, notificationType, dataMap)
+	log.Printf(
+		"Received notification [%s] (Level: %s, Type: %s): %+v",
+		notification.Method, level, notificationType, dataMap,
+	)
 
 	switch notificationType {
 	case "process_started":
@@ -29,7 +35,10 @@ func handleNotification(notification *mcp.JSONRPCNotification) error {
 		}
 	case "process_progress":
 		if message, exists := dataMap["message"].(string); exists {
-			log.Printf("  Stream processing progress: %s (Step: %v/%v, Progress: %.2f%%)", message, dataMap["step"], dataMap["total"], dataMap["progress"])
+			log.Printf(
+				"  Stream processing progress: %s (Step: %v/%v, Progress: %.2f%%)",
+				message, dataMap["step"], dataMap["total"], dataMap["progress"],
+			)
 		}
 	default:
 		log.Printf("  Received other type of notification '%s': %+v", notificationType, dataMap)

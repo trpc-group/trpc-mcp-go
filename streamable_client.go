@@ -130,12 +130,19 @@ func withTransportHTTPReqHandler(handler HTTPReqHandler) transportOption {
 }
 
 // SendRequest sends a request and waits for a response
-func (t *streamableHTTPClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+func (t *streamableHTTPClientTransport) sendRequest(
+	ctx context.Context,
+	req *JSONRPCRequest,
+) (*json.RawMessage, error) {
 	return t.send(ctx, req, nil)
 }
 
 // send sends a request and handles the response
-func (t *streamableHTTPClientTransport) send(ctx context.Context, req *JSONRPCRequest, options *streamOptions) (*json.RawMessage, error) {
+func (t *streamableHTTPClientTransport) send(
+	ctx context.Context,
+	req *JSONRPCRequest,
+	options *streamOptions,
+) (*json.RawMessage, error) {
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
@@ -231,8 +238,80 @@ func (t *streamableHTTPClientTransport) send(ctx context.Context, req *JSONRPCRe
 	return &rawMessage, nil
 }
 
+// processEventData processes SSE event data and returns the processed message
+func (t *streamableHTTPClientTransport) processEventData(
+	data string,
+	reqID interface{},
+	handlers map[string]NotificationHandler,
+) (*json.RawMessage, error) {
+	// Create a raw message from the data
+	rawMessage := json.RawMessage(data)
+
+	// First, check if it's a response to our request by looking at the ID
+	var jsonResp map[string]interface{}
+	if err := json.Unmarshal(rawMessage, &jsonResp); err == nil {
+		// Check if it has an ID that matches our request ID
+		if id, hasID := jsonResp["id"]; hasID && fmt.Sprintf("%v", id) == fmt.Sprintf("%v", reqID) {
+			return t.handleResponseMessage(jsonResp, &rawMessage)
+		}
+	}
+
+	// Check if it's a notification
+	return t.handleNotificationMessage(rawMessage, handlers)
+}
+
+// handleResponseMessage processes a response message and returns the result
+func (t *streamableHTTPClientTransport) handleResponseMessage(
+	jsonResp map[string]interface{},
+	rawMessage *json.RawMessage,
+) (*json.RawMessage, error) {
+	// Check if it's an error response
+	if _, hasError := jsonResp["error"]; hasError {
+		t.logger.Infof("Received error response for ID: %v", jsonResp["id"])
+		return rawMessage, nil
+	}
+
+	// Extract result from the response
+	if result, hasResult := jsonResp["result"]; hasResult {
+		// Serialize just the result part
+		resultBytes, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %v", err)
+		}
+
+		resultRaw := json.RawMessage(resultBytes)
+		return &resultRaw, nil
+	}
+
+	return nil, nil
+}
+
+// handleNotificationMessage processes a notification message
+func (t *streamableHTTPClientTransport) handleNotificationMessage(
+	rawMessage json.RawMessage,
+	handlers map[string]NotificationHandler,
+) (*json.RawMessage, error) {
+	var notification JSONRPCNotification
+	if err := json.Unmarshal(rawMessage, &notification); err == nil && notification.Method != "" {
+		// Process notification
+		if handler, ok := handlers[notification.Method]; ok {
+			if err := handler(&notification); err != nil {
+				t.logger.Infof("Notification handler error: %v", err)
+			}
+		} else {
+			t.logger.Infof("Received unhandled notification: %s", notification.Method)
+		}
+	}
+	return nil, nil
+}
+
 // Handle SSE response
-func (t *streamableHTTPClientTransport) handleSSEResponse(ctx context.Context, httpResp *http.Response, reqID interface{}, options *streamOptions) (*json.RawMessage, error) {
+func (t *streamableHTTPClientTransport) handleSSEResponse(
+	ctx context.Context,
+	httpResp *http.Response,
+	reqID interface{},
+	options *streamOptions,
+) (*json.RawMessage, error) {
 	reader := bufio.NewReader(httpResp.Body)
 	var rawResult *json.RawMessage
 	var resultReceived bool
@@ -285,55 +364,15 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(ctx context.Context, h
 			// Process event data
 			if strings.HasPrefix(line, "data:") {
 				data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-
-				// Create a raw message from the data
-				rawMessage := json.RawMessage(data)
-
-				// First, check if it's a response to our request by looking at the ID
-				var jsonResp map[string]interface{}
-				if err := json.Unmarshal(rawMessage, &jsonResp); err == nil {
-					// Check if it has an ID that matches our request ID
-					if id, hasID := jsonResp["id"]; hasID && fmt.Sprintf("%v", id) == fmt.Sprintf("%v", reqID) {
-						// Check if it's an error response
-						if _, hasError := jsonResp["error"]; hasError {
-							// Return the raw error response for error handling
-							resultReceived = true
-							rawResult = &rawMessage
-							t.logger.Infof("Received error response for ID: %v", reqID)
-							continue
-						}
-
-						// Extract result from the response
-						if result, hasResult := jsonResp["result"]; hasResult {
-							// Serialize just the result part
-							resultBytes, err := json.Marshal(result)
-							if err != nil {
-								return nil, fmt.Errorf("failed to marshal result: %v", err)
-							}
-
-							resultRaw := json.RawMessage(resultBytes)
-							rawResult = &resultRaw
-							resultReceived = true
-
-							// If there are no other handlers, we can return early
-							if len(handlers) == 0 {
-								return rawResult, nil
-							}
-							continue
-						}
-					}
+				result, err := t.processEventData(data, reqID, handlers)
+				if err != nil {
+					return nil, err
 				}
-
-				// Check if it's a notification
-				var notification JSONRPCNotification
-				if err := json.Unmarshal(rawMessage, &notification); err == nil && notification.Method != "" {
-					// Process notification
-					if handler, ok := handlers[notification.Method]; ok {
-						if err := handler(&notification); err != nil {
-							t.logger.Infof("Notification handler error: %v", err)
-						}
-					} else {
-						t.logger.Infof("Received unhandled notification: %s", notification.Method)
+				if result != nil {
+					rawResult = result
+					resultReceived = true
+					if len(handlers) == 0 {
+						return rawResult, nil
 					}
 				}
 			}
@@ -653,7 +692,11 @@ func (t *streamableHTTPClientTransport) isStatelessMode() bool {
 }
 
 // sendRequestWithStream sends a request with streaming options
-func (t *streamableHTTPClientTransport) sendRequestWithStream(ctx context.Context, req *JSONRPCRequest, options *streamOptions) (*json.RawMessage, error) {
+func (t *streamableHTTPClientTransport) sendRequestWithStream(
+	ctx context.Context,
+	req *JSONRPCRequest,
+	options *streamOptions,
+) (*json.RawMessage, error) {
 	return t.send(ctx, req, options)
 }
 

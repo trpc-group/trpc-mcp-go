@@ -126,7 +126,10 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 		// Unable to get session, return a simple greeting
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
-				mcp.NewTextContent("Hello! This is a greeting from the complete MCP server (but unable to get session information)."),
+				mcp.NewTextContent(
+					"Hello! This is a greeting from the complete MCP server " +
+						"(but unable to get session information).",
+				),
 			},
 		}, nil
 	}
@@ -142,8 +145,10 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	// Build greeting message
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Hello, %s! This is a greeting from the complete MCP server. Your session ID is: %s",
-				name, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Hello, %s! This is a greeting from the complete MCP server. Your session ID is: %s",
+				name, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -181,8 +186,10 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	// Return result
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)",
-				count, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Counter current value: %d (Session ID: %s)",
+				count, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -204,7 +211,10 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	if !ok {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get notification sender. This feature requires SSE streaming response support."),
+				mcp.NewTextContent(
+					"Error: Unable to get notification sender. " +
+						"This feature requires SSE streaming response support.",
+				),
 			},
 		}, fmt.Errorf("unable to get notification sender from context")
 	}
@@ -271,12 +281,20 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		log.Printf("Send completion notification failed: %v", err)
 	}
 
+	// Safely get truncated session ID
+	sessionID := session.GetID()
+	truncatedID := sessionID
+	if len(sessionID) > 8 {
+		truncatedID = sessionID[:8] + "..."
+	}
+
 	// Return result
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Processing completed! Executed %d steps, each step delay %d milliseconds. (Session ID: %s)",
-				steps, delayMs, session.GetID()[:8]+"...")),
+				steps, delayMs, truncatedID,
+			)),
 		},
 	}, nil
 }
@@ -313,7 +331,8 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		Content: []mcp.Content{
 			mcp.NewTextContent(fmt.Sprintf(
 				"Notification will be sent in %d seconds. (Session ID: %s)",
-				delaySeconds, session.GetID()[:8]+"...")),
+				delaySeconds, session.GetID()[:8]+"...",
+			)),
 		},
 	}
 
@@ -373,11 +392,13 @@ func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	if len(recentMessages) > 0 {
 		messageText += "\n\nRecent messages:"
 		for i, msg := range recentMessages {
-			messageText += fmt.Sprintf("\n%d) [%s] %s: %s",
+			messageText += fmt.Sprintf(
+				"\n%d) [%s] %s: %s",
 				i+1,
 				msg.Timestamp.Format("15:04:05"),
 				msg.UserName,
-				msg.Message)
+				msg.Message,
+			)
 		}
 	} else {
 		messageText += "\n\nNo chat history yet."
@@ -474,9 +495,15 @@ func broadcastChatMessage(userName, message string) {
 	})
 
 	if err != nil {
-		log.Printf("Broadcast chat message failed (failed session count: %d): %v", failedCount, err)
+		log.Printf(
+			"Broadcast chat message failed (failed session count: %d): %v",
+			failedCount, err,
+		)
 	} else {
-		log.Printf("Broadcast chat message: %s: %s", userName, message)
+		log.Printf(
+			"Broadcast chat message: %s: %s",
+			userName, message,
+		)
 	}
 }
 
@@ -493,9 +520,15 @@ func broadcastSystemMessage(message string) {
 	})
 
 	if err != nil {
-		log.Printf("Broadcast system message failed (failed session count: %d): %v", failedCount, err)
+		log.Printf(
+			"Broadcast system message failed (failed session count: %d): %v",
+			failedCount, err,
+		)
 	} else {
-		log.Printf("Broadcast system message: %s", message)
+		log.Printf(
+			"Broadcast system message: %s",
+			message,
+		)
 	}
 }
 
@@ -505,21 +538,17 @@ func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful SSE+GET SSE mode MCP server...")
 
-	// Create session manager (valid for 1 hour)
-	sessionManager := mcp.NewSessionManager(3600)
-
 	// Create MCP server, configured as:
 	// 1. Stateful mode (Stateful, using sessionManager)
 	// 2. Use SSE response (streaming)
 	// 3. Support independent GET SSE
 	mcpServer = mcp.NewServer(
-		"Stateful-SSE-GETSSE-Server",           // Server name
-		"1.0.0",                                // Server version
-		mcp.WithServerAddress(":3006"),         // Server address and port
-		mcp.WithServerPath("/mcp"),             // Set API path
-		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithPostSSEEnabled(true),           // Enable SSE
-		mcp.WithGetSSEEnabled(true),            // Enable GET SSE
+		"Stateful-SSE-GETSSE-Server",   // Server name
+		"1.0.0",                        // Server version
+		mcp.WithServerAddress(":3006"), // Server address and port
+		mcp.WithServerPath("/mcp"),     // Set API path
+		mcp.WithPostSSEEnabled(true),   // Enable SSE
+		mcp.WithGetSSEEnabled(true),    // Enable GET SSE
 	)
 
 	// Register a greeting tool

@@ -81,15 +81,11 @@ func StartSSETestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 	// Create basic server config.
 	pathPrefix := "/mcp"
 
-	// Create session manager.
-	sessionManager := mcp.NewSessionManager(3600)
-
 	// Instantiate server and enable SSE.
 	s := mcp.NewServer(
 		"E2E-SSE-Test-Server", // Server name
 		"1.0.0",               // Server version
 		mcp.WithServerPath(pathPrefix),
-		mcp.WithSessionManager(sessionManager),
 		mcp.WithPostSSEEnabled(true), // Enable SSE.
 		mcp.WithGetSSEEnabled(true),  // Enable GET SSE.
 	)

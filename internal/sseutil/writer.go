@@ -3,6 +3,7 @@ package sseutil
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -39,7 +40,8 @@ func (sw *Writer) GenerateEventID() string {
 // WriteEvent writes a single SSE event to the http.ResponseWriter.
 // It assumes standard SSE headers have been set appropriately by the caller.
 // It requires data to be pre-serialized.
-func (sw *Writer) WriteEvent(w http.ResponseWriter, flusher http.Flusher, event Event) error {
+// The function will automatically flush the response if the http.ResponseWriter implements http.Flusher.
+func (sw *Writer) WriteEvent(w http.ResponseWriter, event Event) error {
 	if event.ID == "" {
 		// Consider returning a predefined error from this package if this becomes common
 		return fmt.Errorf("SSE event ID cannot be empty")
@@ -48,16 +50,29 @@ func (sw *Writer) WriteEvent(w http.ResponseWriter, flusher http.Flusher, event 
 	// Note: MCP generally sends data. A generic writer might allow empty data for comments/keep-alives.
 	// For now, this writer expects data to be typically non-nil based on MCP usage.
 
-	_, err := fmt.Fprintf(w, "id: %s\n", event.ID)
-	if err != nil {
+	// Write event ID
+	if _, err := fmt.Fprintf(w, "id: %s\n", event.ID); err != nil {
 		return fmt.Errorf("failed to write SSE event ID: %w", err)
 	}
-	_, err = fmt.Fprintf(w, "data: %s\n\n", string(event.Data)) // event.Data is []byte
-	if err != nil {
-		return fmt.Errorf("failed to write SSE event data: %w", err)
+
+	// Write event data with proper SSE formatting
+	// Split data by newlines and prefix each line with 'data: '
+	dataStr := string(event.Data)
+	if dataStr != "" {
+		lines := strings.Split(strings.TrimSuffix(dataStr, "\n"), "\n")
+		for _, line := range lines {
+			if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
+				return fmt.Errorf("failed to write SSE event data line: %w", err)
+			}
+		}
+	}
+	// End of event (double newline)
+	if _, err := fmt.Fprint(w, "\n"); err != nil {
+		return fmt.Errorf("failed to write SSE event terminator: %w", err)
 	}
 
-	if flusher != nil {
+	// Try to flush the response if the writer supports it
+	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
 	return nil

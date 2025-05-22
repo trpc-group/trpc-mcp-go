@@ -108,7 +108,7 @@ func TestMockHTTPTransport(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestNewStreamableHTTPClientTransport(t *testing.T) {
+func TestNewClientTransport(t *testing.T) {
 	// Test creating transport object
 	serverURL, _ := url.Parse("http://localhost:3000/mcp")
 	transport := newStreamableHTTPClientTransport(serverURL)

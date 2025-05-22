@@ -9,15 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// MockFlusher is a mock implementation of the http.Flusher interface
-type MockFlusher struct {
-	flushCalled bool
-}
-
-func (f *MockFlusher) Flush() {
-	f.flushCalled = true
-}
-
 func TestSSEResponder_Respond(t *testing.T) {
 	// Create response recorder
 	w := httptest.NewRecorder()
@@ -47,7 +38,6 @@ func TestSSEResponder_Respond(t *testing.T) {
 func TestSSEResponder_SendNotification(t *testing.T) {
 	// Create response recorder
 	w := httptest.NewRecorder()
-	flusher := &MockFlusher{}
 
 	// Create SSE responder
 	responder := newSSEResponder()
@@ -58,12 +48,11 @@ func TestSSEResponder_SendNotification(t *testing.T) {
 	})
 
 	// Send notification
-	eventID, err := responder.sendNotification(w, flusher, testNotification)
+	eventID, err := responder.sendNotification(w, testNotification)
 
 	// Verify no error
 	assert.NoError(t, err)
 	assert.NotEmpty(t, eventID)
-	assert.True(t, flusher.flushCalled)
 
 	// Verify notification content
 	notificationBody := w.Body.String()
@@ -73,10 +62,9 @@ func TestSSEResponder_SendNotification(t *testing.T) {
 	assert.Contains(t, notificationBody, "value1")
 }
 
-func TestSSEResponder_SendNotification_WithResponse(t *testing.T) {
+func TestSSEResponder_WithResponse(t *testing.T) {
 	// Create response recorder
 	w := httptest.NewRecorder()
-	flusher := &MockFlusher{}
 
 	// Create SSE responder
 	responder := newSSEResponder()
@@ -87,7 +75,7 @@ func TestSSEResponder_SendNotification_WithResponse(t *testing.T) {
 	})
 
 	// Send response as notification (should return error)
-	eventID, err := responder.sendNotification(w, flusher, testResponse)
+	eventID, err := responder.sendNotification(w, testResponse)
 
 	// Verify error occurred
 	assert.Error(t, err)
@@ -126,17 +114,15 @@ func TestSSEResponder_ComprehensiveTest(t *testing.T) {
 	// Reset recorder
 	responseBody := w.Body.String()
 	w = httptest.NewRecorder()
-	flusher := &MockFlusher{}
 
 	// Test sending notification
 	testNotification := NewJSONRPCNotificationFromMap("progress", map[string]interface{}{
 		"percent": 50,
 		"message": "halfway done",
 	})
-	notificationEventID, err := responder.sendNotification(w, flusher, testNotification)
+	notificationEventID, err := responder.sendNotification(w, testNotification)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, notificationEventID)
-	assert.True(t, flusher.flushCalled)
 
 	// Verify response and notification contain correct content
 	assert.Contains(t, responseBody, "\"result\":\"success\"")

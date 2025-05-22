@@ -162,7 +162,7 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 	initResult, err := parseInitializeResultFromJSON(rawResp)
 	if err != nil {
 		c.setState(StateDisconnected)
-		return nil, fmt.Errorf("failed to parse initialization response: %v", err)
+		return nil, fmt.Errorf("failed to parse initialization response: %w", err)
 	}
 
 	// Send initialized notification.

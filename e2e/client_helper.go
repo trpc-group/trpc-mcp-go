@@ -268,13 +268,6 @@ func (nc *NotificationCollector) AssertNotificationCount(t *testing.T, method st
 		"Method %s notification count should be %d, actual %d", method, expectedCount, len(notifications))
 }
 
-// GetUnderlyingTransport gets the underlying transport object from the client.
-// Note: This is a simplified implementation for test environment, cannot access underlying client transport directly. Returns nil and reports failure.
-func GetUnderlyingTransport(c *mcp.Client) (interface{}, bool) {
-	// Client does not expose underlying transport object
-	return nil, false
-}
-
 // CreateClient creates a client connection.
 func CreateClient(url string, enableGetSSE bool) (*mcp.Client, error) {
 	// Create client

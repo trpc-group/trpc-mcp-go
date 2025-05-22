@@ -22,7 +22,7 @@ func TestNewLifecycleManager(t *testing.T) {
 	assert.Equal(t, serverInfo, manager.serverInfo)
 }
 
-func TestLifecycleManager_HandleInitialize(t *testing.T) {
+func TestHandleInitialize(t *testing.T) {
 	// Create lifecycle manager
 	serverInfo := Implementation{
 		Name:    "Test-Server",
@@ -112,7 +112,7 @@ func TestLifecycleManager_HandleInitialize(t *testing.T) {
 	}
 }
 
-func TestLifecycleManager_WithCustomCapabilities(t *testing.T) {
+func TestWithCustomCapabilities(t *testing.T) {
 	// Create lifecycle manager
 	serverInfo := Implementation{
 		Name:    "Test-Server",

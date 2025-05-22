@@ -34,10 +34,16 @@ func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	// Return greeting message.
-	log.Printf("Hello, %s! (Session ID: %s)", name, session.GetID()[:8]+"...")
+	log.Printf(
+		"Hello, %s! (Session ID: %s)",
+		name, session.GetID()[:8]+"...",
+	)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Hello, %s! (Session ID: %s)", name, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Hello, %s! (Session ID: %s)",
+				name, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -74,10 +80,16 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	session.SetData("counter", count)
 
 	// Return result.
-	log.Printf("Counter current value: %d (Session ID: %s)", count, session.GetID()[:8]+"...")
+	log.Printf(
+		"Counter current value: %d (Session ID: %s)",
+		count, session.GetID()[:8]+"...",
+	)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Counter current value: %d (Session ID: %s)", count, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Counter current value: %d (Session ID: %s)",
+				count, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -99,7 +111,10 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	if !ok {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Could not get notification sender. This feature requires SSE streaming response support."),
+				mcp.NewTextContent(
+					"Error: Could not get notification sender. " +
+						"This feature requires SSE streaming response support.",
+				),
 			},
 		}, fmt.Errorf("failed to get notification sender from context")
 	}
@@ -156,10 +171,16 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	}
 
 	// Final return result.
-	log.Printf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.GetID()[:8]+"...")
+	log.Printf(
+		"Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)",
+		steps, delayMs, session.GetID()[:8]+"...",
+	)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent(fmt.Sprintf("Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)", steps, delayMs, session.GetID()[:8]+"...")),
+			mcp.NewTextContent(fmt.Sprintf(
+				"Processing complete! %d steps executed, %d ms delay per step. (Session ID: %s)",
+				steps, delayMs, session.GetID()[:8]+"...",
+			)),
 		},
 	}, nil
 }
@@ -168,21 +189,17 @@ func main() {
 	// Print server start message.
 	log.Printf("Starting Stateful SSE No GET SSE mode MCP server...")
 
-	// Create session manager (valid for 1 hour).
-	sessionManager := mcp.NewSessionManager(3600)
-
 	// Create MCP server, configured as:
 	// 1. Stateful mode (using sessionManager)
 	// 2. Use SSE response (streaming)
 	// 3. Do not support independent GET SSE
 	mcpServer := mcp.NewServer(
-		"Stateful-SSE-No-GETSSE-Server",        // Server name
-		"1.0.0",                                // Server version
-		mcp.WithServerAddress(":3005"),         // Server address and port
-		mcp.WithServerPath("/mcp"),             // Set API path
-		mcp.WithSessionManager(sessionManager), // Use session manager (stateful)
-		mcp.WithPostSSEEnabled(true),           // Enable SSE
-		mcp.WithGetSSEEnabled(false),           // Disable GET SSE
+		"Stateful-SSE-No-GETSSE-Server", // Server name
+		"1.0.0",                         // Server version
+		mcp.WithServerAddress(":3005"),  // Server address and port
+		mcp.WithServerPath("/mcp"),      // Set API path
+		mcp.WithPostSSEEnabled(true),    // Enable SSE
+		mcp.WithGetSSEEnabled(false),    // Disable GET SSE
 	)
 
 	// Register a greeting tool.
@@ -237,8 +254,12 @@ func main() {
 			fmt.Fprintf(w, "Session expiration time: %d seconds\n", 3600)
 			fmt.Fprintf(w, "SSE mode: Enabled\n")
 			fmt.Fprintf(w, "GET SSE support: Disabled\n")
-			fmt.Fprintf(w, "Note: The session manager does not provide the function to list all active sessions.\n")
-			fmt.Fprintf(w, "In a real server, it is recommended to implement session monitoring functionality.\n")
+			fmt.Fprintf(w,
+				"Note: The session manager does not provide the function to list all active sessions.\n",
+			)
+			fmt.Fprintf(w,
+				"In a real server, it is recommended to implement session monitoring functionality.\n",
+			)
 		} else {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			fmt.Fprintf(w, "Unsupported method: %s", r.Method)
@@ -257,7 +278,10 @@ func main() {
 
 	// Start the server
 	log.Printf("MCP server started on :3005, access path /mcp")
-	log.Printf("This is a stateful, SSE streaming response server - it assigns session IDs, uses SSE, and does not support GET SSE")
+	log.Printf(
+		"This is a stateful, SSE streaming response server - " +
+			"it assigns session IDs, uses SSE, and does not support GET SSE",
+	)
 	log.Printf("You can view the session manager status at http://localhost:3005/sessions")
 	if err := mcpServer.Start(); err != nil {
 		log.Fatalf("Server startup failed: %v", err)

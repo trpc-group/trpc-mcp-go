@@ -6,21 +6,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNewSessionManager(t *testing.T) {
 	// Create session manager
-	manager := NewSessionManager(3600) // 1 hour expiry time
+	manager := newSessionManager(3600) // 1 hour expiry time
 
 	// Verify object created successfully
 	assert.NotNil(t, manager)
 	assert.Empty(t, manager.getActiveSessions())
 }
 
-func TestSessionManager_CreateSession(t *testing.T) {
+func TestSCreateSession(t *testing.T) {
 	// Create session manager
-	manager := NewSessionManager(3600)
+	manager := newSessionManager(3600)
 
 	// Create session
 	session := manager.createSession()
@@ -36,9 +35,9 @@ func TestSessionManager_CreateSession(t *testing.T) {
 	assert.Contains(t, sessions, session.GetID())
 }
 
-func TestSessionManager_GetSession(t *testing.T) {
+func TestGetSession(t *testing.T) {
 	// Create session manager
-	manager := NewSessionManager(3600)
+	manager := newSessionManager(3600)
 
 	// Test cases
 	testCases := []struct {
@@ -103,9 +102,9 @@ func TestSessionManager_GetSession(t *testing.T) {
 	}
 }
 
-func TestSessionManager_TerminateSession(t *testing.T) {
+func TestTerminateSession(t *testing.T) {
 	// Create session manager
-	manager := NewSessionManager(3600)
+	manager := newSessionManager(3600)
 
 	// Create a session
 	session := manager.createSession()
@@ -131,7 +130,7 @@ func TestSessionManager_TerminateSession(t *testing.T) {
 	assert.Empty(t, sessions)
 }
 
-func TestSession_UpdateActivity(t *testing.T) {
+func TestUpdateActivity(t *testing.T) {
 	// Create session
 	session := newSession()
 	initialTime := session.GetLastActivity()
@@ -144,36 +143,6 @@ func TestSession_UpdateActivity(t *testing.T) {
 
 	// Verify activity time has been updated
 	assert.True(t, session.GetLastActivity().After(initialTime))
-}
-
-func TestSession_DataOperations(t *testing.T) {
-	// Create session
-	session := newSession()
-
-	// Test storing and retrieving data
-	key := "testKey"
-	value := "testValue"
-
-	// Verify data doesn't exist initially
-	_, exists := session.GetData(key)
-	assert.False(t, exists)
-
-	// Set data
-	session.SetData(key, value)
-
-	// Retrieve data
-	retrievedValue, exists := session.GetData(key)
-	require.True(t, exists)
-	assert.Equal(t, value, retrievedValue)
-
-	// Update data
-	newValue := "newValue"
-	session.SetData(key, newValue)
-
-	// Retrieve updated data
-	retrievedValue, exists = session.GetData(key)
-	require.True(t, exists)
-	assert.Equal(t, newValue, retrievedValue)
 }
 
 func TestSessionContext(t *testing.T) {
