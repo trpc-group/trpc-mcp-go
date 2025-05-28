@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -17,19 +23,22 @@ type serverProvider interface {
 // toolManager is responsible for managing MCP tools
 type toolManager struct {
 	// Registered tools
-	tools map[string]*Tool
+	tools map[string]*registeredTool
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
 
 	// Server provider for injecting server instance into context
 	serverProvider serverProvider
+
+	// Track insertion order of tools
+	toolsOrder []string
 }
 
 // newToolManager creates a tool manager
 func newToolManager() *toolManager {
 	return &toolManager{
-		tools: make(map[string]*Tool),
+		tools: make(map[string]*registeredTool),
 	}
 }
 
@@ -40,20 +49,23 @@ func (m *toolManager) withServerProvider(provider serverProvider) *toolManager {
 }
 
 // registerTool registers a tool
-func (m *toolManager) registerTool(tool *Tool) error {
+func (m *toolManager) registerTool(tool *Tool, handler toolHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if tool.Name == "" {
-		return errors.ErrEmptyToolName
+	if tool == nil || tool.Name == "" {
+		return
 	}
 
-	if _, exists := m.tools[tool.Name]; exists {
-		return fmt.Errorf("%w: %s", errors.ErrToolAlreadyRegistered, tool.Name)
+	if _, exists := m.tools[tool.Name]; !exists {
+		// Only add to order slice if it's a new tool
+		m.toolsOrder = append(m.toolsOrder, tool.Name)
 	}
 
-	m.tools[tool.Name] = tool
-	return nil
+	m.tools[tool.Name] = &registeredTool{
+		Tool:    tool,
+		Handler: handler,
+	}
 }
 
 // getTool retrieves a tool by name
@@ -61,8 +73,11 @@ func (m *toolManager) getTool(name string) (*Tool, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	tool, ok := m.tools[name]
-	return tool, ok
+	registeredTool, ok := m.tools[name]
+	if !ok {
+		return nil, false
+	}
+	return registeredTool.Tool, true
 }
 
 // getTools gets all registered tools
@@ -71,8 +86,10 @@ func (m *toolManager) getTools(protocolVersion string) []*Tool {
 	defer m.mu.RUnlock()
 
 	tools := make([]*Tool, 0, len(m.tools))
-	for _, toolPtr := range m.tools {
-		tools = append(tools, toolPtr)
+	for _, registeredTool := range m.tools {
+		if registeredTool != nil && registeredTool.Tool != nil {
+			tools = append(tools, registeredTool.Tool)
+		}
 	}
 
 	return tools
@@ -127,7 +144,7 @@ func (m *toolManager) handleCallTool(
 	}
 
 	// Get tool
-	tool, ok := m.getTool(toolName)
+	registeredTool, ok := m.tools[toolName]
 	if !ok {
 		return newJSONRPCErrorResponse(
 			req.ID,
@@ -173,9 +190,9 @@ func (m *toolManager) handleCallTool(
 	}
 
 	// Execute tool
-	result, err := tool.ExecuteFunc(ctx, toolReq)
+	result, err := registeredTool.Handler(ctx, toolReq)
 	if err != nil {
-		errMsg := fmt.Sprintf("tool execution failed (tool: %s): %v", tool.Name, err)
+		errMsg := fmt.Sprintf("tool execution failed (tool: %s): %v", registeredTool.Tool.Name, err)
 		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, errMsg, nil), nil
 	}
 

@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -24,7 +30,7 @@ import (
 // enable or disable resource functionality.
 type resourceManager struct {
 	// Resource mapping table
-	resources map[string]*Resource
+	resources map[string]*registeredResource
 
 	// Resource template mapping table
 	templates map[string]*ResourceTemplate
@@ -37,6 +43,9 @@ type resourceManager struct {
 
 	// Subscriber mutex
 	subMu sync.RWMutex
+
+	// Order of resources
+	resourcesOrder []string
 }
 
 // newResourceManager creates a new resource manager
@@ -45,35 +54,30 @@ type resourceManager struct {
 // it is only enabled when the first resource is added.
 func newResourceManager() *resourceManager {
 	return &resourceManager{
-		resources:   make(map[string]*Resource),
+		resources:   make(map[string]*registeredResource),
 		templates:   make(map[string]*ResourceTemplate),
 		subscribers: make(map[string][]chan *JSONRPCNotification),
 	}
 }
 
 // registerResource registers a resource
-func (m *resourceManager) registerResource(resource *Resource) error {
+func (m *resourceManager) registerResource(resource *Resource, handler resourceHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if resource == nil {
-		return fmt.Errorf("resource cannot be nil")
+	if resource == nil || resource.URI == "" {
+		return
 	}
 
-	if resource.Name == "" {
-		return fmt.Errorf("resource name cannot be empty")
+	if _, exists := m.resources[resource.URI]; !exists {
+		// Only add to order slice if it's a new resource
+		m.resourcesOrder = append(m.resourcesOrder, resource.URI)
 	}
 
-	if resource.URI == "" {
-		return errors.ErrEmptyResourceURI
+	m.resources[resource.URI] = &registeredResource{
+		Resource: resource,
+		Handler:  handler,
 	}
-
-	if _, exists := m.resources[resource.URI]; exists {
-		return fmt.Errorf("%w: resource %s already exists", errors.ErrInvalidParams, resource.URI)
-	}
-
-	m.resources[resource.URI] = resource
-	return nil
 }
 
 // registerTemplate registers a resource template
@@ -106,8 +110,11 @@ func (m *resourceManager) getResource(uri string) (*Resource, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	resource, exists := m.resources[uri]
-	return resource, exists
+	registeredResource, exists := m.resources[uri]
+	if !exists {
+		return nil, false
+	}
+	return registeredResource.Resource, true
 }
 
 // getResources retrieves all resources
@@ -116,8 +123,8 @@ func (m *resourceManager) getResources() []*Resource {
 	defer m.mu.RUnlock()
 
 	resources := make([]*Resource, 0, len(m.resources))
-	for _, resource := range m.resources {
-		resources = append(resources, resource)
+	for _, registeredResource := range m.resources {
+		resources = append(resources, registeredResource.Resource)
 	}
 	return resources
 }
@@ -225,7 +232,7 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 	}
 
 	// Get resource
-	resource, exists := m.getResource(uri)
+	registeredResource, exists := m.resources[uri]
 	if !exists {
 		return newJSONRPCErrorResponse(
 			req.ID,
@@ -235,19 +242,25 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 		), nil
 	}
 
-	// Create a dummy text content for now
-	// In a real implementation, you would retrieve actual content
-	textContent := TextResourceContents{
-		URI:      resource.URI,
-		MIMEType: resource.MimeType,
-		Text:     fmt.Sprintf("Content for resource: %s", resource.Name),
+	// Create resource read request
+	readReq := &ReadResourceRequest{
+		Params: struct {
+			URI       string                 `json:"uri"`
+			Arguments map[string]interface{} `json:"arguments,omitempty"`
+		}{
+			URI: uri,
+		},
 	}
 
-	var contents []ResourceContents
-	contents = append(contents, textContent)
+	// Call resource handler
+	content, err := registeredResource.Handler(ctx, readReq)
+	if err != nil {
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
+	}
 
-	result := &ReadResourceResult{
-		Contents: contents,
+	// Create result
+	result := ReadResourceResult{
+		Contents: []ResourceContents{content},
 	}
 
 	return result, nil

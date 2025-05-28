@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package scenarios
 
 import (
@@ -5,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"trpc.group/trpc-go/trpc-mcp-go/e2e"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"trpc.group/trpc-go/trpc-mcp-go/e2e"
 )
 
 // TestSessionCreation tests session creation.

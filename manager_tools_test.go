@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -6,7 +12,6 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // NewMockTool creates a new mock tool
@@ -35,12 +40,7 @@ func NewMockTool(name, description string, toolSchema map[string]interface{}) *T
 		}
 	}
 
-	return NewTool(name,
-		func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
-			return NewTextResult("Mock tool execution result"), nil
-		},
-		opts...,
-	)
+	return NewTool(name, opts...)
 }
 
 func TestNewToolManager(t *testing.T) {
@@ -69,20 +69,23 @@ func TestToolManager_RegisterTool(t *testing.T) {
 	tool2 := NewMockTool("test-tool-2", "Test Tool 2", nil)
 
 	// Test registering a tool
-	err := manager.registerTool(tool1)
-	assert.NoError(t, err)
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 	assert.Len(t, manager.tools, 1)
 	assert.Contains(t, manager.tools, "test-tool-1")
 
 	// Test registering another tool
-	err = manager.registerTool(tool2)
-	assert.NoError(t, err)
+	manager.registerTool(tool2, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 	assert.Len(t, manager.tools, 2)
 	assert.Contains(t, manager.tools, "test-tool-2")
 
 	// Test duplicate registration
-	err = manager.registerTool(tool1)
-	assert.Error(t, err)
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 	assert.Len(t, manager.tools, 2)
 }
 
@@ -93,8 +96,9 @@ func TestToolManager_GetTool(t *testing.T) {
 	// Create and register tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
 
-	err := manager.registerTool(tool)
-	require.NoError(t, err)
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 
 	// Test getting an existing tool
 	result, exists := manager.getTool("test-tool")
@@ -122,8 +126,12 @@ func TestToolManager_GetTools(t *testing.T) {
 
 	tool2 := NewMockTool("tool2", "Tool 2", nil)
 
-	manager.registerTool(tool1)
-	manager.registerTool(tool2)
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+	manager.registerTool(tool2, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 
 	// Test getting tool list
 	tools = manager.getTools("")
@@ -158,8 +166,9 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	// Create and register tool
 	tool := NewMockTool("test-exec-tool", "Test Execution Tool", map[string]interface{}{})
 
-	err := manager.registerTool(tool)
-	require.NoError(t, err)
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
 
 	// Test executing the tool
 	ctx := context.Background()

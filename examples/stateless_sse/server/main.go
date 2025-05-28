@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package main
 
 import (
@@ -96,6 +102,25 @@ func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*m
 	}, nil
 }
 
+// handleGreet handles the simple greeting tool.
+func handleGreet(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := "World"
+	if nameArg, ok := req.Params.Arguments["name"]; ok {
+		if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+			name = nameStr
+		}
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf(
+				"Hello, %s! This is a greeting from the stateless SSE server.",
+				name,
+			)),
+		},
+	}, nil
+}
+
 func main() {
 	log.Printf("Starting Stateless SSE No GET SSE mode MCP server...")
 
@@ -115,35 +140,14 @@ func main() {
 
 	// Register a simple greeting tool.
 	greetTool := mcp.NewTool("greet",
-		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			name := "World"
-			if nameArg, ok := req.Params.Arguments["name"]; ok {
-				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
-					name = nameStr
-				}
-			}
-
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					mcp.NewTextContent(fmt.Sprintf(
-						"Hello, %s! This is a greeting from the stateless SSE server.",
-						name,
-					)),
-				},
-			}, nil
-		},
 		mcp.WithDescription("A simple greeting tool."),
-		mcp.WithString("name", mcp.Description("Name to greet.")),
-	)
+		mcp.WithString("name", mcp.Description("Name to greet.")))
 
-	if err := mcpServer.RegisterTool(greetTool); err != nil {
-		log.Fatalf("Failed to register tool: %v", err)
-	}
+	mcpServer.RegisterTool(greetTool, handleGreet)
 	log.Printf("Registered greet tool: greet")
 
 	// Register a multi-stage greeting tool (sends multiple notifications via SSE).
 	multiStageGreetingTool := mcp.NewTool("multi-stage-greeting",
-		handleMultiStageGreeting,
 		mcp.WithDescription("Send multi-stage greeting via SSE."),
 		mcp.WithString("name", mcp.Description("Name to greet.")),
 		mcp.WithNumber("stages",
@@ -152,9 +156,7 @@ func main() {
 		),
 	)
 
-	if err := mcpServer.RegisterTool(multiStageGreetingTool); err != nil {
-		log.Fatalf("Failed to register multi-stage greeting tool: %v", err)
-	}
+	mcpServer.RegisterTool(multiStageGreetingTool, handleMultiStageGreeting)
 	log.Printf("Registered multi-stage greeting tool: multi-stage-greeting")
 
 	// Set up a simple health check route.

@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -108,13 +114,22 @@ func TestMCPHandler_UnknownMethod(t *testing.T) {
 	assert.Equal(t, "method not found", errorResp.Error.Message)
 }
 
+// handleMockTool handles the mock tool
+func handleMockTool(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+	return &CallToolResult{
+		Content: []Content{
+			NewTextContent("Mock tool response"),
+		},
+	}, nil
+}
+
 func TestMCPHandler_ToolsList(t *testing.T) {
 	// Create handler
 	handler := newMCPHandler()
 
 	// Register test tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
-	handler.toolManager.registerTool(tool)
+	handler.toolManager.registerTool(tool, handleMockTool)
 
 	// Create session and set protocol version
 	session := newSession()
@@ -170,7 +185,7 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 
 	// Register test tool
 	tool := NewMockTool("test-tool", "Test Tool", map[string]interface{}{})
-	handler.toolManager.registerTool(tool)
+	handler.toolManager.registerTool(tool, handleMockTool)
 
 	// Create session
 	session := newSession()

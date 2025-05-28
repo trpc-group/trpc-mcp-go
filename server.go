@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -220,29 +226,24 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(s.config.addr, s.Handler())
 }
 
-// RegisterTool registers a tool
-func (s *Server) RegisterTool(tool *Tool) error {
-	return s.toolManager.registerTool(tool)
+// RegisterTool registers a tool with its handler function
+func (s *Server) RegisterTool(tool *Tool, handler toolHandler) {
+	s.toolManager.registerTool(tool, handler)
 }
 
-// RegisterResource registers a resource
-//
-// The resource feature is automatically enabled when the first resource is registered,
-// no additional configuration is needed.
-// When the resource feature is enabled but no resources are registered, client requests
-// will return an empty list rather than an error.
-func (s *Server) RegisterResource(resource *Resource) error {
-	return s.resourceManager.registerResource(resource)
+// RegisterResource registers a resource with its handler function
+func (s *Server) RegisterResource(resource *Resource, handler resourceHandler) {
+	s.resourceManager.registerResource(resource, handler)
 }
 
-// RegisterPrompt registers a prompt
+// RegisterPrompt registers a prompt with its handler function
 //
 // The prompt feature is automatically enabled when the first prompt is registered,
 // no additional configuration is needed.
 // When the prompt feature is enabled but no prompts are registered, client requests
 // will return an empty list rather than an error.
-func (s *Server) RegisterPrompt(prompt *Prompt) error {
-	return s.promptManager.registerPrompt(prompt)
+func (s *Server) RegisterPrompt(prompt *Prompt, handler promptHandler) {
+	s.promptManager.registerPrompt(prompt, handler)
 }
 
 // SendNotification sends a notification to a specific session

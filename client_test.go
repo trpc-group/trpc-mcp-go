@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -14,19 +20,21 @@ type TestTool struct {
 	*Tool
 }
 
+// handleTestTool handles the test tool
+func handleTestTool(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+	name := "World"
+	if nameArg, ok := req.Params.Arguments["name"]; ok {
+		if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+			name = nameStr
+		}
+	}
+
+	return NewTextResult("Hello, " + name + "!"), nil
+}
+
 // NewTestTool creates a new test tool
 func NewTestTool() *Tool {
 	return NewTool("test-tool",
-		func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
-			name := "World"
-			if nameArg, ok := req.Params.Arguments["name"]; ok {
-				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
-					name = nameStr
-				}
-			}
-
-			return NewTextResult("Hello, " + name + "!"), nil
-		},
 		WithDescription("Test Tool"),
 		WithString("name",
 			Description("Name to greet"),
@@ -45,8 +53,7 @@ func setupTestEnvironment(t *testing.T) (*Client, *httptest.Server, func()) {
 
 	// Register test tool
 	tool := NewTestTool()
-	err := mcpServer.RegisterTool(tool)
-	require.NoError(t, err)
+	mcpServer.RegisterTool(tool, handleTestTool)
 
 	// Create HTTP test server
 	httpServer := httptest.NewServer(mcpServer.HTTPHandler())

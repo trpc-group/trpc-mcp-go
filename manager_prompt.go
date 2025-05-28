@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -23,10 +29,13 @@ import (
 // enable or disable prompt functionality.
 type promptManager struct {
 	// Prompt mapping table
-	prompts map[string]*Prompt
+	prompts map[string]*registeredPrompt
 
 	// Mutex
 	mu sync.RWMutex
+
+	// Track insertion order of prompts
+	promptsOrder []string
 }
 
 // newPromptManager creates a new prompt manager
@@ -35,29 +44,28 @@ type promptManager struct {
 // it is only enabled when the first prompt is added.
 func newPromptManager() *promptManager {
 	return &promptManager{
-		prompts: make(map[string]*Prompt),
+		prompts: make(map[string]*registeredPrompt),
 	}
 }
 
 // registerPrompt registers a prompt
-func (m *promptManager) registerPrompt(prompt *Prompt) error {
+func (m *promptManager) registerPrompt(prompt *Prompt, handler promptHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if prompt == nil {
-		return fmt.Errorf("prompt cannot be nil")
+	if prompt == nil || prompt.Name == "" {
+		return
 	}
 
-	if prompt.Name == "" {
-		return errors.ErrEmptyPromptName
+	if _, exists := m.prompts[prompt.Name]; !exists {
+		// Only add to order slice if it's a new prompt
+		m.promptsOrder = append(m.promptsOrder, prompt.Name)
 	}
 
-	if _, exists := m.prompts[prompt.Name]; exists {
-		return fmt.Errorf("%w: %s", errors.ErrInvalidParams, fmt.Sprintf("prompt %s already exists", prompt.Name))
+	m.prompts[prompt.Name] = &registeredPrompt{
+		Prompt:  prompt,
+		Handler: handler,
 	}
-
-	m.prompts[prompt.Name] = prompt
-	return nil
 }
 
 // getPrompt retrieves a prompt
@@ -65,8 +73,11 @@ func (m *promptManager) getPrompt(name string) (*Prompt, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	prompt, exists := m.prompts[name]
-	return prompt, exists
+	registeredPrompt, exists := m.prompts[name]
+	if !exists {
+		return nil, false
+	}
+	return registeredPrompt.Prompt, true
 }
 
 // getPrompts retrieves all prompts
@@ -75,8 +86,8 @@ func (m *promptManager) getPrompts() []*Prompt {
 	defer m.mu.RUnlock()
 
 	prompts := make([]*Prompt, 0, len(m.prompts))
-	for _, prompt := range m.prompts {
-		prompts = append(prompts, prompt)
+	for _, registeredPrompt := range m.prompts {
+		prompts = append(prompts, registeredPrompt.Prompt)
 	}
 	return prompts
 }
@@ -149,7 +160,7 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 	if !ok {
 		return errResp, nil
 	}
-	prompt, exists := m.getPrompt(name)
+	registeredPrompt, exists := m.prompts[name]
 	if !exists {
 		return newJSONRPCErrorResponse(
 			req.ID,
@@ -158,12 +169,41 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 			nil,
 		), nil
 	}
+
+	// Create prompt get request
+	getReq := &GetPromptRequest{
+		Params: struct {
+			Name      string            `json:"name"`
+			Arguments map[string]string `json:"arguments,omitempty"`
+		}{
+			Name:      name,
+			Arguments: make(map[string]string),
+		},
+	}
+
+	// Convert arguments to string map
+	for k, v := range arguments {
+		if str, ok := v.(string); ok {
+			getReq.Params.Arguments[k] = str
+		}
+	}
+
+	// Call prompt handler if available
+	if registeredPrompt.Handler != nil {
+		result, err := registeredPrompt.Handler(ctx, getReq)
+		if err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
+		}
+		return result, nil
+	}
+
+	// Use default implementation if no handler is provided
 	if arguments == nil {
 		arguments = make(map[string]interface{})
 	}
-	messages := buildPromptMessages(prompt, arguments)
+	messages := buildPromptMessages(registeredPrompt.Prompt, arguments)
 	result := &GetPromptResult{
-		Description: prompt.Description,
+		Description: registeredPrompt.Prompt.Description,
 		Messages:    messages,
 	}
 	return result, nil

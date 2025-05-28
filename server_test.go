@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -79,15 +85,18 @@ func TestServer_RegisterTool(t *testing.T) {
 
 	// Register tool
 	tool := NewTool("mock-tool",
-		func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
-			return NewTextResult("Mock Response"), nil
-		},
 		WithDescription("Mock Tool"),
 	)
-	err := server.RegisterTool(tool)
+	server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock Response"), nil
+	})
 
-	// Verify registration result
-	assert.NoError(t, err)
+	// Verify tool was registered
+	registeredTool, exists := server.toolManager.getTool("mock-tool")
+	assert.True(t, exists)
+	assert.NotNil(t, registeredTool)
+	assert.Equal(t, "mock-tool", registeredTool.Name)
+	assert.Equal(t, "Mock Tool", registeredTool.Description)
 }
 
 func TestServer_HTTPHandler(t *testing.T) {

@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package main
 
 import (
@@ -552,29 +558,25 @@ func main() {
 	)
 
 	// Register a greeting tool
-	greetTool := mcp.NewTool("greet", handleGreet,
+	greetTool := mcp.NewTool("greet",
 		mcp.WithDescription("A simple greeting tool"),
 		mcp.WithString("name", mcp.Description("Name to greet")))
 
-	if err := mcpServer.RegisterTool(greetTool); err != nil {
-		log.Fatalf("Register tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(greetTool, handleGreet)
 	log.Printf("Registered greeting tool: greet")
 
 	// Register counter tool
-	counterTool := mcp.NewTool("counter", handleCounter,
+	counterTool := mcp.NewTool("counter",
 		mcp.WithDescription("A session counter tool, demonstrating stateful session"),
 		mcp.WithNumber("increment",
 			mcp.Description("Counter increment"),
 			mcp.Default(1)))
 
-	if err := mcpServer.RegisterTool(counterTool); err != nil {
-		log.Fatalf("Register counter tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(counterTool, handleCounter)
 	log.Printf("Registered counter tool: counter")
 
 	// Register delayed response tool
-	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
+	delayedTool := mcp.NewTool("delayedResponse",
 		mcp.WithDescription("A delayed response tool, demonstrating SSE streaming response advantage"),
 		mcp.WithNumber("steps",
 			mcp.Description("Processing steps"),
@@ -583,13 +585,11 @@ func main() {
 			mcp.Description("Milliseconds per step"),
 			mcp.Default(500)))
 
-	if err := mcpServer.RegisterTool(delayedTool); err != nil {
-		log.Fatalf("Register delayed response tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(delayedTool, handleDelayedResponse)
 	log.Printf("Registered delayed response tool: delayedResponse")
 
 	// Register notification demo tool
-	notifyTool := mcp.NewTool("sendNotification", handleNotification,
+	notifyTool := mcp.NewTool("sendNotification",
 		mcp.WithDescription("A notification demo tool, sending asynchronous notification message"),
 		mcp.WithString("message",
 			mcp.Description("Notification message to send"),
@@ -598,31 +598,25 @@ func main() {
 			mcp.Description("Delay seconds before sending notification"),
 			mcp.Default(2)))
 
-	if err := mcpServer.RegisterTool(notifyTool); err != nil {
-		log.Fatalf("Register notification tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(notifyTool, handleNotification)
 	log.Printf("Registered notification tool: sendNotification")
 
 	// Register chat room tool
-	chatJoinTool := mcp.NewTool("chatJoin", handleChatJoin,
+	chatJoinTool := mcp.NewTool("chatJoin",
 		mcp.WithDescription("Join chat room"),
 		mcp.WithString("userName",
 			mcp.Description("Chat room username")))
 
-	if err := mcpServer.RegisterTool(chatJoinTool); err != nil {
-		log.Fatalf("Register chat join tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(chatJoinTool, handleChatJoin)
 	log.Printf("Registered chat join tool: chatJoin")
 
 	// Register send chat message tool
-	chatSendTool := mcp.NewTool("chatSend", handleChatSend,
+	chatSendTool := mcp.NewTool("chatSend",
 		mcp.WithDescription("Send chat message"),
 		mcp.WithString("message",
 			mcp.Description("Chat message content")))
 
-	if err := mcpServer.RegisterTool(chatSendTool); err != nil {
-		log.Fatalf("Register chat send tool failed: %v", err)
-	}
+	mcpServer.RegisterTool(chatSendTool, handleChatSend)
 	log.Printf("Registered chat send tool: chatSend")
 
 	// Set a simple health check route

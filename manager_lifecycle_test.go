@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -112,6 +118,19 @@ func TestHandleInitialize(t *testing.T) {
 	}
 }
 
+// handleDummyPrompt handles the dummy prompt
+func handleDummyPrompt(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error) {
+	return &GetPromptResult{
+		Description: "Dummy prompt response",
+		Messages: []PromptMessage{
+			{
+				Role:    RoleAssistant,
+				Content: NewTextContent("Dummy prompt response"),
+			},
+		},
+	}, nil
+}
+
 func TestWithCustomCapabilities(t *testing.T) {
 	// Create lifecycle manager
 	serverInfo := Implementation{
@@ -123,9 +142,9 @@ func TestWithCustomCapabilities(t *testing.T) {
 
 	// Create and set prompt manager with a dummy prompt
 	promptMgr := newPromptManager()
-	dummyPrompt := &Prompt{Name: "test-prompt"} // Create a dummy prompt
-	promptMgr.registerPrompt(dummyPrompt)       // Register the dummy prompt
-	manager.withPromptManager(promptMgr)        // Set the prompt manager
+	dummyPrompt := &Prompt{Name: "test-prompt"}              // Create a dummy prompt
+	promptMgr.registerPrompt(dummyPrompt, handleDummyPrompt) // Register the dummy prompt
+	manager.withPromptManager(promptMgr)                     // Set the prompt manager
 
 	// Skip this test, we will update it after fixing the capabilities conversion logic
 

@@ -1,7 +1,14 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -42,12 +49,18 @@ func registerExampleResources(s *mcp.Server) {
 		Description: "Example text resource",
 		MimeType:    "text/plain",
 	}
-	err := s.RegisterResource(textResource)
-	if err != nil {
-		log.Printf("Error registering text resource: %v\n", err)
-	} else {
-		log.Printf("Registered text resource: %s\n", textResource.Name)
+
+	// Define text resource handler
+	textHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
+		return mcp.TextResourceContents{
+			URI:      textResource.URI,
+			MIMEType: textResource.MimeType,
+			Text:     "This is an example text resource content.",
+		}, nil
 	}
+
+	s.RegisterResource(textResource, textHandler)
+	log.Printf("Registered text resource: %s", textResource.Name)
 
 	// Register image resource.
 	imageResource := &mcp.Resource{
@@ -56,12 +69,20 @@ func registerExampleResources(s *mcp.Server) {
 		Description: "Example image resource",
 		MimeType:    "image/png",
 	}
-	err = s.RegisterResource(imageResource)
-	if err != nil {
-		log.Printf("Error registering image resource: %v\n", err)
-	} else {
-		log.Printf("Registered image resource: %s\n", imageResource.Name)
+
+	// Define image resource handler
+	imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
+		// In a real application, you would read the actual image data
+		// For this example, we'll return a placeholder base64-encoded image
+		return mcp.BlobResourceContents{
+			URI:      imageResource.URI,
+			MIMEType: imageResource.MimeType,
+			Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+		}, nil
 	}
+
+	s.RegisterResource(imageResource, imageHandler)
+	log.Printf("Registered image resource: %s", imageResource.Name)
 }
 
 // Register example prompts.
@@ -78,12 +99,26 @@ func registerExamplePrompts(s *mcp.Server) {
 			},
 		},
 	}
-	err := s.RegisterPrompt(basicPrompt)
-	if err != nil {
-		log.Printf("Error registering basic prompt: %v\n", err)
-	} else {
-		log.Printf("Registered basic prompt: %s\n", basicPrompt.Name)
+
+	// Define basic prompt handler
+	basicPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		name := req.Params.Arguments["name"]
+		return &mcp.GetPromptResult{
+			Description: basicPrompt.Description,
+			Messages: []mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Hello, %s! This is a basic prompt example.", name),
+					},
+				},
+			},
+		}, nil
 	}
+
+	s.RegisterPrompt(basicPrompt, basicPromptHandler)
+	log.Printf("Registered basic prompt: %s", basicPrompt.Name)
 
 	// Register advanced prompt.
 	advancedPrompt := &mcp.Prompt{
@@ -102,18 +137,40 @@ func registerExamplePrompts(s *mcp.Server) {
 			},
 		},
 	}
-	err = s.RegisterPrompt(advancedPrompt)
-	if err != nil {
-		log.Printf("Error registering advanced prompt: %v\n", err)
-	} else {
-		log.Printf("Registered advanced prompt: %s\n", advancedPrompt.Name)
+
+	// Define advanced prompt handler
+	advancedPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		topic := req.Params.Arguments["topic"]
+		length := req.Params.Arguments["length"]
+		if length == "" {
+			length = "medium"
+		}
+
+		return &mcp.GetPromptResult{
+			Description: advancedPrompt.Description,
+			Messages: []mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: mcp.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("Let's discuss about %s. Please provide a %s length response.", topic, length),
+					},
+				},
+			},
+		}, nil
 	}
+
+	s.RegisterPrompt(advancedPrompt, advancedPromptHandler)
+	log.Printf("Registered advanced prompt: %s", advancedPrompt.Name)
 }
 
 // Register example tools.
 func registerExampleTools(s *mcp.Server) {
 	// Register a simple greeting tool.
-	greetTool := mcp.NewTool("greet", func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	greetTool := mcp.NewTool("greet", mcp.WithDescription("Greeting tool"))
+
+	// Define the handler function
+	greetHandler := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Extract name from parameters.
 		name, _ := req.Params.Arguments["name"].(string)
 		if name == "" {
@@ -123,12 +180,8 @@ func registerExampleTools(s *mcp.Server) {
 		// Create response content.
 		greeting := "Hello, " + name + "! Welcome to the resource and prompt example server."
 		return mcp.NewTextResult(greeting), nil
-	}, mcp.WithDescription("Greeting tool"))
-
-	err := s.RegisterTool(greetTool)
-	if err != nil {
-		log.Printf("Error registering greeting tool: %v\n", err)
-	} else {
-		log.Printf("Registered greeting tool: %s\n", greetTool.Name)
 	}
+
+	s.RegisterTool(greetTool, greetHandler)
+	log.Printf("Registered greeting tool: %s", greetTool.Name)
 }

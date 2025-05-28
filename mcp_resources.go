@@ -1,4 +1,23 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
+
+import (
+	"context"
+)
+
+// resourceHandler defines the function type for handling resource reading
+type resourceHandler func(ctx context.Context, req *ReadResourceRequest) (ResourceContents, error)
+
+// registeredResource combines a Resource with its handler function
+type registeredResource struct {
+	Resource *Resource
+	Handler  resourceHandler
+}
 
 // Resource represents a known resource that the server can read
 type Resource struct {

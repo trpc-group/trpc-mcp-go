@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package main
 
 import (
@@ -203,29 +209,25 @@ func main() {
 	)
 
 	// Register a greeting tool.
-	greetTool := mcp.NewTool("greet", handleGreet,
+	greetTool := mcp.NewTool("greet",
 		mcp.WithDescription("A simple greeting tool"),
 		mcp.WithString("name", mcp.Description("Name to greet")))
 
-	if err := mcpServer.RegisterTool(greetTool); err != nil {
-		log.Fatalf("Failed to register tool: %v", err)
-	}
+	mcpServer.RegisterTool(greetTool, handleGreet)
 	log.Printf("Registered greeting tool: greet")
 
 	// Register counter tool
-	counterTool := mcp.NewTool("counter", handleCounter,
+	counterTool := mcp.NewTool("counter",
 		mcp.WithDescription("A session counter tool to demonstrate stateful sessions"),
 		mcp.WithNumber("increment",
 			mcp.Description("Counter increment"),
 			mcp.Default(1)))
 
-	if err := mcpServer.RegisterTool(counterTool); err != nil {
-		log.Fatalf("Failed to register counter tool: %v", err)
-	}
+	mcpServer.RegisterTool(counterTool, handleCounter)
 	log.Printf("Registered counter tool: counter")
 
 	// Register delayed response tool
-	delayedTool := mcp.NewTool("delayedResponse", handleDelayedResponse,
+	delayedTool := mcp.NewTool("delayedResponse",
 		mcp.WithDescription("A delayed response tool to demonstrate the advantages of SSE streaming responses"),
 		mcp.WithNumber("steps",
 			mcp.Description("Number of processing steps"),
@@ -234,9 +236,7 @@ func main() {
 			mcp.Description("Delay in milliseconds per step"),
 			mcp.Default(500)))
 
-	if err := mcpServer.RegisterTool(delayedTool); err != nil {
-		log.Fatalf("Failed to register delayed response tool: %v", err)
-	}
+	mcpServer.RegisterTool(delayedTool, handleDelayedResponse)
 	log.Printf("Registered delayed response tool: delayedResponse")
 
 	// Set up a simple health check route

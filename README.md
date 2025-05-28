@@ -39,6 +39,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -49,26 +50,52 @@ import (
 
 func main() {
 	// Print startup message.
-	log.Printf("Starting example server...")
+	log.Printf("Starting basic example server...")
 
 	// Create server using the new API style:
 	// - First two required parameters: server name and version
 	// - WithServerAddress sets the address to listen on (default: "localhost:3000")
-	// - WithPathPrefix sets the API path prefix
+	// - WithServerPath sets the API path prefix
 	// - WithServerLogger injects logger at the server level
 	mcpServer := mcp.NewServer(
-		"Example-Server",
-		"1.0.0",
+		"Basic-Example-Server",
+		"0.1.0",
 		mcp.WithServerAddress(":3000"),
-		mcp.WithPathPrefix("/mcp"),
+		mcp.WithServerPath("/mcp"),
 		mcp.WithServerLogger(mcp.GetDefaultLogger()),
 	)
 
-	// Register a tool (defined elsewhere)
-	if err := mcpServer.RegisterTool(NewGreetTool()); err != nil {
-		log.Fatalf("Failed to register tool: %v", err)
+	// Register basic greet tool.
+	greetTool := mcp.NewTool("greet",
+		mcp.WithDescription("A simple greeting tool."),
+		mcp.WithString("name", mcp.Description("Name to greet.")))
+
+	greetHandler := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check if the context is cancelled.
+		select {
+		case <-ctx.Done():
+			return mcp.NewErrorResult("Request cancelled"), ctx.Err()
+		default:
+			// Continue execution.
+		}
+
+		// Extract name parameter.
+		name := "World"
+		if nameArg, ok := req.Params.Arguments["name"]; ok {
+			if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+				name = nameStr
+			}
+		}
+
+		// Create greeting message.
+		greeting := fmt.Sprintf("Hello, %s!", name)
+
+		// Create tool result.
+		return mcp.NewTextResult(greeting), nil
 	}
-	log.Printf("Registered tool: greet")
+
+	mcpServer.RegisterTool(greetTool, greetHandler)
+	log.Printf("Registered basic greet tool: greet")
 
 	// Set up a graceful shutdown.
 	stop := make(chan os.Signal, 1)
@@ -88,43 +115,6 @@ func main() {
 }
 ```
 
-### Tool Definition Example
-
-```go
-// NewGreetTool creates a simple greeting tool.
-func NewGreetTool() *mcp.Tool {
-	return mcp.NewTool("greet",
-		func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Check if the context is cancelled.
-			select {
-			case <-ctx.Done():
-				return mcp.NewErrorResult("Request cancelled"), ctx.Err()
-			default:
-				// Continue execution.
-			}
-
-			// Extract name parameter.
-			name := "World"
-			if nameArg, ok := req.Params.Arguments["name"]; ok {
-				if nameStr, ok := nameArg.(string); ok && nameStr != "" {
-					name = nameStr
-				}
-			}
-
-			// Create greeting message.
-			greeting := fmt.Sprintf("Hello, %s!", name)
-
-			// Create tool result.
-			return mcp.NewTextResult(greeting), nil
-		},
-		mcp.WithDescription("A simple greeting tool that returns a greeting message."),
-		mcp.WithString("name",
-			mcp.Description("The name to greet."),
-		),
-	)
-}
-```
-
 ### Client Example
 
 ```go
@@ -132,22 +122,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
 	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
-func main() {
-	// Initialize log.
-	log.Println("Starting example client...")
-
-	// Create context.
-	ctx := context.Background()
-
-	// Create client.
+// initializeClient initializes the MCP client with server connection and session setup
+func initializeClient(ctx context.Context) (*mcp.Client, error) {
+	log.Println("===== Initialize client =====")
 	serverURL := "http://localhost:3000/mcp"
-	// Inject custom logger via WithClientLogger.
 	mcpClient, err := mcp.NewClient(
 		serverURL,
 		mcp.Implementation{
@@ -157,60 +142,110 @@ func main() {
 		mcp.WithClientLogger(mcp.GetDefaultLogger()),
 	)
 	if err != nil {
-		log.Printf("Failed to create client: %v", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("failed to create client: %v", err)
 	}
-	defer mcpClient.Close()
 
-	// Initialize client.
-	initResp, err := mcpClient.Initialize(ctx)
+	initResp, err := mcpClient.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
-		log.Printf("Initialization failed: %v", err)
-		os.Exit(1)
+		mcpClient.Close()
+		return nil, fmt.Errorf("initialization failed: %v", err)
 	}
-	
+
 	log.Printf("Server info: %s %s", initResp.ServerInfo.Name, initResp.ServerInfo.Version)
 	log.Printf("Protocol version: %s", initResp.ProtocolVersion)
+	if initResp.Instructions != "" {
+		log.Printf("Server instructions: %s", initResp.Instructions)
+	}
 
-	// Get session ID.
 	sessionID := mcpClient.GetSessionID()
 	if sessionID != "" {
 		log.Printf("Session ID: %s", sessionID)
 	}
 
-	// List available tools.
-	toolsResult, err := mcpClient.ListTools(ctx)
+	return mcpClient, nil
+}
+
+// handleTools manages tool-related operations including listing and calling tools
+func handleTools(ctx context.Context, client *mcp.Client) error {
+	log.Println("===== List available tools =====")
+	listToolsResp, err := client.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
-		log.Printf("Failed to list tools: %v", err)
-		return
+		return fmt.Errorf("failed to list tools: %v", err)
 	}
 
-	// Call a tool if available.
-	if len(toolsResult.Tools) > 0 {
-		log.Printf("Calling tool: %s", toolsResult.Tools[0].Name)
-		callRes, err := mcpClient.CallTool(ctx, toolsResult.Tools[0].Name, map[string]interface{}{
-			"name": "MCP User",
-		})
-		if err != nil {
-			log.Printf("Tool call failed: %v", err)
-			return
-		}
+	tools := listToolsResp.Tools
+	if len(tools) == 0 {
+		log.Printf("No available tools.")
+		return nil
+	}
 
-		// Process results.
-		for _, item := range callRes.Content {
-			if textContent, ok := item.(mcp.TextContent); ok {
-				log.Printf("Result: %s", textContent.Text)
-			}
+	log.Printf("Found %d tools:", len(tools))
+	for _, tool := range tools {
+		log.Printf("- %s: %s", tool.Name, tool.Description)
+	}
+
+	// Call the first tool
+	log.Printf("===== Call tool: %s =====", tools[0].Name)
+	callToolReq := &mcp.CallToolRequest{}
+	callToolReq.Params.Name = tools[0].Name
+	callToolReq.Params.Arguments = map[string]interface{}{
+		"name": "MCP User",
+	}
+	callToolResp, err := client.CallTool(ctx, callToolReq)
+	if err != nil {
+		return fmt.Errorf("failed to call tool: %v", err)
+	}
+
+	log.Printf("Tool result:")
+	for _, item := range callToolResp.Content {
+		if textContent, ok := item.(mcp.TextContent); ok {
+			log.Printf("  %s", textContent.Text)
 		}
 	}
 
-	// Terminate session if active.
-	if sessionID != "" {
-		if err := mcpClient.TerminateSession(ctx); err != nil {
-			log.Printf("Failed to terminate session: %v", err)
-		}
+	return nil
+}
+
+// terminateSession handles the termination of the current session
+func terminateSession(ctx context.Context, client *mcp.Client) error {
+	sessionID := client.GetSessionID()
+	if sessionID == "" {
+		return nil
 	}
-	
+
+	log.Printf("===== Terminate session =====")
+	if err := client.TerminateSession(ctx); err != nil {
+		return fmt.Errorf("failed to terminate session: %v", err)
+	}
+	log.Printf("Session terminated.")
+	return nil
+}
+
+func main() {
+	// Initialize log.
+	log.Println("Starting example client...")
+
+	// Create context.
+	ctx := context.Background()
+
+	// Initialize client
+	client, err := initializeClient(ctx)
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	// Handle tools
+	if err := handleTools(ctx, client); err != nil {
+		log.Printf("Error: %v\n", err)
+	}
+
+	// Terminate session
+	if err := terminateSession(ctx, client); err != nil {
+		log.Printf("Error: %v\n", err)
+	}
+
 	log.Printf("Example finished.")
 }
 ```
@@ -226,8 +261,8 @@ server := mcp.NewServer(
     "My-MCP-Server",                      // Server name
     "1.0.0",                              // Server version 
     mcp.WithServerAddress(":3000"),       // Listen address
-    mcp.WithPathPrefix("/mcp"),           // API path prefix
-    mcp.WithSSEEnabled(true),             // Enable SSE
+    mcp.WithServerPath("/mcp"),           // API path prefix
+    mcp.WithPostSSEEnabled(true),         // Enable SSE responses
     mcp.WithGetSSEEnabled(true),          // Allow GET for SSE
     mcp.WithStatelessMode(false),         // Use stateful mode
     mcp.WithServerLogger(mcp.GetDefaultLogger()), // Custom logger
@@ -239,14 +274,13 @@ server := mcp.NewServer(
 | Option | Description | Default |
 |--------|-------------|---------|
 | `WithServerAddress` | Set server address to listen on | `"localhost:3000"` |
-| `WithPathPrefix` | Set API path prefix | `/mcp` |
-| `WithSessionManager` | Use custom session manager | Built-in manager |
+| `WithServerPath` | Set API path prefix | `/mcp` |
+| `WithServerLogger` | Custom logger for server | Default logger |
 | `WithoutSession` | Disable session management | Sessions enabled |
-| `WithSSEEnabled` | Enable SSE responses | `true` |
+| `WithPostSSEEnabled` | Enable SSE responses | `true` |
 | `WithGetSSEEnabled` | Allow GET for SSE connections | `true` |
 | `WithNotificationBufferSize` | Size of notification buffer | `10` |
 | `WithStatelessMode` | Run in stateless mode | `false` |
-| `WithServerLogger` | Custom logger for server | Default logger |
 
 ### Client Configuration
 
@@ -259,8 +293,8 @@ client, err := mcp.NewClient(
         Name:    "MCP-Client",
         Version: "1.0.0",
     },
-    mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05),  // Protocol version
-    mcp.WithGetSSEEnabled(true),                              // Use GET for SSE
+    mcp.WithProtocolVersion(mcp.ProtocolVersion_2025_03_26),  // Protocol version
+    mcp.WithClientGetSSEEnabled(true),                        // Use GET for SSE
     mcp.WithClientLogger(mcp.GetDefaultLogger()),             // Custom logger
 )
 ```
@@ -269,10 +303,11 @@ client, err := mcp.NewClient(
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2024_11_05` |
-| `WithGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
-| `WithTransport` | Use a custom HTTP transport | Default `http.DefaultTransport` |
+| `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2025_03_26` |
+| `WithClientGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
 | `WithClientLogger` | Custom logger for client | Default logger |
+| `WithClientPath` | Set custom client path | Server path |
+| `WithHTTPReqHandler` | Use custom HTTP request handler | Default handler |
 
 ## Advanced Features
 
@@ -281,70 +316,117 @@ client, err := mcp.NewClient(
 Create tools that provide real-time progress updates:
 
 ```go
-package tools
+// handleMultiStageGreeting handles the multi-stage greeting tool and sends multiple notifications via SSE.
+func handleMultiStageGreeting(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Extract name from parameters.
+	name := "Guest"
+	if nameArg, ok := req.Params.Arguments["name"]; ok {
+		if nameStr, ok := nameArg.(string); ok && nameStr != "" {
+			name = nameStr
+		}
+	}
 
-import (
-	"context"
-	"fmt"
-	"time"
+	stages := 3
+	if stagesArg, ok := req.Params.Arguments["stages"]; ok {
+		if stagesFloat, ok := stagesArg.(float64); ok && stagesFloat > 0 {
+			stages = int(stagesFloat)
+		}
+	}
 
-	"trpc.group/trpc-go/trpc-mcp-go"
-)
+	// Get notification sender from context.
+	notificationSender, hasNotificationSender := mcp.GetNotificationSender(ctx)
+	if !hasNotificationSender {
+		log.Printf("unable to get notification sender from context")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewTextContent("Error: unable to get notification sender."),
+			},
+		}, fmt.Errorf("unable to get notification sender from context")
+	}
 
+	// Send progress update.
+	sendProgress := func(progress float64, message string) {
+		err := notificationSender.SendProgress(progress, message)
+		if err != nil {
+			log.Printf("Failed to send progress notification: %v", err)
+		}
+	}
 
-func NewStreamingTool() *mcp.Tool {
-    return mcp.NewTool("sse-progress",
-        func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-            // Extract parameters
-            steps := 5 // Default
-            if stepsArg, ok := req.Params.Arguments["steps"]; ok {
-                if stepsFloat, ok := stepsArg.(float64); ok {
-                    steps = int(stepsFloat)
-                }
-            }
-            
-            // Get notification sender from context
-            notifier, ok := mcp.GetNotificationSender(ctx)
-            if !ok {
-                return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent("No notification sender available")}}, nil
-            }
-            
-            // Send initial progress
-            notifier.SendProgress(0.0, "Starting process")
-            notifier.SendLogMessage("info", "Starting process") // Assuming data is a simple string here
-            
-            // Process steps and send progress updates
-            for i := 1; i <= steps; i++ {
-                select {
-                case <-ctx.Done():
-                    return nil, ctx.Err()
-                default:
-                    // Calculate progress
-                    progress := float64(i) / float64(steps)
-                    message := fmt.Sprintf("Step %d/%d", i, steps)
-                    
-                    // Send notifications
-                    notifier.SendProgress(progress, message)
-                    // For SendLogMessage, the 'data' part might be a structured map or a simple string.
-                    // Example with simple string:
-                    notifier.SendLogMessage("info", fmt.Sprintf("Completed %s", message))
-                    
-                    // Simulate work
-                    time.Sleep(500 * time.Millisecond)
-                }
-            }
-            
-            // Final progress update
-            notifier.SendProgress(1.0, "Complete")
-            
-            return &mcp.CallToolResult{Content: []mcp.Content{mcp.NewTextContent("Process completed successfully")}}, nil
-        },
-        mcp.WithDescription("Tool with progress notifications"),
-        mcp.WithNumber("steps",
-            mcp.Description("Number of steps to process"),
-            mcp.Default(5),
-        ),
-    )
+	// Send log message.
+	sendLogMessage := func(level string, message string) {
+		err := notificationSender.SendLogMessage(level, message)
+		if err != nil {
+			log.Printf("Failed to send log notification: %v", err)
+		}
+	}
+
+	// Start greeting process.
+	sendProgress(0.0, "Start multi-stage greeting")
+	sendLogMessage("info", fmt.Sprintf("Start greeting to %s", name))
+	time.Sleep(500 * time.Millisecond)
+
+	// Send multiple stage notifications.
+	for i := 1; i <= stages; i++ {
+		// Check if context is canceled.
+		select {
+		case <-ctx.Done():
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					mcp.NewTextContent(fmt.Sprintf("Greeting canceled at stage %d", i)),
+				},
+			}, ctx.Err()
+		default:
+			// Continue sending.
+		}
+
+		sendProgress(float64(i)/float64(stages), fmt.Sprintf("Stage %d greeting", i))
+		sendLogMessage("info", fmt.Sprintf("Stage %d greeting: Hello %s!", i, name))
+		time.Sleep(800 * time.Millisecond)
+	}
+
+	// Send final greeting.
+	sendProgress(1.0, "Greeting completed")
+	sendLogMessage("info", fmt.Sprintf("Completed multi-stage greeting to %s", name))
+
+	// Return final result.
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.NewTextContent(fmt.Sprintf(
+				"Completed %d-stage greeting to %s!",
+				stages, name,
+			)),
+		},
+	}, nil
+}
+
+func main() {
+	// Create MCP server
+	mcpServer := mcp.NewServer(
+		"Multi-Stage-Greeting-Server",
+		"1.0.0",
+		mcp.WithServerAddress(":3000"),
+		mcp.WithServerPath("/mcp"),
+		mcp.WithPostSSEEnabled(true),
+	)
+
+	// Register a multi-stage greeting tool
+	multiStageGreetingTool := mcp.NewTool("multi-stage-greeting",
+		mcp.WithDescription("Send multi-stage greeting via SSE."),
+		mcp.WithString("name", mcp.Description("Name to greet.")),
+		mcp.WithNumber("stages",
+			mcp.Description("Number of greeting stages."),
+			mcp.Default(3),
+		),
+	)
+
+	mcpServer.RegisterTool(multiStageGreetingTool, handleMultiStageGreeting)
+	log.Printf("Registered multi-stage greeting tool: multi-stage-greeting")
+
+	// Start server
+	log.Printf("MCP server started at :3000, path /mcp")
+	if err := mcpServer.Start(); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }
 ```
 
@@ -361,7 +443,6 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go"
 )
 
-
 // Example NotificationCollector structure and methods
 type NotificationCollector struct{}
 
@@ -374,77 +455,65 @@ func (nc *NotificationCollector) HandleProgress(notification *mcp.JSONRPCNotific
 
 func (nc *NotificationCollector) HandleLog(notification *mcp.JSONRPCNotification) error {
 	level, _ := notification.Params.AdditionalFields["level"].(string)
-	// The 'data' field for log messages can be a string or a structured map.
-	// This example assumes it's a simple string for brevity.
-	// In a real application, you might need to check its type.
-	logMessageText := "Could not extract log message data"
-	if dataStr, ok := notification.Params.AdditionalFields["data"].(string); ok {
-		logMessageText = dataStr
-	} else if dataMap, ok := notification.Params.AdditionalFields["data"].(map[string]interface{}); ok {
-		// If it's a map, you might want to format it or extract a specific field.
-		// For this example, we'll just try to get a "message" field if it exists.
-		if msg, found := dataMap["message"].(string); found {
-			logMessageText = msg
-		} else {
-			logMessageText = fmt.Sprintf("%+v", dataMap) // Or some other formatting
-		}
-	}
-	fmt.Printf("[%s] %s\n", level, logMessageText)
+	data, _ := notification.Params.AdditionalFields["data"].(string)
+	fmt.Printf("[%s] %s\n", level, data)
 	return nil
 }
 
 func main() {
-	// ... (client setup as in previous example)
-	// Set custom logger if needed. Example:
-	// mcpServer := mcp.NewServer("My-Server", "1.0.0", mcp.WithServerLogger(mcp.GetDefaultLogger()))
-	// The default logger prints to stdout. To use zap or other loggers, inject with WithServerLogger or WithClientLogger.
+	// Create context
 	ctx := context.Background()
-	mcpClient, err := mcp.NewClient("http://localhost:3000/mcp", mcp.Implementation{
-		Name:    "MCP-Go-Client-Stream-Handler",
-		Version: "1.0.0",
-	})
+
+	// Initialize client
+	client, err := mcp.NewClient(
+		"http://localhost:3000/mcp",
+		mcp.Implementation{
+			Name:    "MCP-Client-Stream-Handler",
+			Version: "1.0.0",
+		},
+		mcp.WithClientGetSSEEnabled(true),
+	)
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
-	defer mcpClient.Close()
-	// ... (client initialization)
-	_, err = mcpClient.Initialize(ctx)
+	defer client.Close()
+
+	// Initialize connection
+	_, err = client.Initialize(ctx, &mcp.InitializeRequest{})
 	if err != nil {
 		log.Fatalf("Failed to initialize client: %v", err)
 	}
 
-
 	// Create notification collector
 	collector := &NotificationCollector{}
 
-	// Set up stream options
-	streamOpts := &transport.StreamOptions{
-		NotificationHandlers: map[string]transport.NotificationHandler{
-			"notifications/progress": collector.HandleProgress,
-			"notifications/message":  collector.HandleLog,
-		},
-	}
+	// Register notification handlers
+	client.RegisterNotificationHandler("notifications/progress", collector.HandleProgress)
+	client.RegisterNotificationHandler("notifications/message", collector.HandleLog)
 
 	// Call tool with streaming
-	log.Printf("Calling tool with streaming...")
-	callRes, err := mcpClient.CallToolWithStream(ctx, "sse-progress", map[string]interface{}{ // Ensure "sse-progress" tool is registered on server
-		"steps": 5,
-	}, streamOpts)
+	log.Printf("Calling multi-stage greeting tool...")
+	callRes, err := client.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "multi-stage-greeting",
+			Arguments: map[string]interface{}{
+				"name":   "MCP User",
+				"stages": 5,
+			},
+		},
+	})
 	if err != nil {
-		log.Printf("Tool call with stream failed: %v", err)
+		log.Printf("Tool call failed: %v", err)
 		return
 	}
 
-	// Process final result from CallToolWithStream (if any)
-	if callRes != nil {
-		for _, item := range callRes.Content {
-			if textContent, ok := item.(mcp.TextContent); ok {
-				log.Printf("Final tool result: %s", textContent.Text)
-			}
+	// Process final result
+	for _, item := range callRes.Content {
+		if textContent, ok := item.(mcp.TextContent); ok {
+			log.Printf("Final tool result: %s", textContent.Text)
 		}
 	}
-	// Keep the main function running for a bit to receive notifications if the tool runs asynchronously
-	// time.Sleep(10 * time.Second) // Uncomment if needed for testing async notifications
+
 	log.Printf("Client example finished.")
 }
 ```
@@ -454,65 +523,86 @@ func main() {
 Register and serve resources:
 
 ```go
-// Presuming 'server' is an initialized *server.Server instance
-// Register a text resource
+// Register text resource
 textResource := &mcp.Resource{
-    URI:         "resource://example/text", // Ensure URI scheme is meaningful
+    URI:         "resource://example/text",
     Name:        "example-text",
     Description: "Example text resource",
     MimeType:    "text/plain",
-	// Content can be set via a handler or direct data if supported by your server setup.
-	// This example focuses on registration. Serving actual content requires a handler.
-}
-// The actual registration mechanism might vary. If RegisterResource takes a handler:
-// server.RegisterResource(textResource, myTextResourceHandler)
-// If it's just metadata for now:
-err := mcpServer.RegisterResource(textResource, func(ctx context.Context, uri string) (io.ReadCloser, error) {
-    // Example handler: return a string reader
-    return io.NopCloser(strings.NewReader("This is the content of the text resource.")), nil
-})
-if err != nil {
-    log.Fatalf("Failed to register resource: %v", err)
 }
 
+// Define text resource handler
+textHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
+    return mcp.TextResourceContents{
+        URI:      textResource.URI,
+        MIMEType: textResource.MimeType,
+        Text:     "This is an example text resource content.",
+    }, nil
+}
 
-// Resource handler is automatically set up through the HTTP handler
+// Register the text resource
+server.RegisterResource(textResource, textHandler)
+
+// Register image resource
+imageResource := &mcp.Resource{
+    URI:         "resource://example/image",
+    Name:        "example-image",
+    Description: "Example image resource",
+    MimeType:    "image/png",
+}
+
+// Define image resource handler
+imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
+    // In a real application, you would read the actual image data
+    // For this example, we'll return a placeholder base64-encoded image
+    return mcp.BlobResourceContents{
+        URI:      imageResource.URI,
+        MIMEType: imageResource.MimeType,
+        Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+    }, nil
+}
+
+// Register the image resource
+server.RegisterResource(imageResource, imageHandler)
 ```
 
-### Prompt Templates
+### Prompt
 
-Register prompt templates:
+Register prompt:
 
 ```go
-// Presuming 'mcpServer' is an initialized *server.Server instance
-// Register a prompt template
-promptTemplate := &mcp.Prompt{
-    Name:        "example-prompt",
-    Description: "Example prompt template",
+// Register basic prompt
+basicPrompt := &mcp.Prompt{
+    Name:        "basic-prompt",
+    Description: "Basic prompt example",
     Arguments: []mcp.PromptArgument{
         {
-            Name:        "topic",
-            Description: "Topic to discuss",
+            Name:        "name",
+            Description: "User name",
             Required:    true,
         },
     },
-	// Template string itself would be part of how it's handled or stored.
-	// For example:
-	// Template: "Please tell me more about {{topic}}.",
 }
-// The registration of the template string itself might be part of the server's prompt handling logic.
-// This example focuses on registering the metadata.
-err := mcpServer.RegisterPrompt(promptTemplate, func(ctx context.Context, args map[string]interface{}) (string, error) {
-    // Example handler:
-    topic, ok := args["topic"].(string)
-    if !ok {
-        return "", fmt.Errorf("topic argument is missing or not a string")
-    }
-    return fmt.Sprintf("Please tell me more about %s.", topic), nil
-})
-if err != nil {
-    log.Fatalf("Failed to register prompt: %v", err)
+
+// Define basic prompt handler
+basicPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+    name := req.Params.Arguments["name"]
+    return &mcp.GetPromptResult{
+        Description: basicPrompt.Description,
+        Messages: []mcp.PromptMessage{
+            {
+                Role: "user",
+                Content: mcp.TextContent{
+                    Type: "text",
+                    Text: fmt.Sprintf("Hello, %s! This is a basic prompt example.", name),
+                },
+            },
+        },
+    }, nil
 }
+
+// Register the basic prompt
+server.RegisterPrompt(basicPrompt, basicPromptHandler)
 ```
 
 ## Example Patterns

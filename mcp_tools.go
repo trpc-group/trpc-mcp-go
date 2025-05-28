@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package mcp
 
 import (
@@ -77,12 +83,15 @@ type Tool struct {
 
 	// Raw schema (for custom schemas)
 	RawInputSchema json.RawMessage `json:"-"`
+}
 
-	// Tool execution function - new version
-	ExecuteFunc func(
-		ctx context.Context,
-		req *CallToolRequest,
-	) (*CallToolResult, error) `json:"-"`
+// toolHandler defines the function type for handling tool execution
+type toolHandler func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error)
+
+// registeredTool combines a Tool with its handler function
+type registeredTool struct {
+	Tool    *Tool
+	Handler toolHandler
 }
 
 // ToolOption represents a function that configures a Tool
@@ -94,10 +103,6 @@ type PropertyOption func(*openapi3.Schema)
 // NewTool creates a new tool
 func NewTool(
 	name string,
-	executeFunc func(
-		ctx context.Context,
-		req *CallToolRequest,
-	) (*CallToolResult, error),
 	opts ...ToolOption,
 ) *Tool {
 	tool := &Tool{
@@ -107,7 +112,6 @@ func NewTool(
 			Properties: make(openapi3.Schemas),
 			Required:   []string{},
 		},
-		ExecuteFunc: executeFunc,
 	}
 
 	for _, opt := range opts {

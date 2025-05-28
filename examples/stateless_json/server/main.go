@@ -1,3 +1,9 @@
+// Tencent is pleased to support the open source community by making trpc-mcp-go available.
+//
+// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+//
+// trpc-mcp-go is licensed under the Apache License Version 2.0.
+
 package main
 
 import (
@@ -52,13 +58,11 @@ func main() {
 	)
 
 	// Register a greet tool.
-	greetTool := mcp.NewTool("greet", handleGreet,
+	greetTool := mcp.NewTool("greet",
 		mcp.WithDescription("A simple greeting tool."),
 		mcp.WithString("name", mcp.Description("Name to greet.")))
 
-	if err := mcpServer.RegisterTool(greetTool); err != nil {
-		log.Fatalf("Failed to register tool: %v", err)
-	}
+	mcpServer.RegisterTool(greetTool, handleGreet)
 	log.Printf("Registered greet tool: greet")
 
 	// Set up a simple health check route.
