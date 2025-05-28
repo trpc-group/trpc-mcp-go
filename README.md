@@ -619,11 +619,3 @@ The project includes several example patterns:
 | `stateful_sse_getsse` | Stateful SSE with GET SSE support |
 | `stateless_json` | Stateless connections with JSON-RPC |
 | `stateless_sse` | Stateless connections with SSE |
-
-## License
-
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. 
