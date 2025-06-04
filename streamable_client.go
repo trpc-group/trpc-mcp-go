@@ -34,6 +34,9 @@ type streamableHTTPClientTransport struct {
 	// HTTP request handler
 	httpReqHandler HTTPReqHandler
 
+	// Custom HTTP headers to be added to all requests
+	httpHeaders http.Header
+
 	// Session ID
 	sessionID string
 
@@ -90,6 +93,7 @@ func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOp
 		serverURL:            serverURL,
 		httpClient:           &http.Client{},
 		httpReqHandler:       NewDefaultHTTPReqHandler(),
+		httpHeaders:          make(http.Header),
 		notificationHandlers: make(map[string]NotificationHandler),
 		enableGetSSE:         true,               // Default: GET SSE enabled
 		logger:               GetDefaultLogger(), // Use default logger if not set.
@@ -135,6 +139,18 @@ func withTransportHTTPReqHandler(handler HTTPReqHandler) transportOption {
 	}
 }
 
+// withTransportHTTPHeaders sets custom HTTP headers for all requests
+func withTransportHTTPHeaders(headers http.Header) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		if t.httpHeaders == nil {
+			t.httpHeaders = make(http.Header)
+		}
+		for k, v := range headers {
+			t.httpHeaders[k] = v
+		}
+	}
+}
+
 // SendRequest sends a request and waits for a response
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
@@ -176,6 +192,13 @@ func (t *streamableHTTPClientTransport) send(
 		httpReq.Header.Set(httputil.LastEventIDHeader, options.lastEventID)
 	} else if t.lastEventID != "" {
 		httpReq.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
+	}
+
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
 	}
 
 	// Send request using the handler
@@ -426,6 +449,13 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	}
 
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+
 	// Send request
 	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
@@ -535,6 +565,13 @@ func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	req.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	if t.lastEventID != "" {
 		req.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
+	}
+
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
 	}
 
 	t.logger.Debugf("Attempting to establish GET SSE connection, session ID: %s", t.sessionID)
@@ -663,6 +700,13 @@ func (t *streamableHTTPClientTransport) terminateSession(ctx context.Context) er
 		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	} else {
 		return fmt.Errorf("no active session")
+	}
+
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
 	}
 
 	// Send request

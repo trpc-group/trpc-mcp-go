@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -124,4 +125,100 @@ func TestNewClientTransport(t *testing.T) {
 
 	// Verify basic properties
 	assert.Equal(t, "", transport.sessionID) // Initial session ID should be empty
+}
+
+// Test HTTP headers transport option
+func TestTransportHTTPHeaders(t *testing.T) {
+	// Create test headers
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer test-token")
+	headers.Set("User-Agent", "TestTransport/1.0")
+	headers.Add("Accept", "application/json")
+	headers.Add("Accept", "text/html")
+
+	// Create transport with headers
+	serverURL, _ := url.Parse("http://localhost:3000/mcp")
+	transport := newStreamableHTTPClientTransport(serverURL, withTransportHTTPHeaders(headers))
+
+	// Verify headers are set correctly
+	assert.NotNil(t, transport.httpHeaders)
+	assert.Equal(t, "Bearer test-token", transport.httpHeaders.Get("Authorization"))
+	assert.Equal(t, "TestTransport/1.0", transport.httpHeaders.Get("User-Agent"))
+
+	// Verify multi-value headers
+	acceptValues := transport.httpHeaders["Accept"]
+	assert.Len(t, acceptValues, 2)
+	assert.Contains(t, acceptValues, "application/json")
+	assert.Contains(t, acceptValues, "text/html")
+}
+
+// Test HTTP headers with other transport options
+func TestTransportHTTPHeadersWithOtherOptions(t *testing.T) {
+	// Create headers
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer combo-token")
+
+	// Create transport with headers and other options
+	serverURL, _ := url.Parse("http://localhost:3000/mcp")
+	transport := newStreamableHTTPClientTransport(
+		serverURL,
+		withTransportHTTPHeaders(headers),
+		withClientTransportGetSSEEnabled(true),
+		withClientTransportPath("/custom"),
+	)
+
+	// Verify headers are set
+	assert.Equal(t, "Bearer combo-token", transport.httpHeaders.Get("Authorization"))
+
+	// Verify other options are also applied
+	assert.True(t, transport.enableGetSSE)
+	assert.Equal(t, "/custom", transport.path)
+}
+
+// Test HTTP context functions in server transport
+func TestServerTransportHTTPContextFuncs(t *testing.T) {
+	// Define context keys
+	type contextKey string
+	const testKey contextKey = "test_key"
+
+	// Define HTTP context function
+	testContextFunc := func(ctx context.Context, r *http.Request) context.Context {
+		if testHeader := r.Header.Get("X-Test-Header"); testHeader != "" {
+			return context.WithValue(ctx, testKey, testHeader)
+		}
+		return ctx
+	}
+
+	// Create server handler with context functions
+	handler := &httpServerHandler{
+		httpContextFuncs: []HTTPContextFunc{testContextFunc},
+	}
+
+	// Verify context functions are set
+	assert.NotNil(t, handler.httpContextFuncs)
+	assert.Len(t, handler.httpContextFuncs, 1)
+}
+
+// Test multiple HTTP context functions in server transport
+func TestServerTransportMultipleHTTPContextFuncs(t *testing.T) {
+	// Define context functions
+	func1 := func(ctx context.Context, r *http.Request) context.Context {
+		return context.WithValue(ctx, "key1", "value1")
+	}
+	func2 := func(ctx context.Context, r *http.Request) context.Context {
+		return context.WithValue(ctx, "key2", "value2")
+	}
+	func3 := func(ctx context.Context, r *http.Request) context.Context {
+		return context.WithValue(ctx, "key3", "value3")
+	}
+
+	// Create server handler with multiple context functions
+	handler := &httpServerHandler{}
+
+	// Apply context functions using the configuration function
+	withTransportHTTPContextFuncs([]HTTPContextFunc{func1, func2, func3})(handler)
+
+	// Verify all context functions are set
+	assert.NotNil(t, handler.httpContextFuncs)
+	assert.Len(t, handler.httpContextFuncs, 3)
 }

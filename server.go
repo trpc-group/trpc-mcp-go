@@ -29,6 +29,12 @@ const (
 	defaultNotificationBufferSize = 10
 )
 
+// HTTPContextFunc defines a function type that extracts information from HTTP request to context.
+// This function is called before each HTTP request processing, allowing users to extract information
+// from HTTP request and add it to the context.
+// Multiple HTTPContextFunc will be executed in the order they are registered.
+type HTTPContextFunc func(ctx context.Context, r *http.Request) context.Context
+
 // serverConfig stores all server configuration options
 type serverConfig struct {
 	// Basic configuration
@@ -44,6 +50,9 @@ type serverConfig struct {
 	postSSEEnabled         bool
 	getSSEEnabled          bool
 	notificationBufferSize int
+
+	// HTTP context functions for extracting information from HTTP requests
+	httpContextFuncs []HTTPContextFunc
 }
 
 // Server MCP server
@@ -141,6 +150,11 @@ func (s *Server) initComponents() {
 		withTransportNotificationBufferSize(s.config.notificationBufferSize),
 	)
 
+	// HTTP context functions configuration.
+	if len(s.config.httpContextFuncs) > 0 {
+		httpOptions = append(httpOptions, withTransportHTTPContextFuncs(s.config.httpContextFuncs))
+	}
+
 	// Inject logger into httpServerHandler if provided.
 	if s.logger != nil {
 		// This is the httpServerHandler option version.
@@ -198,6 +212,15 @@ func WithGetSSEEnabled(enabled bool) ServerOption {
 func WithNotificationBufferSize(size int) ServerOption {
 	return func(s *Server) {
 		s.config.notificationBufferSize = size
+	}
+}
+
+// WithHTTPContextFunc adds an HTTP context function that will be called for each HTTP request.
+// Multiple functions can be registered and they will be executed in the order they are added.
+// Each function receives the current context and HTTP request, and returns a potentially modified context.
+func WithHTTPContextFunc(fn HTTPContextFunc) ServerOption {
+	return func(s *Server) {
+		s.config.httpContextFuncs = append(s.config.httpContextFuncs, fn)
 	}
 }
 

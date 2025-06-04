@@ -62,6 +62,9 @@ type httpServerHandler struct {
 	// Session GET SSE connections mapping (each session ID maps to a GET SSE connection)
 	getSSEConnections     map[string]*getSSEConnection
 	getSSEConnectionsLock sync.RWMutex
+
+	// HTTP context functions for extracting information from HTTP requests
+	httpContextFuncs []HTTPContextFunc
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -173,6 +176,13 @@ func withTransportStatelessMode() func(*httpServerHandler) {
 	}
 }
 
+// withTransportHTTPContextFuncs sets the HTTP context functions
+func withTransportHTTPContextFuncs(funcs []HTTPContextFunc) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.httpContextFuncs = funcs
+	}
+}
+
 // ServeHTTP implements the http.Handler interface
 func (h *httpServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// First check the HTTP method
@@ -202,6 +212,12 @@ type baseMessage struct {
 
 // handlePost handles POST requests
 func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	// Apply HTTP context functions to enrich the context with information from HTTP request
+	enrichedCtx := ctx
+	for _, fn := range h.httpContextFuncs {
+		enrichedCtx = fn(enrichedCtx, r)
+	}
+
 	var rawMessage json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
 		http.Error(w, ErrInvalidRequestBody.Error(), http.StatusBadRequest)
@@ -255,11 +271,11 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 
 	// Branch: request or notification
 	if base.ID != nil && base.Method != "" {
-		h.handlePostRequest(ctx, w, r, rawMessage, base, session)
+		h.handlePostRequest(enrichedCtx, w, r, rawMessage, base, session)
 		return
 	}
 	if base.ID == nil && base.Method != "" {
-		h.handlePostNotification(ctx, w, r, rawMessage, base, session)
+		h.handlePostNotification(enrichedCtx, w, r, rawMessage, base, session)
 		return
 	}
 

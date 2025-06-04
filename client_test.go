@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -190,4 +191,32 @@ func TestClient_GetSessionID(t *testing.T) {
 
 	// Session ID should not be empty after initialization
 	assert.NotEmpty(t, client.GetSessionID())
+}
+
+// Test WithHTTPHeaders option
+func TestClient_WithHTTPHeaders(t *testing.T) {
+	// Create custom headers
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer test-token")
+	headers.Set("User-Agent", "TestClient/1.0")
+	headers.Set("X-Custom-Header", "custom-value")
+
+	// Create client with custom headers
+	client, err := NewClient("http://localhost:3000/mcp", Implementation{
+		Name:    "Test-Client",
+		Version: "1.0.0",
+	}, WithHTTPHeaders(headers))
+
+	// Verify successful object creation
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.NotNil(t, client.transport)
+
+	// Verify headers are set in transport
+	if streamableTransport, ok := client.transport.(*streamableHTTPClientTransport); ok {
+		assert.NotNil(t, streamableTransport.httpHeaders)
+		assert.Equal(t, "Bearer test-token", streamableTransport.httpHeaders.Get("Authorization"))
+		assert.Equal(t, "TestClient/1.0", streamableTransport.httpHeaders.Get("User-Agent"))
+		assert.Equal(t, "custom-value", streamableTransport.httpHeaders.Get("X-Custom-Header"))
+	}
 }

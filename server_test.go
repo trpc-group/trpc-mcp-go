@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Create test server
@@ -128,4 +129,160 @@ func TestServer_MCPHandler(t *testing.T) {
 	// Verify MCP handler
 	assert.NotNil(t, server.MCPHandler())
 	assert.Equal(t, server.mcpHandler, server.MCPHandler())
+}
+
+// Test HTTP context function registration
+func TestServer_WithHTTPContextFunc(t *testing.T) {
+	// Define context keys
+	type contextKey string
+	const authTokenKey contextKey = "auth_token"
+
+	// Define HTTP context function
+	extractAuthToken := func(ctx context.Context, r *http.Request) context.Context {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			return context.WithValue(ctx, authTokenKey, authHeader)
+		}
+		return ctx
+	}
+
+	// Create server with HTTP context function
+	server := NewServer(
+		"Test-Server",
+		"1.0.0",
+		WithServerAddress(":3000"),
+		WithHTTPContextFunc(extractAuthToken),
+	)
+
+	// Verify server created successfully
+	assert.NotNil(t, server)
+	assert.NotNil(t, server.config.httpContextFuncs)
+	assert.Len(t, server.config.httpContextFuncs, 1)
+}
+
+// Test multiple HTTP context functions
+func TestServer_WithMultipleHTTPContextFuncs(t *testing.T) {
+	// Define context keys
+	type contextKey string
+	const (
+		authTokenKey contextKey = "auth_token"
+		userAgentKey contextKey = "user_agent"
+	)
+
+	// Define HTTP context functions
+	extractAuthToken := func(ctx context.Context, r *http.Request) context.Context {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			return context.WithValue(ctx, authTokenKey, authHeader)
+		}
+		return ctx
+	}
+
+	extractUserAgent := func(ctx context.Context, r *http.Request) context.Context {
+		if userAgent := r.Header.Get("User-Agent"); userAgent != "" {
+			return context.WithValue(ctx, userAgentKey, userAgent)
+		}
+		return ctx
+	}
+
+	// Create server with multiple HTTP context functions
+	server := NewServer(
+		"Test-Server",
+		"1.0.0",
+		WithServerAddress(":3000"),
+		WithHTTPContextFunc(extractAuthToken),
+		WithHTTPContextFunc(extractUserAgent),
+	)
+
+	// Verify server created successfully
+	assert.NotNil(t, server)
+	assert.NotNil(t, server.config.httpContextFuncs)
+	assert.Len(t, server.config.httpContextFuncs, 2)
+}
+
+// Test tool handler accessing headers via context
+func TestServer_ToolHandlerWithHeaders(t *testing.T) {
+	// Define context keys
+	type contextKey string
+	const authTokenKey contextKey = "auth_token"
+
+	// Define HTTP context function
+	extractAuthToken := func(ctx context.Context, r *http.Request) context.Context {
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			return context.WithValue(ctx, authTokenKey, authHeader)
+		}
+		return ctx
+	}
+
+	// Create server with HTTP context function
+	server := NewServer(
+		"Test-Server",
+		"1.0.0",
+		WithServerPath("/mcp"),
+		WithHTTPContextFunc(extractAuthToken),
+	)
+
+	// Define tool handler that accesses headers
+	headerTool := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		authToken, _ := ctx.Value(authTokenKey).(string)
+		return NewTextResult("Auth: " + authToken), nil
+	}
+
+	// Register tool
+	tool := NewTool("header-tool", WithDescription("Tool that uses headers"))
+	server.RegisterTool(tool, headerTool)
+
+	// Create HTTP test server
+	httpServer := httptest.NewServer(server.HTTPHandler())
+	defer httpServer.Close()
+
+	// Create client
+	client, err := NewClient(httpServer.URL+"/mcp", Implementation{
+		Name:    "Test-Client",
+		Version: "1.0.0",
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Initialize client
+	ctx := context.Background()
+	_, err = client.Initialize(ctx, &InitializeRequest{})
+	require.NoError(t, err)
+
+	// Call tool without headers
+	result, err := client.CallTool(ctx, &CallToolRequest{
+		Params: CallToolParams{
+			Name:      "header-tool",
+			Arguments: map[string]interface{}{},
+		},
+	})
+	require.NoError(t, err)
+	textContent, ok := result.Content[0].(TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "Auth: ", textContent.Text) // Empty auth token
+
+	// Create client with headers
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer test-token")
+
+	clientWithHeaders, err := NewClient(httpServer.URL+"/mcp", Implementation{
+		Name:    "Test-Client-With-Headers",
+		Version: "1.0.0",
+	}, WithHTTPHeaders(headers))
+	require.NoError(t, err)
+	defer clientWithHeaders.Close()
+
+	// Initialize client with headers
+	_, err = clientWithHeaders.Initialize(ctx, &InitializeRequest{})
+	require.NoError(t, err)
+
+	// Call tool with headers
+	result, err = clientWithHeaders.CallTool(ctx, &CallToolRequest{
+		Params: CallToolParams{
+			Name:      "header-tool",
+			Arguments: map[string]interface{}{},
+		},
+	})
+	require.NoError(t, err)
+	textContent, ok = result.Content[0].(TextContent)
+	require.True(t, ok)
+	assert.Equal(t, "Auth: Bearer test-token", textContent.Text) // Header extracted successfully
 }

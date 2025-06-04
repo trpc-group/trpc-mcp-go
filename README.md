@@ -619,3 +619,144 @@ The project includes several example patterns:
 | `stateful_sse_getsse` | Stateful SSE with GET SSE support |
 | `stateless_json` | Stateless connections with JSON-RPC |
 | `stateless_sse` | Stateless connections with SSE |
+
+## FAQ
+
+### How to handle HTTP Headers?
+
+**Q: How can I extract HTTP headers on the server side and send custom headers from the client?**
+
+**A:** The library provides comprehensive HTTP header support for both server and client sides while maintaining transport layer independence.
+
+#### Server Side: Extracting HTTP Headers
+
+Use `WithHTTPContextFunc` to extract HTTP headers and make them available in tool handlers through context:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
+)
+
+// Define context keys for type safety
+type contextKey string
+const (
+	AuthTokenKey contextKey = "auth_token"
+	UserAgentKey contextKey = "user_agent"
+)
+
+// HTTP context functions to extract headers
+func extractAuthToken(ctx context.Context, r *http.Request) context.Context {
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		return context.WithValue(ctx, AuthTokenKey, authHeader)
+	}
+	return ctx
+}
+
+func extractUserAgent(ctx context.Context, r *http.Request) context.Context {
+	if userAgent := r.Header.Get("User-Agent"); userAgent != "" {
+		return context.WithValue(ctx, UserAgentKey, userAgent)
+	}
+	return ctx
+}
+
+// Tool handler that accesses headers via context
+func myTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Extract headers from context
+	authToken, _ := ctx.Value(AuthTokenKey).(string)
+	userAgent, _ := ctx.Value(UserAgentKey).(string)
+	
+	// Use header information in your tool logic
+	response := fmt.Sprintf("Received auth: %s, user-agent: %s", authToken, userAgent)
+	return mcp.NewTextResult(response), nil
+}
+
+func main() {
+	// Create server with HTTP context functions
+	server := mcp.NewServer(
+		"header-server", "1.0.0",
+		// Register multiple HTTP context functions
+		mcp.WithHTTPContextFunc(extractAuthToken),
+		mcp.WithHTTPContextFunc(extractUserAgent),
+	)
+	
+	// Register tool
+	tool := mcp.NewTool("my-tool", mcp.WithDescription("Tool that uses headers"))
+	server.RegisterTool(tool, myTool)
+	
+	// Start server
+	server.Start()
+}
+```
+
+#### Client Side: Sending Custom HTTP Headers
+
+Use `WithHTTPHeaders` to send custom HTTP headers with all requests:
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
+)
+
+func main() {
+	// Create custom headers
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer your-token-here")
+	headers.Set("User-Agent", "MyMCPClient/1.0")
+	headers.Set("X-Custom-Header", "custom-value")
+	
+	// Create client with custom headers
+	client, err := mcp.NewClient(
+		"http://localhost:3000/mcp",
+		mcp.Implementation{
+			Name:    "my-client",
+			Version: "1.0.0",
+		},
+		mcp.WithHTTPHeaders(headers), // All requests will include these headers
+	)
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
+	
+	// Initialize and use client normally
+	// Headers will be automatically included in all HTTP requests
+	_, err = client.Initialize(context.Background(), &mcp.InitializeRequest{})
+	if err != nil {
+		log.Fatalf("Failed to initialize: %v", err)
+	}
+	
+	// Call tools - headers are automatically included
+	result, err := client.CallTool(context.Background(), &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "my-tool",
+			Arguments: map[string]interface{}{
+				"message": "Hello with headers!",
+			},
+		},
+	})
+	// Handle result...
+}
+```
+
+#### Key Features
+
+- **Transport Layer Independence**: Tool handlers access headers through context, not directly from HTTP requests
+- **Multiple Context Functions**: Use multiple `WithHTTPContextFunc` calls to extract different headers
+- **Type Safety**: Use strongly-typed context keys to avoid conflicts
+- **Automatic Application**: Client headers are applied to all HTTP requests (initialize, tool calls, notifications, etc.)
+- **Backward Compatibility**: Optional feature that doesn't break existing APIs
+
+#### Complete Example
+
+See `examples/headers/` for a complete working example demonstrating both server-side header extraction and client-side header sending.

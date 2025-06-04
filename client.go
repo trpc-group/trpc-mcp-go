@@ -9,6 +9,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"reflect"
 	"sync/atomic"
@@ -110,6 +111,15 @@ func WithClientPath(path string) ClientOption {
 func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 	return func(c *Client) {
 		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandler(handler))
+	}
+}
+
+// WithHTTPHeaders sets custom HTTP headers for all requests.
+// Headers will be applied to all HTTP requests made by the client,
+// including initialization, tool calls, notifications, and SSE connections.
+func WithHTTPHeaders(headers http.Header) ClientOption {
+	return func(c *Client) {
+		c.transportOptions = append(c.transportOptions, withTransportHTTPHeaders(headers))
 	}
 }
 
