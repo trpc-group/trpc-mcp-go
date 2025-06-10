@@ -259,6 +259,14 @@ func (s *Server) RegisterResource(resource *Resource, handler resourceHandler) {
 	s.resourceManager.registerResource(resource, handler)
 }
 
+func (s *Server) RegisterResourceTemplate(
+	template *ResourceTemplate,
+	handler resourceTemplateHandler,
+) {
+
+	s.resourceManager.registerTemplate(template, handler)
+}
+
 // RegisterPrompt registers a prompt with its handler function
 //
 // The prompt feature is automatically enabled when the first prompt is registered,

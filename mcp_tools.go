@@ -176,6 +176,22 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+func WithObject(name string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) {
+		schema := &openapi3.Schema{
+			Type:       &openapi3.Types{openapi3.TypeObject},
+			Properties: make(openapi3.Schemas),
+		}
+		for _, opt := range opts {
+			opt(schema)
+		}
+		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
+		if schema.Required != nil && len(schema.Required) > 0 {
+			t.InputSchema.Required = append(t.InputSchema.Required, name)
+		}
+	}
+}
+
 // Property option functions
 func Description(desc string) PropertyOption {
 	return func(s *openapi3.Schema) {
@@ -192,6 +208,69 @@ func Required() PropertyOption {
 func Default(value interface{}) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Default = value
+	}
+}
+
+func Title(title string) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.Title = title
+	}
+}
+
+func Enum(values ...string) PropertyOption {
+	return func(s *openapi3.Schema) {
+		enum := make([]any, len(values))
+		for i, v := range values {
+			enum[i] = v
+		}
+		s.Enum = enum
+	}
+}
+
+func Properties(props openapi3.Schemas) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.Properties = props
+	}
+}
+
+func WithArray(name string, opts ...PropertyOption) ToolOption {
+	return func(t *Tool) {
+		schema := &openapi3.Schema{
+			Type: &openapi3.Types{openapi3.TypeArray},
+		}
+		for _, opt := range opts {
+			opt(schema)
+		}
+		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
+		if schema.Required != nil && len(schema.Required) > 0 {
+			t.InputSchema.Required = append(t.InputSchema.Required, name)
+		}
+	}
+}
+
+func Items(itemSchema *openapi3.Schema) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.Items = openapi3.NewSchemaRef("", itemSchema)
+	}
+}
+
+func MinItems(min int) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := uint64(min)
+		s.MinItems = val
+	}
+}
+
+func MaxItems(max int) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := uint64(max)
+		s.MaxItems = &val
+	}
+}
+
+func UniqueItems(unique bool) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.UniqueItems = unique
 	}
 }
 

@@ -33,7 +33,7 @@ type resourceManager struct {
 	resources map[string]*registeredResource
 
 	// Resource template mapping table
-	templates map[string]*ResourceTemplate
+	templates map[string]*registerResourceTemplate
 
 	// Mutex
 	mu sync.RWMutex
@@ -55,7 +55,7 @@ type resourceManager struct {
 func newResourceManager() *resourceManager {
 	return &resourceManager{
 		resources:   make(map[string]*registeredResource),
-		templates:   make(map[string]*ResourceTemplate),
+		templates:   make(map[string]*registerResourceTemplate),
 		subscribers: make(map[string][]chan *JSONRPCNotification),
 	}
 }
@@ -81,7 +81,7 @@ func (m *resourceManager) registerResource(resource *Resource, handler resourceH
 }
 
 // registerTemplate registers a resource template
-func (m *resourceManager) registerTemplate(template *ResourceTemplate) error {
+func (m *resourceManager) registerTemplate(template *ResourceTemplate, handler resourceTemplateHandler) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (m *resourceManager) registerTemplate(template *ResourceTemplate) error {
 		return fmt.Errorf("template name cannot be empty")
 	}
 
-	if template.URITemplate == "" {
+	if template.URITemplate == nil {
 		return fmt.Errorf("template URI cannot be empty")
 	}
 
@@ -101,7 +101,11 @@ func (m *resourceManager) registerTemplate(template *ResourceTemplate) error {
 		return fmt.Errorf("template %s already exists", template.Name)
 	}
 
-	m.templates[template.Name] = template
+	m.templates[template.Name] = &registerResourceTemplate{
+		resourceTemplate: template,
+		Handler:          handler,
+	}
+
 	return nil
 }
 
@@ -136,7 +140,7 @@ func (m *resourceManager) getTemplates() []*ResourceTemplate {
 
 	templates := make([]*ResourceTemplate, 0, len(m.templates))
 	for _, template := range m.templates {
-		templates = append(templates, template)
+		templates = append(templates, template.resourceTemplate)
 	}
 	return templates
 }

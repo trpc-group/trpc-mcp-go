@@ -8,15 +8,23 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/yosida95/uritemplate/v3"
 )
 
 // resourceHandler defines the function type for handling resource reading
 type resourceHandler func(ctx context.Context, req *ReadResourceRequest) (ResourceContents, error)
+type resourceTemplateHandler func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error)
 
 // registeredResource combines a Resource with its handler function
 type registeredResource struct {
 	Resource *Resource
 	Handler  resourceHandler
+}
+
+type registerResourceTemplate struct {
+	resourceTemplate *ResourceTemplate
+	Handler          resourceTemplateHandler
 }
 
 // Resource represents a known resource that the server can read
@@ -115,7 +123,7 @@ type ResourceTemplate struct {
 	Name string `json:"name"`
 
 	// URI template
-	URITemplate string `json:"uriTemplate"`
+	URITemplate *URITemplate `json:"uriTemplate"`
 
 	// Resource description (optional)
 	Description string `json:"description,omitempty"`
@@ -145,4 +153,71 @@ type ReadResourceResponse struct {
 // ResourceListChangedNotification describes a resource list changed notification.
 type ResourceListChangedNotification struct {
 	Notification
+}
+
+type ResourceTemplateOption func(*ResourceTemplate)
+
+func NewResourceTemplate(uriTemplate string, name string, opts ...ResourceTemplateOption) *ResourceTemplate {
+	template := ResourceTemplate{
+		URITemplate: &URITemplate{Template: uritemplate.MustNew(uriTemplate)},
+		Name:        name,
+	}
+
+	for _, opt := range opts {
+		opt(&template)
+	}
+
+	return &template
+}
+
+// WithTemplateDescription adds a description to the ResourceTemplate.
+// The description should provide a clear, human-readable explanation of what resources this template represents.
+func WithTemplateDescription(description string) ResourceTemplateOption {
+	return func(t *ResourceTemplate) {
+		t.Description = description
+	}
+}
+
+// WithTemplateMIMEType sets the MIME type for the ResourceTemplate.
+// This should only be set if all resources matching this template will have the same type.
+func WithTemplateMIMEType(mimeType string) ResourceTemplateOption {
+	return func(t *ResourceTemplate) {
+		t.MimeType = mimeType
+	}
+}
+
+// WithTemplateAnnotations adds annotations to the ResourceTemplate.
+// Annotations can provide additional metadata about the template's intended use.
+func WithTemplateAnnotations(audience []Role, priority float64) ResourceTemplateOption {
+	return func(t *ResourceTemplate) {
+		if t.Annotations == nil {
+			t.Annotations = &struct {
+				Audience []Role  `json:"audience,omitempty"`
+				Priority float64 `json:"priority,omitempty"`
+			}{}
+		}
+		t.Annotations.Audience = audience
+		t.Annotations.Priority = priority
+	}
+}
+
+type URITemplate struct {
+	*uritemplate.Template
+}
+
+func (t *URITemplate) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.Template.Raw())
+}
+
+func (t *URITemplate) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	template, err := uritemplate.New(raw)
+	if err != nil {
+		return err
+	}
+	t.Template = template
+	return nil
 }

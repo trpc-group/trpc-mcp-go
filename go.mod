@@ -5,6 +5,7 @@ go 1.22.5
 require (
 	github.com/getkin/kin-openapi v0.132.0
 	github.com/stretchr/testify v1.10.0
+	github.com/yosida95/uritemplate/v3 v3.0.2
 	go.uber.org/zap v1.27.0
 )
 
