@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/utils"
 )
 
@@ -118,6 +119,40 @@ func parseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult
 					RawInputSchema: rawSchema,
 				}
 
+				// Convert RawInputSchema to InputSchema object.
+				if rawSchema != nil {
+					// First try to parse rawSchema directly to openapi3.Schema.
+					var schema openapi3.Schema
+					err := json.Unmarshal(rawSchema, &schema)
+					if err == nil {
+						tool.InputSchema = &schema
+					} else {
+						// If the direct parsing fails, it may be due to type mismatch.
+						// Use a more flexible processing method.
+						var rawSchemaMap map[string]interface{}
+						if jsonErr := json.Unmarshal(rawSchema, &rawSchemaMap); jsonErr != nil {
+							// If the map cannot be parsed, skip processing.
+							continue
+						}
+
+						// Process special field types.
+						handleSchemaNumberBoolFields(rawSchemaMap)
+
+						// Re-serialize and deserialize.
+						fixedData, jsonErr := json.Marshal(rawSchemaMap)
+						if jsonErr != nil {
+							continue
+						}
+
+						var fixedSchema openapi3.Schema
+						if jsonErr := json.Unmarshal(fixedData, &fixedSchema); jsonErr != nil {
+							continue
+						}
+
+						tool.InputSchema = &fixedSchema
+					}
+				}
+
 				// Add tool to result
 				result.Tools = append(result.Tools, tool)
 			}
@@ -130,4 +165,73 @@ func parseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult
 	}
 
 	return result, nil
+}
+
+// processExclusiveField exclusiveMaximum/exclusiveMinimum field, convert number type to boolean type.
+func processExclusiveField(schema map[string]interface{}, field string) {
+	if value, exists := schema[field]; exists {
+		// If it is already a boolean type, no need to process.
+		if _, isBool := value.(bool); isBool {
+			return
+		}
+
+		// If it is a number type, convert to true.
+		if _, isNumber := value.(float64); isNumber {
+			schema[field] = true
+		}
+	}
+}
+
+// handleSchemaNumberBoolFields Recursively process special field types in schema.
+func handleSchemaNumberBoolFields(schema map[string]interface{}) {
+	// Process exclusiveMaximum and exclusiveMinimum fields in the current schema.
+	processExclusiveField(schema, "exclusiveMaximum")
+	processExclusiveField(schema, "exclusiveMinimum")
+
+	// Process required field, if it is a boolean value.
+	if value, exists := schema["required"]; exists {
+		if boolVal, isBool := value.(bool); isBool {
+			// If it is true, convert to empty string array, if it is false, delete the field.
+			if boolVal {
+				schema["required"] = []string{}
+			} else {
+				delete(schema, "required")
+			}
+		}
+	}
+
+	// Recursively process properties.
+	if props, ok := schema["properties"].(map[string]interface{}); ok {
+		for _, propSchema := range props {
+			if propMap, isMap := propSchema.(map[string]interface{}); isMap {
+				handleSchemaNumberBoolFields(propMap)
+			}
+		}
+	}
+
+	// Recursively process array items.
+	if items, ok := schema["items"].(map[string]interface{}); ok {
+		handleSchemaNumberBoolFields(items)
+	}
+
+	// Recursively process additionalProperties.
+	if addProps, ok := schema["additionalProperties"].(map[string]interface{}); ok {
+		handleSchemaNumberBoolFields(addProps)
+	}
+
+	// Process allOf, oneOf, anyOf arrays.
+	processSchemaArray(schema, "allOf")
+	processSchemaArray(schema, "oneOf")
+	processSchemaArray(schema, "anyOf")
+}
+
+// processSchemaArray Process schema array fields.
+func processSchemaArray(schema map[string]interface{}, field string) {
+	if arr, ok := schema[field].([]interface{}); ok {
+		for _, item := range arr {
+			if itemMap, isMap := item.(map[string]interface{}); isMap {
+				handleSchemaNumberBoolFields(itemMap)
+			}
+		}
+	}
 }

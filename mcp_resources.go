@@ -14,6 +14,8 @@ import (
 
 // resourceHandler defines the function type for handling resource reading
 type resourceHandler func(ctx context.Context, req *ReadResourceRequest) (ResourceContents, error)
+
+// resourceTemplateHandler defines the function type for handling resource template reading.
 type resourceTemplateHandler func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error)
 
 // registeredResource combines a Resource with its handler function
@@ -22,6 +24,7 @@ type registeredResource struct {
 	Handler  resourceHandler
 }
 
+// registerResourceTemplate combines a ResourceTemplate with its handler function.
 type registerResourceTemplate struct {
 	resourceTemplate *ResourceTemplate
 	Handler          resourceTemplateHandler
@@ -155,8 +158,10 @@ type ResourceListChangedNotification struct {
 	Notification
 }
 
+// ResourceTemplateOption is a function that configures a ResourceTemplate.
 type ResourceTemplateOption func(*ResourceTemplate)
 
+// NewResourceTemplate creates a new ResourceTemplate.
 func NewResourceTemplate(uriTemplate string, name string, opts ...ResourceTemplateOption) *ResourceTemplate {
 	template := ResourceTemplate{
 		URITemplate: &URITemplate{Template: uritemplate.MustNew(uriTemplate)},
@@ -170,8 +175,7 @@ func NewResourceTemplate(uriTemplate string, name string, opts ...ResourceTempla
 	return &template
 }
 
-// WithTemplateDescription adds a description to the ResourceTemplate.
-// The description should provide a clear, human-readable explanation of what resources this template represents.
+// WithTemplateDescription sets the description for the ResourceTemplate.
 func WithTemplateDescription(description string) ResourceTemplateOption {
 	return func(t *ResourceTemplate) {
 		t.Description = description
@@ -179,15 +183,13 @@ func WithTemplateDescription(description string) ResourceTemplateOption {
 }
 
 // WithTemplateMIMEType sets the MIME type for the ResourceTemplate.
-// This should only be set if all resources matching this template will have the same type.
 func WithTemplateMIMEType(mimeType string) ResourceTemplateOption {
 	return func(t *ResourceTemplate) {
 		t.MimeType = mimeType
 	}
 }
 
-// WithTemplateAnnotations adds annotations to the ResourceTemplate.
-// Annotations can provide additional metadata about the template's intended use.
+// WithTemplateAnnotations sets the annotations for the ResourceTemplate.
 func WithTemplateAnnotations(audience []Role, priority float64) ResourceTemplateOption {
 	return func(t *ResourceTemplate) {
 		if t.Annotations == nil {
@@ -201,14 +203,17 @@ func WithTemplateAnnotations(audience []Role, priority float64) ResourceTemplate
 	}
 }
 
+// URITemplate represents a URI template.
 type URITemplate struct {
 	*uritemplate.Template
 }
 
+// MarshalJSON implements the json.Marshaler interface.
 func (t *URITemplate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.Template.Raw())
 }
 
+// UnmarshalJSON implements the json.Unmarshaler interface.
 func (t *URITemplate) UnmarshalJSON(data []byte) error {
 	var raw string
 	if err := json.Unmarshal(data, &raw); err != nil {

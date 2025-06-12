@@ -176,6 +176,7 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+// WithObject adds an object parameter to the tool's input schema.
 func WithObject(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
@@ -192,31 +193,35 @@ func WithObject(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
-// Property option functions
+// Description adds a description to the tool's input schema.
 func Description(desc string) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Description = desc
 	}
 }
 
+// Required marks the parameter as required.
 func Required() PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Required = []string{"true"}
 	}
 }
 
+// Default sets a default value for the parameter.
 func Default(value interface{}) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Default = value
 	}
 }
 
+// Title sets a title for the parameter.
 func Title(title string) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Title = title
 	}
 }
 
+// Enum adds an enum to the tool's input schema.
 func Enum(values ...string) PropertyOption {
 	return func(s *openapi3.Schema) {
 		enum := make([]any, len(values))
@@ -227,12 +232,14 @@ func Enum(values ...string) PropertyOption {
 	}
 }
 
+// Properties adds properties to the tool's input schema.
 func Properties(props openapi3.Schemas) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Properties = props
 	}
 }
 
+// WithArray adds an array to the tool's input schema.
 func WithArray(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
@@ -248,12 +255,14 @@ func WithArray(name string, opts ...PropertyOption) ToolOption {
 	}
 }
 
+// Items adds items to the tool's input schema.
 func Items(itemSchema *openapi3.Schema) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.Items = openapi3.NewSchemaRef("", itemSchema)
 	}
 }
 
+// MinItems sets the minimum number of items in the array.
 func MinItems(min int) PropertyOption {
 	return func(s *openapi3.Schema) {
 		val := uint64(min)
@@ -261,6 +270,7 @@ func MinItems(min int) PropertyOption {
 	}
 }
 
+// MaxItems sets the maximum number of items in the array.
 func MaxItems(max int) PropertyOption {
 	return func(s *openapi3.Schema) {
 		val := uint64(max)
@@ -268,18 +278,21 @@ func MaxItems(max int) PropertyOption {
 	}
 }
 
+// UniqueItems sets whether the array contains unique items.
 func UniqueItems(unique bool) PropertyOption {
 	return func(s *openapi3.Schema) {
 		s.UniqueItems = unique
 	}
 }
 
+// NewTextResult creates a new text result.
 func NewTextResult(text string) *CallToolResult {
 	return &CallToolResult{
 		Content: []Content{NewTextContent(text)},
 	}
 }
 
+// NewErrorResult creates a new error result.
 func NewErrorResult(text string) *CallToolResult {
 	return &CallToolResult{
 		IsError: true,

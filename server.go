@@ -259,11 +259,11 @@ func (s *Server) RegisterResource(resource *Resource, handler resourceHandler) {
 	s.resourceManager.registerResource(resource, handler)
 }
 
+// RegisterResourceTemplate registers a resource template with its handler function.
 func (s *Server) RegisterResourceTemplate(
 	template *ResourceTemplate,
 	handler resourceTemplateHandler,
 ) {
-
 	s.resourceManager.registerTemplate(template, handler)
 }
 
