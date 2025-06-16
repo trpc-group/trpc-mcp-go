@@ -414,3 +414,8 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) withContext(ctx context.Context) context.Context {
 	return setServerToContext(ctx, s)
 }
+
+// GetServerInfo returns the server implementation information
+func (s *Server) GetServerInfo() Implementation {
+	return s.serverInfo
+}

@@ -286,3 +286,19 @@ func TestServer_ToolHandlerWithHeaders(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "Auth: Bearer test-token", textContent.Text) // Header extracted successfully
 }
+
+func TestServer_GetServerInfo(t *testing.T) {
+	serverName := "Test-Server-GetInfo"
+	serverVersion := "2.0.0"
+
+	server := NewServer(
+		serverName,
+		serverVersion,
+		WithServerAddress(":3000"),
+	)
+
+	info := server.GetServerInfo()
+
+	assert.Equal(t, serverName, info.Name)
+	assert.Equal(t, serverVersion, info.Version)
+}

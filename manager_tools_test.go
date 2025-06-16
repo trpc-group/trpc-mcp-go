@@ -8,10 +8,12 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // NewMockTool creates a new mock tool
@@ -213,4 +215,83 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	errorResp, ok := result.(*JSONRPCError)
 	assert.True(t, ok, "Expected *JSONRPCError but got %T", result)
 	assert.Equal(t, ErrCodeMethodNotFound, errorResp.Error.Code)
+}
+
+func TestToolManager_ServerInfoInContext(t *testing.T) {
+	// Create a tool manager
+	manager := newToolManager()
+
+	// Create a test server
+	testServerName := "Test-Server-Context"
+	testServerVersion := "3.0.0"
+	server := NewServer(testServerName, testServerVersion, WithServerAddress(":0"))
+
+	// Set the server provider
+	manager.withServerProvider(server)
+
+	// Create a tool that checks for server info in context
+	tool := NewTool("server-info-tool", WithDescription("A tool that extracts server info from context"))
+
+	var capturedServerInfo Implementation
+	toolHandler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		// Try to get server instance from context
+		serverInstance := GetServerFromContext(ctx)
+		require.NotNil(t, serverInstance, "Server instance should be available in context")
+
+		// Cast to *Server and get server info
+		mcpServer, ok := serverInstance.(*Server)
+		require.True(t, ok, "Should be able to cast to *Server")
+
+		// Get server info using the new method
+		capturedServerInfo = mcpServer.GetServerInfo()
+
+		return NewTextResult(fmt.Sprintf("Server: %s v%s", capturedServerInfo.Name, capturedServerInfo.Version)), nil
+	}
+
+	// Register the tool
+	manager.registerTool(tool, toolHandler)
+
+	// Create a mock session
+	session := newSession()
+
+	// Create a request
+	req := &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "test-id",
+		Request: Request{
+			Method: MethodToolsCall,
+		},
+		Params: map[string]interface{}{
+			"name":      "server-info-tool",
+			"arguments": map[string]interface{}{},
+		},
+	}
+
+	// Handle the tool call
+	ctx := context.Background()
+	result, err := manager.handleCallTool(ctx, req, session)
+
+	// Verify no error occurred
+	require.NoError(t, err)
+
+	// Verify the result
+	toolResult, ok := result.(*CallToolResult)
+	require.True(t, ok, "Result should be a CallToolResult")
+	require.Len(t, toolResult.Content, 1)
+
+	// Check content type - it might be TextContent or *TextContent
+	var textContent *TextContent
+	switch content := toolResult.Content[0].(type) {
+	case *TextContent:
+		textContent = content
+	case TextContent:
+		textContent = &content
+	default:
+		t.Fatalf("Content should be text, got %T", content)
+	}
+	require.Equal(t, fmt.Sprintf("Server: %s v%s", testServerName, testServerVersion), textContent.Text)
+
+	// Verify the captured server info
+	assert.Equal(t, testServerName, capturedServerInfo.Name)
+	assert.Equal(t, testServerVersion, capturedServerInfo.Version)
 }

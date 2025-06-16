@@ -622,7 +622,7 @@ The project includes several example patterns:
 
 ## FAQ
 
-### How to handle HTTP Headers?
+### 1. How to handle HTTP Headers?
 
 **Q: How can I extract HTTP headers on the server side and send custom headers from the client?**
 
@@ -760,3 +760,19 @@ func main() {
 #### Complete Example
 
 See `examples/headers/` for a complete working example demonstrating both server-side header extraction and client-side header sending.
+
+### 2. How to get server name and version in a tool handler?
+
+You can retrieve the `mcp.Server` instance from the `context.Context` within your tool handler and then call its `GetServerInfo()` method:
+
+```go
+func handleMyTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+    serverInstance := mcp.GetServerFromContext(ctx)
+    if mcpServer, ok := serverInstance.(*mcp.Server); ok {
+        serverInfo := mcpServer.GetServerInfo()
+        // Now you have serverInfo.Name and serverInfo.Version
+        return mcp.NewTextResult(fmt.Sprintf("Server Name: %s, Version: %s", serverInfo.Name, serverInfo.Version)), nil
+    }
+    return mcp.NewTextResult("Could not retrieve server information."), nil
+}
+```
