@@ -100,6 +100,11 @@ type ToolOption func(*Tool)
 // PropertyOption represents a function that configures a schema property
 type PropertyOption func(*openapi3.Schema)
 
+// ToolListFilter defines a function type for filtering tools based on context.
+// The filter receives the request context and all registered tools, and returns
+// a filtered list of tools that should be visible to the client.
+type ToolListFilter func(ctx context.Context, tools []*Tool) []*Tool
+
 // NewTool creates a new tool
 func NewTool(
 	name string,

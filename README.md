@@ -776,3 +776,146 @@ func handleMyTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolR
     return mcp.NewTextResult("Could not retrieve server information."), nil
 }
 ```
+
+### 3. How to dynamically filter tools based on user context?
+
+The library provides a powerful tool filtering system that works with HTTP header extraction to enable dynamic access control. You can filter tools based on user context such as roles, permissions, client version, or any other criteria.
+
+#### Basic Context-Based Filtering
+
+Use `WithToolListFilter` combined with `WithHTTPContextFunc` to filter tools based on user context (e.g., roles, permissions, version, etc.):
+
+```go
+package main
+
+import (
+	"context"
+	"net/http"
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
+)
+
+// Extract user role from HTTP headers
+func extractUserRole(ctx context.Context, r *http.Request) context.Context {
+	if userRole := r.Header.Get("X-User-Role"); userRole != "" {
+		ctx = context.WithValue(ctx, "user_role", userRole)
+	}
+	return ctx
+}
+
+// Create role-based filter
+func createRoleBasedFilter() mcp.ToolListFilter {
+	return func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
+		userRole := "guest" // default
+		if role, ok := ctx.Value("user_role").(string); ok && role != "" {
+			userRole = role
+		}
+
+		var filtered []*mcp.Tool
+		for _, tool := range tools {
+			switch userRole {
+			case "admin":
+				filtered = append(filtered, tool) // Admin sees all tools
+			case "user":
+				if tool.Name == "calculator" || tool.Name == "weather" {
+					filtered = append(filtered, tool)
+				}
+			case "guest":
+				if tool.Name == "calculator" {
+					filtered = append(filtered, tool)
+				}
+			}
+		}
+		return filtered
+	}
+}
+
+func main() {
+	// Create server with context-based tool filtering
+	server := mcp.NewServer(
+		"filtered-server", "1.0.0",
+		mcp.WithHTTPContextFunc(extractUserRole),
+		mcp.WithToolListFilter(createRoleBasedFilter()),
+	)
+
+	// Register tools as usual
+	server.RegisterTool(calculatorTool, calculatorHandler)
+	server.RegisterTool(weatherTool, weatherHandler)
+	server.RegisterTool(adminTool, adminHandler)
+	
+	server.Start()
+}
+```
+
+#### Advanced Custom Filter Functions
+
+You can create more complex filtering logic:
+
+```go
+func createAdvancedFilter() mcp.ToolListFilter {
+	return func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
+		// Extract user information from context
+		userRole := "guest"
+		if role, ok := ctx.Value("user_role").(string); ok && role != "" {
+			userRole = role
+		}
+		
+		clientVersion := ""
+		if version, ok := ctx.Value("client_version").(string); ok {
+			clientVersion = version
+		}
+		
+		// Complex business logic
+		if userRole == "premium" && clientVersion == "2.0.0" {
+			return tools // Premium users with v2.0.0 see all tools
+		}
+		
+		var filtered []*mcp.Tool
+		for _, tool := range tools {
+			if shouldShowTool(tool, userRole, clientVersion) {
+				filtered = append(filtered, tool)
+			}
+		}
+		return filtered
+	}
+}
+
+// Helper function for business logic
+func shouldShowTool(tool *mcp.Tool, userRole, clientVersion string) bool {
+	// Implement your business logic here
+	switch tool.Name {
+	case "calculator":
+		return true // Available to everyone
+	case "weather":
+		return userRole == "user" || userRole == "admin"
+	case "admin_panel":
+		return userRole == "admin"
+	default:
+		return false
+	}
+}
+```
+
+#### Testing Tool Filtering
+
+You can test different user contexts by sending HTTP headers:
+
+```bash
+# Admin sees all tools
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-User-Role: admin" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+
+# User sees filtered tools
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-User-Role: user" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+```
+
+#### Key Benefits
+
+- **Flexible Filtering**: Create custom filters based on any context information
+- **Transport Independence**: Works with both stateful and stateless modes
+- **Performance**: Filters run only when tools are listed, not on every request
+- **Security**: Tools are completely hidden from unauthorized users

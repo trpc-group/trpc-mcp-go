@@ -33,6 +33,9 @@ type toolManager struct {
 
 	// Track insertion order of tools
 	toolsOrder []string
+
+	// Tool list filter function.
+	toolListFilter ToolListFilter
 }
 
 // newToolManager creates a tool manager
@@ -45,6 +48,12 @@ func newToolManager() *toolManager {
 // withServerProvider sets the server provider
 func (m *toolManager) withServerProvider(provider serverProvider) *toolManager {
 	m.serverProvider = provider
+	return m
+}
+
+// withToolListFilter sets the tool list filter.
+func (m *toolManager) withToolListFilter(filter ToolListFilter) *toolManager {
+	m.toolListFilter = filter
 	return m
 }
 
@@ -103,6 +112,11 @@ func (m *toolManager) handleListTools(
 ) (JSONRPCMessage, error) {
 	// Get all tools
 	toolPtrs := m.getTools("")
+
+	// Apply filter if available.
+	if m.toolListFilter != nil {
+		toolPtrs = m.toolListFilter(ctx, toolPtrs)
+	}
 
 	// Convert []*mcp.Tool to []mcp.Tool
 	tools := make([]Tool, len(toolPtrs))

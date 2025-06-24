@@ -53,6 +53,9 @@ type serverConfig struct {
 
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
+
+	// Tool list filter function
+	toolListFilter ToolListFilter
 }
 
 // Server MCP server
@@ -105,6 +108,11 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 func (s *Server) initComponents() {
 	// Create tool manager.
 	s.toolManager = newToolManager()
+
+	// Set tool list filter if configured
+	if s.config.toolListFilter != nil {
+		s.toolManager.withToolListFilter(s.config.toolListFilter)
+	}
 
 	// Create resource manager.
 	s.resourceManager = newResourceManager()
@@ -230,6 +238,32 @@ func WithHTTPContextFunc(fn HTTPContextFunc) ServerOption {
 func WithStatelessMode(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.isStateless = enabled
+	}
+}
+
+// WithToolListFilter sets a tool list filter that will be applied to tools/list requests.
+// The filter function receives the request context and all registered tools, and should
+// return a filtered list of tools that should be visible to the client.
+//
+// The context may contain user information extracted from HTTP headers (in stateless mode)
+// or session information (in stateful mode). Use helper functions like GetUserRole()
+// and GetClientVersion() to extract relevant information.
+//
+// Example:
+//
+//	server := mcp.NewServer("my-server", "1.0",
+//	    mcp.WithHTTPContextFunc(extractUserInfo), // Extract user info from headers
+//	    mcp.WithToolListFilter(func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
+//	        userRole := mcp.GetUserRole(ctx)
+//	        if userRole == "admin" {
+//	            return tools // Admin sees all tools
+//	        }
+//	        return filterUserTools(tools) // Filter for regular users
+//	    }),
+//	)
+func WithToolListFilter(filter ToolListFilter) ServerOption {
+	return func(s *Server) {
+		s.config.toolListFilter = filter
 	}
 }
 
