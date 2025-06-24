@@ -56,6 +56,9 @@ type serverConfig struct {
 
 	// Tool list filter function
 	toolListFilter ToolListFilter
+
+	// Method name modifier for external customization.
+	methodNameModifier MethodNameModifier
 }
 
 // Server MCP server
@@ -112,6 +115,11 @@ func (s *Server) initComponents() {
 	// Set tool list filter if configured
 	if s.config.toolListFilter != nil {
 		s.toolManager.withToolListFilter(s.config.toolListFilter)
+	}
+
+	// Set method name modifier if configured.
+	if s.config.methodNameModifier != nil {
+		s.toolManager.withMethodNameModifier(s.config.methodNameModifier)
 	}
 
 	// Create resource manager.
@@ -452,4 +460,13 @@ func (s *Server) withContext(ctx context.Context) context.Context {
 // GetServerInfo returns the server implementation information
 func (s *Server) GetServerInfo() Implementation {
 	return s.serverInfo
+}
+
+// SetMethodNameModifier sets the method name modifier for the server.
+// This allows external components to configure method name modification after server creation.
+func (s *Server) SetMethodNameModifier(modifier MethodNameModifier) {
+	s.config.methodNameModifier = modifier
+	if s.toolManager != nil {
+		s.toolManager.withMethodNameModifier(modifier)
+	}
 }

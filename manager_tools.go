@@ -20,6 +20,10 @@ type serverProvider interface {
 	withContext(ctx context.Context) context.Context
 }
 
+// MethodNameModifier defines a function type for modifying method names in context.
+// This allows external components (like the integrated version) to customize method names for monitoring.
+type MethodNameModifier func(ctx context.Context, method, toolName string)
+
 // toolManager is responsible for managing MCP tools
 type toolManager struct {
 	// Registered tools
@@ -36,6 +40,9 @@ type toolManager struct {
 
 	// Tool list filter function.
 	toolListFilter ToolListFilter
+
+	// Method name modifier for external customization.
+	methodNameModifier MethodNameModifier
 }
 
 // newToolManager creates a tool manager
@@ -54,6 +61,12 @@ func (m *toolManager) withServerProvider(provider serverProvider) *toolManager {
 // withToolListFilter sets the tool list filter.
 func (m *toolManager) withToolListFilter(filter ToolListFilter) *toolManager {
 	m.toolListFilter = filter
+	return m
+}
+
+// withMethodNameModifier sets the method name modifier.
+func (m *toolManager) withMethodNameModifier(modifier MethodNameModifier) *toolManager {
+	m.methodNameModifier = modifier
 	return m
 }
 
@@ -201,6 +214,11 @@ func (m *toolManager) handleCallTool(
 	// Before calling the tool, inject server instance into context if server provider exists
 	if m.serverProvider != nil {
 		ctx = m.serverProvider.withContext(ctx)
+	}
+
+	// Modify method name for monitoring if modifier is available.
+	if m.methodNameModifier != nil {
+		m.methodNameModifier(ctx, MethodToolsCall, toolName)
 	}
 
 	// Execute tool

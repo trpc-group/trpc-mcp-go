@@ -295,3 +295,64 @@ func TestToolManager_ServerInfoInContext(t *testing.T) {
 	assert.Equal(t, testServerName, capturedServerInfo.Name)
 	assert.Equal(t, testServerVersion, capturedServerInfo.Version)
 }
+
+// TestToolManager_MethodNameModifier tests the method name modifier functionality.
+func TestToolManager_MethodNameModifier(t *testing.T) {
+	// Create tool manager.
+	manager := newToolManager()
+
+	// Track method modification calls.
+	var modificationCalls []struct {
+		method   string
+		toolName string
+	}
+
+	// Create a test modifier.
+	testModifier := func(ctx context.Context, method, toolName string) {
+		modificationCalls = append(modificationCalls, struct {
+			method   string
+			toolName string
+		}{method: method, toolName: toolName})
+	}
+
+	// Set the modifier.
+	manager.withMethodNameModifier(testModifier)
+
+	// Create and register tool.
+	tool := NewMockTool("test-modifier-tool", "Test Method Modifier Tool", map[string]interface{}{})
+
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+
+	// Test executing the tool.
+	ctx := context.Background()
+
+	// Create request
+	req := newJSONRPCRequest("modifier-1", MethodToolsCall, map[string]interface{}{
+		"name": "test-modifier-tool",
+		"arguments": map[string]interface{}{
+			"param1": "value1",
+		},
+	})
+
+	// Process request.
+	result, err := manager.handleCallTool(ctx, req, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify modifier was called.
+	assert.Len(t, modificationCalls, 1)
+	assert.Equal(t, MethodToolsCall, modificationCalls[0].method)
+	assert.Equal(t, "test-modifier-tool", modificationCalls[0].toolName)
+
+	// Test without modifier (should not panic).
+	managerWithoutModifier := newToolManager()
+	managerWithoutModifier.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+
+	result2, err2 := managerWithoutModifier.handleCallTool(ctx, req, nil)
+	assert.NoError(t, err2)
+	assert.NotNil(t, result2)
+}
