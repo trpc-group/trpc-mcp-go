@@ -48,11 +48,12 @@ type GetPromptResult struct {
 	Messages    []PromptMessage `json:"messages"`
 }
 
+// PromptListChangedNotification represents a notification that the prompt list has changed
 type PromptListChangedNotification struct {
 	Notification
 }
 
-// Prompt represents a prompt or prompt template provided by the server
+// Prompt represents a prompt or prompt template provided by the server.
 type Prompt struct {
 	// Name is the name of the prompt or prompt template
 	// Corresponds to schema: "name": {"description": "The name of the prompt or prompt template."}

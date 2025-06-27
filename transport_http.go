@@ -13,7 +13,7 @@ import (
 	"net/http"
 )
 
-// HTTPReqHandler is a custom HTTP request handler interface
+// HTTPReqHandler is a custom HTTP request handler interface.
 type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)
 }

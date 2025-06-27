@@ -13,7 +13,7 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/session"
 )
 
-// Session defines the session interface
+// Session defines the session interface.
 type Session interface {
 	// GetID returns the session ID
 	GetID() string

@@ -69,7 +69,7 @@ type streamableHTTPClientTransport struct {
 	logger Logger
 }
 
-// NotificationHandler is a handler for notifications
+// NotificationHandler is a handler for notifications.
 type NotificationHandler func(notification *JSONRPCNotification) error
 
 // streamOptions represents streaming options

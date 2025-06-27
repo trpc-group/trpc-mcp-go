@@ -70,7 +70,7 @@ type ToolListChangedNotification struct {
 	Notification
 }
 
-// Tool represents an MCP tool
+// Tool represents an MCP tool.
 type Tool struct {
 	// Tool name
 	Name string `json:"name"`

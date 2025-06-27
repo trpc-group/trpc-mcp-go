@@ -15,6 +15,7 @@ import (
 
 // Constants definition
 const (
+	// JSONRPCVersion specifies the JSON-RPC version
 	JSONRPCVersion = "2.0"
 
 	// Standard JSON-RPC error codes
@@ -109,8 +110,8 @@ func newJSONRPCNotification(notification Notification) *JSONRPCNotification {
 	}
 }
 
-// NewJSONRPCNotificationFromMap creates a new JSON-RPC notification from a map of parameters
-// This is a convenience function that converts map[string]interface{} to NotificationParams
+// NewJSONRPCNotificationFromMap creates a new JSON-RPC notification from a map of parameters.
+// This is a convenience function that converts map[string]interface{} to NotificationParams.
 func NewJSONRPCNotificationFromMap(method string, params map[string]interface{}) *JSONRPCNotification {
 	notificationParams := NotificationParams{
 		AdditionalFields: make(map[string]interface{}),
@@ -144,11 +145,16 @@ type RequestId interface{}
 type JSONRPCMessageType string
 
 const (
-	JSONRPCMessageTypeRequest      JSONRPCMessageType = "request"
-	JSONRPCMessageTypeResponse     JSONRPCMessageType = "response"
+	// JSONRPCMessageTypeRequest represents a JSON-RPC request message
+	JSONRPCMessageTypeRequest JSONRPCMessageType = "request"
+	// JSONRPCMessageTypeResponse represents a JSON-RPC response message
+	JSONRPCMessageTypeResponse JSONRPCMessageType = "response"
+	// JSONRPCMessageTypeNotification represents a JSON-RPC notification message
 	JSONRPCMessageTypeNotification JSONRPCMessageType = "notification"
-	JSONRPCMessageTypeError        JSONRPCMessageType = "error"
-	JSONRPCMessageTypeUnknown      JSONRPCMessageType = "unknown"
+	// JSONRPCMessageTypeError represents a JSON-RPC error message
+	JSONRPCMessageTypeError JSONRPCMessageType = "error"
+	// JSONRPCMessageTypeUnknown represents an unknown message type
+	JSONRPCMessageTypeUnknown JSONRPCMessageType = "unknown"
 )
 
 // parseJSONRPCMessageType determines the type of a JSON-RPC message

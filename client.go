@@ -22,14 +22,82 @@ type State string
 
 // Client state constants.
 const (
+	// StateDisconnected indicates the client is not connected to any server.
 	StateDisconnected State = "disconnected"
-	StateConnected    State = "connected"
-	StateInitialized  State = "initialized"
+	// StateConnected indicates the client has established a connection but not initialized.
+	StateConnected State = "connected"
+	// StateInitialized indicates the client is fully initialized and ready for use.
+	StateInitialized State = "initialized"
 )
 
 // String returns the string representation of the state.
 func (s State) String() string {
 	return string(s)
+}
+
+// Connector defines the core interface that all MCP clients must implement.
+// This provides a unified interface for different transport implementations.
+type Connector interface {
+	// Initialize establishes connection and initializes the MCP client.
+	Initialize(ctx context.Context, req *InitializeRequest) (*InitializeResult, error)
+	// Close closes the client connection and cleans up resources.
+	Close() error
+	// GetState returns the current client state.
+	GetState() State
+	// ListTools retrieves all available tools from the server.
+	ListTools(ctx context.Context, req *ListToolsRequest) (*ListToolsResult, error)
+	// CallTool executes a specific tool with given parameters.
+	CallTool(ctx context.Context, req *CallToolRequest) (*CallToolResult, error)
+	// ListPrompts retrieves all available prompts from the server.
+	ListPrompts(ctx context.Context, req *ListPromptsRequest) (*ListPromptsResult, error)
+	// GetPrompt retrieves a specific prompt by name.
+	GetPrompt(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error)
+	// ListResources retrieves all available resources from the server.
+	ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error)
+	// ReadResource reads the content of a specific resource.
+	ReadResource(ctx context.Context, req *ReadResourceRequest) (*ReadResourceResult, error)
+	// RegisterNotificationHandler registers a handler for server notifications.
+	RegisterNotificationHandler(method string, handler NotificationHandler)
+	// UnregisterNotificationHandler removes a notification handler.
+	UnregisterNotificationHandler(method string)
+}
+
+// SessionClient extends Connector with session management capabilities.
+// This is primarily for HTTP-based transports that support sessions.
+type SessionClient interface {
+	Connector
+	// GetSessionID returns the current session ID.
+	GetSessionID() string
+	// TerminateSession terminates the current session.
+	TerminateSession(ctx context.Context) error
+}
+
+// ProcessClient extends Connector with process management capabilities.
+// This is for stdio-based transports that manage external processes.
+type ProcessClient interface {
+	Connector
+
+	// GetProcessID returns the process ID of the managed process.
+	GetProcessID() int
+	// GetCommandLine returns the command line used to start the process.
+	GetCommandLine() []string
+	// IsProcessRunning checks if the managed process is still running.
+	IsProcessRunning() bool
+	// RestartProcess restarts the managed process.
+	RestartProcess(ctx context.Context) error
+}
+
+// TransportInfo provides information about the underlying transport.
+type TransportInfo struct {
+	Type         string                 `json:"type"`         // "http", "stdio", "sse"
+	Description  string                 `json:"description"`  // Human readable description
+	Capabilities map[string]interface{} `json:"capabilities"` // Transport-specific capabilities
+}
+
+// TransportAware allows clients to expose transport information.
+type TransportAware interface {
+	// GetTransportInfo returns information about the underlying transport
+	GetTransportInfo() TransportInfo
 }
 
 // Client represents an MCP client.
@@ -101,6 +169,7 @@ func WithClientGetSSEEnabled(enabled bool) ClientOption {
 	}
 }
 
+// WithClientPath sets a custom path for the client transport.
 func WithClientPath(path string) ClientOption {
 	return func(c *Client) {
 		c.transportOptions = append(c.transportOptions, withClientTransportPath(path))
@@ -297,6 +366,8 @@ func (c *Client) TerminateSession(ctx context.Context) error {
 func (c *Client) RegisterNotificationHandler(method string, handler NotificationHandler) {
 	if httpTransport, ok := c.transport.(*streamableHTTPClientTransport); ok {
 		httpTransport.registerNotificationHandler(method, handler)
+	} else if stdioTransport, ok := c.transport.(*stdioClientTransport); ok {
+		stdioTransport.registerNotificationHandler(method, handler)
 	}
 }
 
@@ -304,6 +375,8 @@ func (c *Client) RegisterNotificationHandler(method string, handler Notification
 func (c *Client) UnregisterNotificationHandler(method string) {
 	if httpTransport, ok := c.transport.(*streamableHTTPClientTransport); ok {
 		httpTransport.unregisterNotificationHandler(method)
+	} else if stdioTransport, ok := c.transport.(*stdioClientTransport); ok {
+		stdioTransport.unregisterNotificationHandler(method)
 	}
 }
 

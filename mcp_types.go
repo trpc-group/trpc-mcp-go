@@ -145,7 +145,7 @@ type ProgressToken interface{}
 // Cursor is the base cursor struct for all MCP cursors.
 type Cursor string
 
-// Role represents the sender or recipient of a message
+// Role represents the sender or recipient of a message.
 type Role string
 
 const (
@@ -165,6 +165,7 @@ type Annotated struct {
 	} `json:"annotations,omitempty"`
 }
 
+// Content represents different types of message content (text, image, audio, embedded resource).
 type Content interface {
 	isContent()
 }

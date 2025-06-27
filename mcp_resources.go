@@ -9,6 +9,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/yosida95/uritemplate/v3"
 )
 
@@ -30,7 +31,7 @@ type registerResourceTemplate struct {
 	Handler          resourceTemplateHandler
 }
 
-// Resource represents a known resource that the server can read
+// Resource represents a known resource that the server can read.
 type Resource struct {
 	// Resource name
 	Name string `json:"name"`
@@ -94,11 +95,13 @@ type ReadResourceRequest struct {
 	} `json:"params"`
 }
 
+// ReadResourceResult describes a result of reading a resource.
 type ReadResourceResult struct {
 	Result
 	Contents []ResourceContents `json:"contents"`
 }
 
+// ResourceUpdatedNotification represents a notification that a resource has been updated.
 type ResourceUpdatedNotification struct {
 	Notification
 	Params struct {
@@ -106,6 +109,7 @@ type ResourceUpdatedNotification struct {
 	} `json:"params"`
 }
 
+// SubscribeRequest describes a request to subscribe to resource updates.
 type SubscribeRequest struct {
 	Request
 	Params struct {
@@ -113,6 +117,7 @@ type SubscribeRequest struct {
 	} `json:"params"`
 }
 
+// UnsubscribeRequest describes a request to unsubscribe from resource updates.
 type UnsubscribeRequest struct {
 	Request
 	Params struct {

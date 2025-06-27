@@ -195,7 +195,7 @@ func WithServerLogger(logger Logger) ServerOption {
 	}
 }
 
-// WithoutSession disables session
+// WithoutSession disables session.
 func WithoutSession() ServerOption {
 	return func(s *Server) {
 		s.config.EnableSession = false
@@ -210,14 +210,14 @@ func WithServerPath(prefix string) ServerOption {
 	}
 }
 
-// WithPostSSEEnabled enables or disables SSE responses
+// WithPostSSEEnabled enables or disables SSE responses.
 func WithPostSSEEnabled(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.postSSEEnabled = enabled
 	}
 }
 
-// WithGetSSEEnabled enables or disables GET SSE
+// WithGetSSEEnabled enables or disables GET SSE.
 func WithGetSSEEnabled(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.getSSEEnabled = enabled

@@ -50,6 +50,7 @@ func GetNotificationSender(ctx context.Context) (notificationSender, bool) {
 	return sender, ok
 }
 
+// NewNotification creates a new notification with the given method and parameters
 func NewNotification(method string, params map[string]interface{}) *Notification {
 	notificationParams := NotificationParams{
 		AdditionalFields: make(map[string]interface{}),
