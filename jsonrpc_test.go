@@ -7,6 +7,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -260,5 +262,38 @@ func TestNewJSONRPCNotification(t *testing.T) {
 			assert.Equal(t, tc.expected.Method, result.Method)
 			assert.Equal(t, tc.expected.Params, result.Params)
 		})
+	}
+}
+
+// TestNewJSONRPCRequestNilParams tests that newJSONRPCRequest handles nil params correctly.
+func TestNewJSONRPCRequestNilParams(t *testing.T) {
+	// Test with nil params
+	req := newJSONRPCRequest(1, "test.method", nil)
+
+	// Marshal the request to JSON.
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	// Convert to string for easier inspection.
+	jsonStr := string(jsonData)
+
+	// Check if params field is an empty object, not null.
+	if !strings.Contains(jsonStr, `"params":{}`) {
+		t.Errorf("Expected params field to be empty object {}, but got: %s", jsonStr)
+	}
+
+	// Verify that Params is not nil.
+	if req.Params == nil {
+		t.Error("req.Params should not be nil")
+	}
+
+	// Verify that Params is an empty map.
+	paramsMap, ok := req.Params.(map[string]interface{})
+	if !ok {
+		t.Error("req.Params should be a map[string]interface{}")
+	} else if len(paramsMap) != 0 {
+		t.Error("req.Params should be an empty map")
 	}
 }

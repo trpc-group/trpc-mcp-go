@@ -442,9 +442,9 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 		httpReq.URL.Path = t.path
 	}
 
-	// Set request headers
+	// Set request headers - must accept both JSON and SSE responses per MCP specification.
 	httpReq.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
-	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON)
+	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
 	if t.sessionID != "" {
 		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	}

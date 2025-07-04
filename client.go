@@ -284,7 +284,14 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 
 	// Create request.
 	requestID := c.requestID.Add(1)
-	req := newJSONRPCRequest(requestID, MethodToolsList, nil)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodToolsList,
+		},
+		Params: listToolsReq.Params,
+	}
 
 	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {

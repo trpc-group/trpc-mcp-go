@@ -207,3 +207,77 @@ func TestWithCustomCapabilities(t *testing.T) {
 		assert.True(t, customFeature, "customFeature should be true")
 	}
 }
+
+// TestStatelessCrossNodeInitialization tests the cross-node scenario in stateless mode
+// where initialize request goes to node A but notifications/initialized goes to node B
+func TestStatelessCrossNodeInitialization(t *testing.T) {
+	// Create two servers representing different nodes.
+	serverA := NewServer("Node-A", "1.0.0", WithStatelessMode(true))
+	serverB := NewServer("Node-B", "1.0.0", WithStatelessMode(true))
+
+	// Node A: Build initialize JSON-RPC request directly (stateless mode).
+	jsonReq := newJSONRPCRequest(1, MethodInitialize, map[string]interface{}{
+		"protocolVersion": ProtocolVersion_2025_03_26,
+		"clientInfo": Implementation{
+			Name:    "Test-Client",
+			Version: "1.0.0",
+		},
+		"capabilities": ClientCapabilities{},
+	})
+
+	// Create temporary session for Node A (simulating stateless mode).
+	sessionA := newSession()
+
+	// Node A processes initialize request.
+	ctx := context.Background()
+	initResp, err := serverA.mcpHandler.handleRequest(ctx, jsonReq, sessionA)
+	require.NoError(t, err)
+	assert.NotNil(t, initResp)
+
+	// Node B: Handle notifications/initialized (different session, simulating cross-node).
+	sessionB := newSession() // Different session ID from sessionA.
+
+	// Create initialized notification
+	initNotification := NewInitializedNotification()
+
+	// Node B processes notifications/initialized - this should NOT fail.
+	err = serverB.mcpHandler.handleNotification(ctx, initNotification, sessionB)
+	assert.NoError(t, err, "Cross-node notifications/initialized should succeed in stateless mode")
+}
+
+// TestStatefulCrossNodeInitialization tests that stateful mode still validates session state.
+func TestStatefulCrossNodeInitialization(t *testing.T) {
+	// Create server in stateful mode
+	server := NewServer("Stateful-Server", "1.0.0") // Default is stateful.
+
+	// Create session that has NOT been through initialize.
+	session := newSession()
+
+	// Create initialized notification.
+	initNotification := NewInitializedNotification()
+
+	// This should fail because session was not initialized.
+	ctx := context.Background()
+	err := server.mcpHandler.handleNotification(ctx, initNotification, session)
+	assert.Error(t, err, "notifications/initialized should fail for uninitialized session in stateful mode")
+}
+
+// TestStatelessModeSkipsLifecycleManager tests that stateless mode skips lifecycle manager.
+func TestStatelessModeSkipsLifecycleManager(t *testing.T) {
+	// Create stateless server.
+	server := NewServer("Stateless-Server", "1.0.0", WithStatelessMode(true))
+
+	// Verify that the lifecycle manager is configured with stateless mode.
+	assert.True(t, server.mcpHandler.lifecycleManager.isStateless, "Lifecycle manager should be in stateless mode")
+
+	// Create temporary session.
+	session := newSession()
+
+	// Create initialized notification.
+	initNotification := NewInitializedNotification()
+
+	// This should succeed without any session state validation.
+	ctx := context.Background()
+	err := server.mcpHandler.lifecycleManager.handleInitialized(ctx, initNotification, session)
+	assert.NoError(t, err, "handleInitialized should succeed in stateless mode")
+}

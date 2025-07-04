@@ -370,8 +370,12 @@ func (h *httpServerHandler) handlePostNotification(ctx context.Context, w http.R
 		if h.enableSession && session == nil {
 			h.logger.Info("Warning: Received initialized notification but no active session")
 		}
-		h.sendNotificationResponse(w, session)
-		return
+		// In stateless mode, skip initialization state check and return success directly.
+		if h.isStateless {
+			h.logger.Debug("Stateless mode: Skipping initialization state check for notifications/initialized")
+			h.sendNotificationResponse(w, session)
+			return
+		}
 	}
 	notificationCtx := ctx
 	if session != nil {
