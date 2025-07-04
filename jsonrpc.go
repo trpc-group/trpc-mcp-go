@@ -69,6 +69,10 @@ type JSONRPCNotification struct {
 
 // newJSONRPCRequest creates a new JSON-RPC request
 func newJSONRPCRequest(id interface{}, method string, params map[string]interface{}) *JSONRPCRequest {
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+
 	req := &JSONRPCRequest{
 		JSONRPC: JSONRPCVersion,
 		ID:      id,

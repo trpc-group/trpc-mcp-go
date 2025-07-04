@@ -136,6 +136,11 @@ func (s *Server) initComponents() {
 		lifecycleManager = newLifecycleManager(s.serverInfo)
 	}
 
+	// Configure stateless mode for lifecycle manager.
+	if s.config.isStateless {
+		lifecycleManager = lifecycleManager.withStatelessMode(true)
+	}
+
 	// Create MCP handler.
 	s.mcpHandler = newMCPHandler(
 		withToolManager(s.toolManager),

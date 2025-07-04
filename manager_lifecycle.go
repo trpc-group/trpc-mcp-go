@@ -41,6 +41,9 @@ type lifecycleManager struct {
 	// Prompt manager reference
 	promptManager *promptManager
 
+	// Whether in stateless mode.
+	isStateless bool
+
 	// Mutex for concurrent access
 	mu sync.RWMutex
 }
@@ -100,6 +103,12 @@ func (m *lifecycleManager) withPromptManager(promptManager *promptManager) *life
 // withClientTransportLogger sets the logger for lifecycleManager.
 func (m *lifecycleManager) withLogger(logger Logger) *lifecycleManager {
 	m.logger = logger
+	return m
+}
+
+// withStatelessMode sets the stateless mode flag for lifecycleManager.
+func (m *lifecycleManager) withStatelessMode(isStateless bool) *lifecycleManager {
+	m.isStateless = isStateless
 	return m
 }
 
@@ -267,6 +276,12 @@ func convertToServerCapabilities(capMap map[string]interface{}) ServerCapabiliti
 
 // handleInitialized handles initialized notifications
 func (m *lifecycleManager) handleInitialized(ctx context.Context, notification *JSONRPCNotification, session Session) error {
+	// In stateless mode, skip session state check.
+	if m.isStateless {
+		m.logger.Debug("Stateless mode: Skipping session state check for notifications/initialized")
+		return nil
+	}
+
 	if session == nil {
 		// Or handle as a global initialized event if applicable
 		return nil

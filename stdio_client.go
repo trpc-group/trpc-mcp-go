@@ -205,10 +205,13 @@ func (c *StdioClient) ListTools(ctx context.Context, req *ListToolsRequest) (*Li
 	}
 
 	requestID := c.requestID.Add(1)
-	jsonReq := newJSONRPCRequest(requestID, MethodToolsList, nil)
-
-	if req != nil && !isZeroStruct(req.Params) {
-		jsonReq.Params = req.Params
+	jsonReq := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodToolsList,
+		},
+		Params: req.Params,
 	}
 
 	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
@@ -264,10 +267,13 @@ func (c *StdioClient) ListPrompts(ctx context.Context, req *ListPromptsRequest) 
 	}
 
 	requestID := c.requestID.Add(1)
-	jsonReq := newJSONRPCRequest(requestID, MethodPromptsList, nil)
-
-	if req != nil && !isZeroStruct(req.Params) {
-		jsonReq.Params = req.Params
+	jsonReq := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodPromptsList,
+		},
+		Params: req.Params,
 	}
 
 	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
@@ -323,10 +329,13 @@ func (c *StdioClient) ListResources(ctx context.Context, req *ListResourcesReque
 	}
 
 	requestID := c.requestID.Add(1)
-	jsonReq := newJSONRPCRequest(requestID, MethodResourcesList, nil)
-
-	if req != nil && !isZeroStruct(req.Params) {
-		jsonReq.Params = req.Params
+	jsonReq := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodResourcesList,
+		},
+		Params: req.Params,
 	}
 
 	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
