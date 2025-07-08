@@ -180,9 +180,9 @@ func (m *lifecycleManager) selectSupportedVersion(protocolVersion string) string
 // logProtocolVersion logs protocol version selection
 func (m *lifecycleManager) logProtocolVersion(requested, selected string) {
 	if requested != selected {
-		m.logger.Infof("Client requested protocol version %s is not supported, using %s", requested, selected)
+		m.logger.Debugf("Client requested protocol version %s is not supported, using %s", requested, selected)
 	} else {
-		m.logger.Infof("Using protocol version: %s", selected)
+		m.logger.Debugf("Using protocol version: %s", selected)
 	}
 }
 

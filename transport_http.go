@@ -83,6 +83,9 @@ var (
 
 // transport represents the interface for the communication transport layer
 type transport interface {
+	// Start the transport
+	start(ctx context.Context) error
+
 	// Send a request and wait for a response
 	sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error)
 

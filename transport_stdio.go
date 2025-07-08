@@ -105,6 +105,11 @@ func withStdioTransportLogger(logger Logger) stdioTransportOption {
 	}
 }
 
+// start is a no-op for stdioClientTransport.
+func (t *stdioClientTransport) start(ctx context.Context) error {
+	return nil
+}
+
 // startProcess starts the MCP server process.
 func (t *stdioClientTransport) startProcess() error {
 	if t.closed.Load() {

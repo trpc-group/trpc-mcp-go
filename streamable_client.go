@@ -151,6 +151,11 @@ func withTransportHTTPHeaders(headers http.Header) transportOption {
 	}
 }
 
+// start is a no-op for streamableHTTPClientTransport.
+func (t *streamableHTTPClientTransport) start(ctx context.Context) error {
+	return nil
+}
+
 // SendRequest sends a request and waits for a response
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
