@@ -36,13 +36,9 @@ func main() {
 	log.Printf("Creating SSE client for 2024-11-05 protocol compatibility...")
 	log.Printf("Connecting to %s...", serverURL)
 
-	// Add detailed logs.
-	logger := mcp.GetDefaultLogger()
-
 	mcpClient, err := mcp.NewSSEClient(
 		serverURL,
 		clientInfo,
-		mcp.WithClientLogger(logger),
 		mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05), // Explicitly specify protocol version.
 	)
 	if err != nil {

@@ -68,7 +68,6 @@ The server sends notifications for:
 server := mcp.NewSSEServer(
     "SSE Compatibility Server",          // Server name
     "1.0.0",                             // Server version
-    mcp.WithSSEServerLogger(logger),     // Use logger
     mcp.WithSSEEndpoint("/sse"),         // Set SSE endpoint
     mcp.WithMessageEndpoint("/message"), // Set message endpoint
 )
@@ -93,7 +92,6 @@ if err := server.Start(":4000"); err != nil {
 mcpClient, err := mcp.NewSSEClient(
     "http://localhost:4000/sse",
     clientInfo,
-    mcp.WithClientLogger(logger),
     mcp.WithProtocolVersion(mcp.ProtocolVersion_2024_11_05),
 )
 

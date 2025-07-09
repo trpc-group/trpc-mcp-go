@@ -20,15 +20,11 @@ import (
 
 func main() {
 	// Create SSE server.
-	logger := mcp.GetDefaultLogger()
-
 	server := mcp.NewSSEServer(
 		"SSE Compatibility Server",          // Server name.
 		"1.0.0",                             // Server version.
-		mcp.WithSSEServerLogger(logger),     // Use logger.
 		mcp.WithSSEEndpoint("/sse"),         // Explicitly set SSE endpoint.
 		mcp.WithMessageEndpoint("/message"), // Explicitly set message endpoint.
-		mcp.WithBasePath(""),                // Do not use base path.
 	)
 
 	// Register tools.
