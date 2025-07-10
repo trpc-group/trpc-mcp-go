@@ -32,6 +32,18 @@ type Session interface {
 
 	// SetData sets session data
 	SetData(key string, value interface{})
+	
+	// RegisterCanceler stores a cancellation function
+	RegisterCanceler(requestID any, cancelFunc context.CancelFunc)
+
+	// CancelRequest finds and executes the cancellation function
+	CancelRequest(requestID any)
+
+	// CleanupRequest removes a canceller from the map
+	CleanupRequest(requestID any)
+
+	// CancelAll cancels all ongoing requests in the session
+	CancelAll()
 }
 
 // sessionManager defines the session manager interface

@@ -34,7 +34,7 @@ func TestNewJSONRPCRequest(t *testing.T) {
 				Request: Request{
 					Method: "test.method",
 				},
-				Params: (map[string]interface{}(nil)),
+				Params: map[string]interface{}{},
 			},
 		},
 		{
