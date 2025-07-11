@@ -134,6 +134,10 @@ func (m *lifecycleManager) updateCapabilities() {
 		capMap["prompts"] = map[string]interface{}{
 			"listChanged": true,
 		}
+		// Add completions capability if any prompt has completion handler
+		if m.promptManager.hasCompletionHandlers() {
+			capMap["completions"] = map[string]interface{}{}
+		}
 	}
 
 	// Preserve existing experimental features

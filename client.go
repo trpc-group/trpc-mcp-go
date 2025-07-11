@@ -52,6 +52,8 @@ type Connector interface {
 	ListPrompts(ctx context.Context, req *ListPromptsRequest) (*ListPromptsResult, error)
 	// GetPrompt retrieves a specific prompt by name.
 	GetPrompt(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error)
+	// CompletionComplete gets completion suggestions for a prompt or resource.
+	CompletionComplete(ctx context.Context, req *CompletionCompleteRequest) (*CompletionCompleteResult, error)
 	// ListResources retrieves all available resources from the server.
 	ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error)
 	// ReadResource reads the content of a specific resource.
@@ -459,6 +461,43 @@ func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) 
 
 	// Parse response using specialized parser
 	return parseGetPromptResultFromJSON(rawResp)
+}
+
+// CompletionComplete gets completion suggestions for a prompt or resource.
+func (c *Client) CompletionComplete(ctx context.Context, completionReq *CompletionCompleteRequest) (*CompletionCompleteResult, error) {
+	// Check if initialized.
+	if !c.initialized {
+		return nil, errors.ErrNotInitialized
+	}
+
+	// Create request.
+	requestID := c.requestID.Add(1)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodCompletionComplete,
+		},
+		Params: completionReq.Params,
+	}
+
+	rawResp, err := c.transport.sendRequest(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("completion complete request failed: %v", err)
+	}
+
+	// Check for error response
+	if isErrorResponse(rawResp) {
+		errResp, err := parseRawMessageToError(rawResp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse error response: %w", err)
+		}
+		return nil, fmt.Errorf("completion complete error: %s (code: %d)",
+			errResp.Error.Message, errResp.Error.Code)
+	}
+
+	// Parse response using specialized parser
+	return parseCompletionCompleteResultFromJSON(rawResp)
 }
 
 // ListResources lists available resources.
