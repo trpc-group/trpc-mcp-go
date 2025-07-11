@@ -41,6 +41,15 @@ func parseGetPromptResultFromJSON(rawMessage *json.RawMessage) (*GetPromptResult
 	return &result, nil
 }
 
+// parseCompletionCompleteResultFromJSON parses a raw JSON message into a CompletionCompleteResult
+func parseCompletionCompleteResultFromJSON(rawMessage *json.RawMessage) (*CompletionCompleteResult, error) {
+	var result CompletionCompleteResult
+	if err := json.Unmarshal(*rawMessage, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal CompletionCompleteResult: %v", err)
+	}
+	return &result, nil
+}
+
 // parseListResourcesResultFromJSON parses a raw JSON message into a ListResourcesResult
 func parseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourcesResult, error) {
 	var result ListResourcesResult
