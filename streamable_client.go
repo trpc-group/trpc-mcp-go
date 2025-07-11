@@ -87,7 +87,7 @@ func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOp
 	transport := &streamableHTTPClientTransport{
 		serverURL:            serverURL,
 		httpClient:           &http.Client{},
-		httpReqHandler:       DefaultHTTPReqHandlerFactory(),
+		httpReqHandler:       NewHTTPReqHandler(),
 		httpHeaders:          make(http.Header),
 		notificationHandlers: make(map[string]NotificationHandler),
 		enableGetSSE:         true,               // Default: GET SSE enabled
