@@ -65,7 +65,7 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 			sseTransport := &sseClientTransport{
 				baseURL:        parsedURL,
 				httpClient:     &http.Client{},
-				httpReqHandler: NewDefaultHTTPReqHandler(),
+				httpReqHandler: DefaultHTTPReqHandlerFactory(),
 				httpHeaders:    make(http.Header),
 				responses:      make(map[string]chan *json.RawMessage),
 				endpointChan:   make(chan struct{}),

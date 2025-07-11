@@ -18,6 +18,12 @@ type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)
 }
 
+// DefaultHTTPReqHandlerFactory creates HTTP request handlers.
+// This can be replaced by internal implementations to customize HTTP request handling.
+var DefaultHTTPReqHandlerFactory = func() HTTPReqHandler {
+	return &defaultHTTPReqHandler{}
+}
+
 // defaultHTTPReqHandler is the default implementation of HTTPReqHandler
 type defaultHTTPReqHandler struct{}
 
@@ -27,7 +33,7 @@ func (h *defaultHTTPReqHandler) Handle(ctx context.Context, client *http.Client,
 
 // NewDefaultHTTPReqHandler creates a new default HTTP request handler
 func NewDefaultHTTPReqHandler() HTTPReqHandler {
-	return &defaultHTTPReqHandler{}
+	return DefaultHTTPReqHandlerFactory()
 }
 
 // Common errors

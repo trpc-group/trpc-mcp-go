@@ -81,18 +81,13 @@ type streamOptions struct {
 	notificationHandlers map[string]NotificationHandler
 }
 
-// newStreamableHTTPClientTransport creates a new client transport
-//
-// This transport implementation automatically detects if the server is in stateless mode.
-// When no session ID is provided in the initialize response, the client automatically
-// sets itself to stateless mode and disables GET SSE connections.
 // newStreamableHTTPClientTransport creates a new client transport.
 // If logger is not set via options, uses the default logger.
 func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOption) *streamableHTTPClientTransport {
 	transport := &streamableHTTPClientTransport{
 		serverURL:            serverURL,
 		httpClient:           &http.Client{},
-		httpReqHandler:       NewDefaultHTTPReqHandler(),
+		httpReqHandler:       DefaultHTTPReqHandlerFactory(),
 		httpHeaders:          make(http.Header),
 		notificationHandlers: make(map[string]NotificationHandler),
 		enableGetSSE:         true,               // Default: GET SSE enabled
