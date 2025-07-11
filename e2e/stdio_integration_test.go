@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -139,7 +139,7 @@ func TestStdioClientServer_EndToEndIntegration(t *testing.T) {
 		// Test invalid parameters
 		_, err = client.CallTool(ctx, &mcp.CallToolRequest{
 			Params: mcp.CallToolParams{
-				Name: "echo",
+				Name:      "echo",
 				Arguments: map[string]interface{}{
 					// Missing required 'text' parameter
 				},
