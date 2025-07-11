@@ -8,6 +8,7 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -28,6 +29,9 @@ type Session struct {
 
 	// Session data
 	Data map[string]interface{}
+
+	// Cancelers for session termination
+	Cancelers sync.Map
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
@@ -78,6 +82,36 @@ func (s *Session) SetData(key string, value interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Data[key] = value
+}
+
+// RegisterCanceler stores a cancellation function
+func (s *Session) RegisterCanceler(requestID any, cancelFunc context.CancelFunc) {
+	s.Cancelers.Store(requestID, cancelFunc)
+}
+
+// CancelRequest finds and executes the cancellation function
+func (s *Session) CancelRequest(requestID any) {
+	if cancelFunc, ok := s.Cancelers.LoadAndDelete(requestID); ok {
+		if cf, ok := cancelFunc.(context.CancelFunc); ok {
+			cf() 
+		}
+	}
+}
+
+// CleanupRequest removes a canceller from the map
+func (s *Session) CleanupRequest(requestID any) {
+	s.Cancelers.Delete(requestID)
+}
+
+// CancelAll cancels all ongoing requests in the session
+func (s *Session) CancelAll() {
+	s.Cancelers.Range(func(key, value interface{}) bool {
+		if cf, ok := value.(context.CancelFunc); ok {
+			cf()
+		}
+		s.Cancelers.Delete(key)
+		return true
+	})
 }
 
 // SessionManager manages server-side sessions

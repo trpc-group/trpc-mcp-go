@@ -23,7 +23,7 @@ type handler interface {
 	handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
 	// HandleNotification processes notifications
-	handleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
+	handleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error
 }
 
 // mcpHandler implements the default MCP protocol handler
@@ -39,6 +39,12 @@ type mcpHandler struct {
 
 	// Prompt manager
 	promptManager *promptManager
+
+	// Session manager
+	sessionManager sessionManager
+
+	// Logger for the handler
+	logger Logger
 }
 
 // newMCPHandler creates an MCP protocol handler
@@ -69,6 +75,11 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 			Name:    defaultServerName,
 			Version: defaultServerVersion,
 		})
+	}
+
+	// Create a default session manager if not set
+	if h.sessionManager == nil {
+		h.sessionManager = &sessionManagerAdapter{}
 	}
 
 	// Pass managers to lifecycle manager
@@ -107,6 +118,20 @@ func withPromptManager(manager *promptManager) func(*mcpHandler) {
 	}
 }
 
+// withSessionManager sets the session manager
+func withSessionManager(manager sessionManager) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.sessionManager = manager
+	}
+}
+
+// withLogger sets the logger
+func withLogger(logger Logger) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.logger = logger
+	}
+}
+
 // Definition: request dispatch table type
 type requestHandlerFunc func(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
@@ -131,10 +156,20 @@ func (h *mcpHandler) requestDispatchTable() map[string]requestHandlerFunc {
 // Refactored handleRequest
 func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	dispatchTable := h.requestDispatchTable()
-	if handler, ok := dispatchTable[req.Method]; ok {
-		return handler(ctx, req, session)
+	handler, ok := dispatchTable[req.Method]
+	if !ok {
+		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
 	}
-	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+
+	reqCtx, cancel := context.WithCancel(ctx)
+	session.RegisterCanceler(req.ID, cancel)
+
+	defer func() {
+		cancel()
+		session.CleanupRequest(req.ID)
+	}()
+
+	return handler(reqCtx, req, session)
 }
 
 // Private methods for each case branch
@@ -192,6 +227,40 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 	switch notification.Method {
 	case MethodNotificationsInitialized:
 		return h.lifecycleManager.handleInitialized(ctx, notification, session)
+	case MethodCancelRequest:
+		// Extract requestId directly from additionalFields
+		additionalFields := notification.Params.AdditionalFields
+		if additionalFields == nil {
+			// No additional fields, nothing to cancel
+			return nil
+		}
+
+		// Extract requestId
+		requestId, exists := additionalFields["requestId"]
+		if !exists {
+			// Required field missing, silently ignore
+			return nil
+		}
+
+		// Extract optional reason
+		reason := ""
+		if reasonValue, ok := additionalFields["reason"].(string); ok {
+			reason = reasonValue
+		}
+
+		// Check if trying to cancel initialize request
+		if reqID, ok := requestId.(string); ok && reqID == "initialize" {
+			// The initialize request MUST NOT be cancelled by clients
+			return nil
+		}
+
+		// Log reason if available
+		if reason != "" && h.logger != nil {
+			h.logger.Debugf("Cancel request %v reason: %s", requestId, reason)
+		}
+
+		session.CancelRequest(requestId)
+		return nil
 	default:
 		// Ignore unknown notifications
 		return nil
@@ -202,4 +271,16 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 func (h *mcpHandler) onSessionTerminated(sessionID string) {
 	// Notify lifecycle manager that session has terminated
 	h.lifecycleManager.onSessionTerminated(sessionID)
+
+	// Retrieve the session from the session manager
+	session, found := h.sessionManager.getSession(sessionID)
+	if found {
+		// Cancel all in-progress requests for this session
+		session.CancelAll()
+	}
+
+	// Log the session termination
+	if h.logger != nil {
+		h.logger.Infof("Session %s terminated, all pending requests cancelled", sessionID)
+	}
 }

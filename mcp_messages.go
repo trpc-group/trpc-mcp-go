@@ -174,6 +174,7 @@ const (
 	// Base protocol
 	MethodInitialize               = "initialize"
 	MethodNotificationsInitialized = "notifications/initialized"
+	MethodCancelRequest 		   = "notifications/cancelled"
 
 	// Tool related
 	MethodToolsList = "tools/list"

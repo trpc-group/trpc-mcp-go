@@ -221,6 +221,12 @@ func (m *toolManager) handleCallTool(
 		m.methodNameModifier(ctx, MethodToolsCall, toolName)
 	}
 
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), nil
+	default:
+	}
+
 	// Execute tool
 	result, err := registeredTool.Handler(ctx, toolReq)
 	if err != nil {

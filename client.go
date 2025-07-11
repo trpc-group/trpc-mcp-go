@@ -535,6 +535,19 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 	return parseReadResourceResultFromJSON(rawResp)
 }
 
+// CancelRequest sends a cancellation notification for a specific request.
+func (c *Client) CancelRequest(ctx context.Context, sessionID string, requestIDToCancel any, reason string) error {
+	params := map[string]any{
+		"requestId": requestIDToCancel,
+	}
+	// Add reason if provided
+	if reason != "" {
+		params["reason"] = reason
+	}
+	notification := NewJSONRPCNotificationFromMap(MethodCancelRequest, params)
+	return c.transport.sendNotification(ctx, notification)
+}
+
 func isZeroStruct(x interface{}) bool {
 	return reflect.ValueOf(x).IsZero()
 }
