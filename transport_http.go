@@ -18,9 +18,18 @@ type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)
 }
 
+// HTTPReqHandlerOption defines options for HTTP request handler.
+// The default implementation does not use these options, but custom
+// implementations may use them for additional configuration.
+type HTTPReqHandlerOption interface{}
+
 // NewHTTPReqHandler returns a new default HTTP request handler.
-// This can be replaced by internal implementations to customize HTTP request handling.
-var NewHTTPReqHandler = func() HTTPReqHandler {
+// This can be replaced by custom implementations to customize HTTP request handling.
+// It accepts an optional serviceName and additional options for extensibility.
+// Note: The default implementation ignores both serviceName and options parameters,
+// but custom implementations may use them for specific functionality.
+var NewHTTPReqHandler = func(serviceName string, options ...HTTPReqHandlerOption) HTTPReqHandler {
+	// The default implementation ignores serviceName and options.
 	return NewDefaultHTTPReqHandler()
 }
 

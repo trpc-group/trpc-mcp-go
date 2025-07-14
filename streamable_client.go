@@ -67,6 +67,16 @@ type streamableHTTPClientTransport struct {
 
 	// Logger for this client transport.
 	logger Logger
+
+	// Service name for custom HTTP request handlers.
+	// This field is typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function.
+	serviceName string
+
+	// HTTP request handler options.
+	// These options are typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function for extensibility.
+	httpReqHandlerOptions []HTTPReqHandlerOption
 }
 
 // NotificationHandler is a handler for notifications.
@@ -82,21 +92,29 @@ type streamOptions struct {
 }
 
 // newStreamableHTTPClientTransport creates a new client transport.
-// If logger is not set via options, uses the default logger.
-func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOption) *streamableHTTPClientTransport {
+
+func newStreamableHTTPClientTransport(config *transportConfig, options ...transportOption) *streamableHTTPClientTransport {
+	// use config to create transport.
 	transport := &streamableHTTPClientTransport{
-		serverURL:            serverURL,
-		httpClient:           &http.Client{},
-		httpReqHandler:       NewHTTPReqHandler(),
-		httpHeaders:          make(http.Header),
-		notificationHandlers: make(map[string]NotificationHandler),
-		enableGetSSE:         true,               // Default: GET SSE enabled
-		logger:               GetDefaultLogger(), // Use default logger if not set.
+		serverURL:             config.serverURL,
+		httpClient:            config.httpClient,
+		httpHeaders:           config.httpHeaders,
+		notificationHandlers:  make(map[string]NotificationHandler),
+		enableGetSSE:          config.enableGetSSE,
+		logger:                config.logger,
+		serviceName:           config.serviceName,
+		httpReqHandlerOptions: config.httpReqHandlerOptions,
+		path:                  config.path,
 	}
 
+	// apply extra options.
 	for _, option := range options {
 		option(transport)
 	}
+
+	// create HTTP request handler.
+	transport.httpReqHandler = NewHTTPReqHandler(
+		transport.serviceName, transport.httpReqHandlerOptions...)
 
 	return transport
 }
@@ -118,7 +136,7 @@ func withClientTransportLogger(logger Logger) transportOption {
 	}
 }
 
-// withClientTransportLogger sets the logger for the client transport.
+// withClientTransportPath sets the path for the client transport.
 func withClientTransportPath(path string) transportOption {
 	return func(t *streamableHTTPClientTransport) {
 		t.path = path
@@ -143,6 +161,23 @@ func withTransportHTTPHeaders(headers http.Header) transportOption {
 		for k, v := range headers {
 			t.httpHeaders[k] = v
 		}
+	}
+}
+
+// withTransportServiceName sets the service name for custom HTTP request handlers.
+// This is typically only needed when using custom implementations of HTTPReqHandler.
+func withTransportServiceName(serviceName string) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.serviceName = serviceName
+	}
+}
+
+// withTransportHTTPReqHandlerOption adds an option for HTTP request handler.
+// This is typically only needed when using custom implementations of HTTPReqHandler
+// that support additional configuration options.
+func withTransportHTTPReqHandlerOption(option HTTPReqHandlerOption) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.httpReqHandlerOptions = append(t.httpReqHandlerOptions, option)
 	}
 }
 
