@@ -23,3 +23,17 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace (
+    github.com/trpc-group/trpc-mcp-go => .
+    github.com/trpc-group/trpc-mcp-go/mcp => ./mcp
+    github.com/trpc-group/trpc-mcp-go/server => ./server
+    github.com/trpc-group/trpc-mcp-go/client => ./client
+)
+
+replace (
+    github.com/trpc-group/trpc-mcp-go => .
+    github.com/trpc-group/trpc-mcp-go/mcp => ./mcp
+    github.com/trpc-group/trpc-mcp-go/server => ./server
+    github.com/trpc-group/trpc-mcp-go/client => ./client
+)

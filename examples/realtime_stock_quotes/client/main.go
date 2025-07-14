@@ -69,7 +69,7 @@ func (p *NotificationProcessor) HandleProgress(n *mcp.JSONRPCNotification) error
 
 func (p *NotificationProcessor) HandleLog(n *mcp.JSONRPCNotification) error {
 	level, _ := n.Params.AdditionalFields["level"].(string)
-	// 修复：使用正确的字段名 "message" 而不是 "data"
+	
 	message, _ := n.Params.AdditionalFields["message"].(string)
 	
 	outputMutex.Lock()
@@ -83,7 +83,7 @@ func (p *NotificationProcessor) HandleStockUpdate(n *mcp.JSONRPCNotification) er
 	outputMutex.Lock()
 	defer outputMutex.Unlock()
 	
-	// 修复：直接使用 AdditionalFields 而不是嵌套字段
+	
 	fmt.Print("\n[STOCKS] ")
 	for symbol, price := range n.Params.AdditionalFields {
 		if p, ok := price.(float64); ok {
@@ -97,7 +97,7 @@ func (p *NotificationProcessor) HandleStockSummary(n *mcp.JSONRPCNotification) e
 	outputMutex.Lock()
 	defer outputMutex.Unlock()
 	
-	// 修复：直接使用 AdditionalFields 而不是嵌套字段
+	
 	fmt.Println("\n\n=== STOCK SUMMARY ===")
 	for symbol, data := range n.Params.AdditionalFields {
 		if info, ok := data.(map[string]interface{}); ok {

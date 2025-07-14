@@ -28,7 +28,7 @@ func main() {
 		mcp.WithNotificationBufferSize(20),
 	)
 
-	// 修复1: 正确使用 PropertyOption 参数
+	
 	progressTool := mcp.NewTool("start-progress",
 		mcp.WithDescription("Start a task with progress notifications"),
 		mcp.WithNumber("total", 
@@ -39,7 +39,7 @@ func main() {
 	server.RegisterTool(progressTool, handleProgressTask)
 	log.Println("Registered tool: start-progress")
 
-	// 修复2: 参数选项使用正确格式
+	
 	logTool := mcp.NewTool("start-logs",
 		mcp.WithDescription("Generate real-time log stream"),
 		mcp.WithNumber("count", 
@@ -50,7 +50,7 @@ func main() {
 	server.RegisterTool(logTool, handleLogStream)
 	log.Println("Registered tool: start-logs")
 
-	// 修复3: 字符串参数选项
+	
 	stockTool := mcp.NewTool("monitor-stocks",
 		mcp.WithDescription("Real-time stock price monitor"),
 		mcp.WithString("symbols", 
@@ -176,7 +176,7 @@ func handleStockPrices(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 			return mcp.NewTextResult("Stock monitoring stopped"), nil
 		default:
 			// 更新所有股票价格
-			update := make(map[string]interface{}) // 修复4: 使用正确的接口类型
+			update := make(map[string]interface{})
 			for symbol, price := range priceMap {
 				change := (rand.Float64() - 0.5) * 10
 				newPrice := price + change
