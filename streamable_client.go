@@ -112,9 +112,11 @@ func newStreamableHTTPClientTransport(config *transportConfig, options ...transp
 		option(transport)
 	}
 
-	// create HTTP request handler.
-	transport.httpReqHandler = NewHTTPReqHandler(
-		transport.serviceName, transport.httpReqHandlerOptions...)
+	// create HTTP request handler only if not already set.
+	if transport.httpReqHandler == nil {
+		transport.httpReqHandler = NewHTTPReqHandler(
+			transport.serviceName, transport.httpReqHandlerOptions...)
+	}
 
 	return transport
 }

@@ -65,6 +65,9 @@ type httpServerHandler struct {
 
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
+
+	// Server path for URL validation.
+	serverPath string
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -83,7 +86,7 @@ type getSSEConnection struct {
 }
 
 // newHTTPServerHandler creates an HTTP server handler
-func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHandler)) *httpServerHandler {
+func newHTTPServerHandler(handler requestHandler, serverPath string, options ...func(*httpServerHandler)) *httpServerHandler {
 	h := &httpServerHandler{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		requestHandler:         handler,
@@ -93,6 +96,7 @@ func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHan
 		enablePostSSE:          true, // Default: POST SSE enabled
 		enableGetSSE:           true, // Default: GET SSE enabled
 		getSSEConnections:      make(map[string]*getSSEConnection),
+		serverPath:             serverPath,
 	}
 
 	// Apply options
@@ -185,7 +189,13 @@ func withTransportHTTPContextFuncs(funcs []HTTPContextFunc) func(*httpServerHand
 
 // ServeHTTP implements the http.Handler interface
 func (h *httpServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// First check the HTTP method
+	if !h.isValidPath(r.URL.Path) {
+		if h.serverPath == "" {
+			http.Error(w, fmt.Sprintf("Path not found: %s (expected: %s)", r.URL.Path, h.serverPath), http.StatusNotFound)
+		}
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPost:
 		h.handlePost(r.Context(), w, r)
@@ -640,4 +650,12 @@ func (h *httpServerHandler) cleanupSession(sessionID string) {
 		delete(h.getSSEConnections, sessionID)
 	}
 	h.getSSEConnectionsLock.Unlock()
+}
+
+// isValidPath validates if the request path matches the configured server path.
+func (h *httpServerHandler) isValidPath(requestPath string) bool {
+	if h.serverPath == "" {
+		return true
+	}
+	return requestPath == h.serverPath
 }

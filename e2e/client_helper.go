@@ -167,8 +167,11 @@ func ExecuteSSETestTool(t *testing.T, c *mcp.Client, toolName string, args map[s
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Register notification handler.
-	c.RegisterNotificationHandler(toolName, collector.GetHandlers()[toolName])
+	// Register notification handlers for both progress and message notifications.
+	handlers := collector.GetHandlers()
+	for method, handler := range handlers {
+		c.RegisterNotificationHandler(method, handler)
+	}
 
 	// Call tool with streaming method.
 	callToolReq := &mcp.CallToolRequest{}

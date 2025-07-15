@@ -728,7 +728,8 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return 404 Not Found.
 	w.WriteHeader(http.StatusNotFound)
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "Not Found: %s", r.URL.Path)
+	expectedEndpoints := fmt.Sprintf("%s%s, %s%s", s.basePath, sseEndpoint, s.basePath, messageEndpoint)
+	fmt.Fprintf(w, "Path not found: %s (expected endpoints: %s)", r.URL.Path, expectedEndpoints)
 }
 
 // generateSessionID generates a unique session ID.

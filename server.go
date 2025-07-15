@@ -183,7 +183,7 @@ func (s *Server) initComponents() {
 	}
 
 	// Create HTTP handler.
-	s.httpHandler = newHTTPServerHandler(s.mcpHandler, httpOptions...)
+	s.httpHandler = newHTTPServerHandler(s.mcpHandler, s.config.path, httpOptions...)
 
 	// Set server instance as the tool manager's server provider.
 	s.toolManager.withServerProvider(s)
