@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -728,7 +728,8 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return 404 Not Found.
 	w.WriteHeader(http.StatusNotFound)
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "Not Found: %s", r.URL.Path)
+	expectedEndpoints := fmt.Sprintf("%s%s, %s%s", s.basePath, sseEndpoint, s.basePath, messageEndpoint)
+	fmt.Fprintf(w, "Path not found: %s (expected endpoints: %s)", r.URL.Path, expectedEndpoints)
 }
 
 // generateSessionID generates a unique session ID.

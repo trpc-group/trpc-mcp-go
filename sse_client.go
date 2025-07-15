@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -47,10 +47,11 @@ type sseClientTransport struct {
 	closed       atomic.Bool   // Flag indicating if transport is closed.
 	endpointChan chan struct{} // Channel to signal when endpoint is received.
 	logger       Logger        // Logger for this client transport.
-}
 
-// sseClientOption defines options for the SSE client transport.
-type sseClientOption func(*sseClientTransport)
+	// Fields for HTTP request handler configuration
+	serviceName           string                 // Service name for custom HTTP request handlers.
+	httpReqHandlerOptions []HTTPReqHandlerOption // HTTP request handler options for extensibility.
+}
 
 // NewSSEClient creates a new client using the SSE transport from the 2024-11-05 spec.
 func NewSSEClient(serverURL string, clientInfo Implementation, options ...ClientOption) (*Client, error) {
@@ -59,18 +60,31 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
+	// extract transport configuration.
+	config := extractTransportConfig(options)
+	config.serverURL = parsedURL
+
 	// Create client options with standard options.
 	clientOptions := []ClientOption{
 		WithCustomTransport(func(c *Client) {
+			// create SSE transport.
 			sseTransport := &sseClientTransport{
-				baseURL:        parsedURL,
-				httpClient:     &http.Client{},
-				httpReqHandler: NewDefaultHTTPReqHandler(),
-				httpHeaders:    make(http.Header),
-				responses:      make(map[string]chan *json.RawMessage),
-				endpointChan:   make(chan struct{}),
-				logger:         c.logger, // Use the client logger.
+				baseURL:               parsedURL,
+				httpClient:            config.httpClient,
+				httpHeaders:           config.httpHeaders,
+				responses:             make(map[string]chan *json.RawMessage),
+				endpointChan:          make(chan struct{}),
+				logger:                config.logger,
+				serviceName:           config.serviceName,
+				httpReqHandlerOptions: config.httpReqHandlerOptions,
 			}
+
+			// create HTTP request handler only if not already set.
+			if sseTransport.httpReqHandler == nil {
+				sseTransport.httpReqHandler = NewHTTPReqHandler(
+					sseTransport.serviceName, sseTransport.httpReqHandlerOptions...)
+			}
+
 			c.transport = sseTransport
 		}),
 		WithProtocolVersion(ProtocolVersion_2024_11_05), // Use the 2024-11-05 protocol version.

@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -111,6 +111,9 @@ type Client struct {
 	state            State                  // State.
 	transportOptions []transportOption
 
+	// transport configuration.
+	transportConfig *transportConfig
+
 	logger Logger // Logger for client transport (optional).
 }
 
@@ -132,7 +135,11 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 		capabilities:     make(map[string]interface{}),
 		state:            StateDisconnected,
 		transportOptions: []transportOption{},
+		transportConfig:  newDefaultTransportConfig(),
 	}
+
+	// set server URL.
+	client.transportConfig.serverURL = parsedURL
 
 	// Apply options.
 	for _, option := range options {
@@ -141,10 +148,57 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 
 	// Create transport layer if not previously set via options.
 	if client.transport == nil {
-		client.transport = newStreamableHTTPClientTransport(parsedURL, client.transportOptions...)
+		client.transport = newStreamableHTTPClientTransport(client.transportConfig, client.transportOptions...)
 	}
 
 	return client, nil
+}
+
+// transportConfig includes transport layer configuration.
+type transportConfig struct {
+	serverURL    *url.URL // server URL
+	httpClient   *http.Client
+	httpHeaders  http.Header
+	logger       Logger
+	enableGetSSE bool   // for streamable transport
+	path         string // for streamable transport
+
+	// Service name for custom HTTP request handlers.
+	// This field is typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function.
+	serviceName string
+	// HTTP request handler options.
+	// These options are typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function for extensibility.
+	httpReqHandlerOptions []HTTPReqHandlerOption
+}
+
+// newDefaultTransportConfig creates a default transport configuration.
+func newDefaultTransportConfig() *transportConfig {
+	return &transportConfig{
+		httpClient:            &http.Client{},
+		httpHeaders:           make(http.Header),
+		logger:                GetDefaultLogger(),
+		serviceName:           "",
+		httpReqHandlerOptions: []HTTPReqHandlerOption{},
+		enableGetSSE:          true,
+		path:                  "",
+	}
+}
+
+// extractTransportConfig extracts transport configuration from client options.
+func extractTransportConfig(options []ClientOption) *transportConfig {
+	// create a temporary client to collect configuration.
+	tempClient := &Client{
+		transportConfig: newDefaultTransportConfig(),
+	}
+
+	// apply all options.
+	for _, option := range options {
+		option(tempClient)
+	}
+
+	return tempClient.transportConfig
 }
 
 // WithProtocolVersion sets the protocol version.
@@ -189,6 +243,23 @@ func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 func WithHTTPHeaders(headers http.Header) ClientOption {
 	return func(c *Client) {
 		c.transportOptions = append(c.transportOptions, withTransportHTTPHeaders(headers))
+	}
+}
+
+// WithServiceName sets the service name for custom HTTP request handlers.
+// This is typically only needed when using custom implementations of HTTPReqHandler.
+func WithServiceName(serviceName string) ClientOption {
+	return func(c *Client) {
+		c.transportOptions = append(c.transportOptions, withTransportServiceName(serviceName))
+	}
+}
+
+// WithHTTPReqHandlerOption adds an option for HTTP request handler.
+// This is typically only needed when using custom implementations of HTTPReqHandler
+// that support additional configuration options.
+func WithHTTPReqHandlerOption(option HTTPReqHandlerOption) ClientOption {
+	return func(c *Client) {
+		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
 	}
 }
 
