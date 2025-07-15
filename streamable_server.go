@@ -66,7 +66,7 @@ type httpServerHandler struct {
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
 
-	// Server path for URL validation.
+	// Server path.
 	serverPath string
 }
 
