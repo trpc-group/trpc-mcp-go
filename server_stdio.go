@@ -122,6 +122,22 @@ func (s *StdioServer) RegisterTool(tool *Tool, handler toolHandler) {
 	s.logger.Infof("Registered tool: %s", tool.Name)
 }
 
+// UnregisterTools removes multiple tools by names and logs the operation.
+func (s *StdioServer) UnregisterTools(names ...string) error {
+	if len(names) == 0 {
+		err := fmt.Errorf("no tool names provided")
+		return err
+	}
+
+	unregisteredCount := s.toolManager.unregisterTools(names...)
+	if unregisteredCount == 0 {
+		err := fmt.Errorf("none of the specified tools were found")
+		return err
+	}
+
+	return nil
+}
+
 // RegisterPrompt registers a prompt with its handler using the prompt manager.
 func (s *StdioServer) RegisterPrompt(prompt *Prompt, handler promptHandler) {
 	if prompt == nil || handler == nil {

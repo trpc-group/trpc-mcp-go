@@ -746,6 +746,20 @@ func (s *SSEServer) RegisterTool(tool *Tool, handler toolHandler) {
 	s.toolManager.registerTool(tool, handler)
 }
 
+// UnregisterTools removes multiple tools by names and returns an error if no tools were unregistered.
+func (s *SSEServer) UnregisterTools(names ...string) error {
+	if len(names) == 0 {
+		return fmt.Errorf("no tool names provided")
+	}
+
+	unregisteredCount := s.toolManager.unregisterTools(names...)
+	if unregisteredCount == 0 {
+		return fmt.Errorf("none of the specified tools were found")
+	}
+
+	return nil
+}
+
 // RegisterResource registers a resource with its handler.
 func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler) {
 	if resource == nil || handler == nil {
