@@ -413,7 +413,7 @@ func (t *stdioClientTransport) handleErrorResponse(rawMessage json.RawMessage) {
 func (t *stdioClientTransport) handleNotification(rawMessage json.RawMessage) {
 	var notification JSONRPCNotification
 	if err := json.Unmarshal(rawMessage, &notification); err != nil {
-		t.logger.Infof("Error unmarshaling notification: %v", err)
+		t.logger.Debugf("Error unmarshaling notification: %v", err)
 		return
 	}
 
@@ -422,14 +422,14 @@ func (t *stdioClientTransport) handleNotification(rawMessage json.RawMessage) {
 	t.handlersMutex.RUnlock()
 
 	if !exists {
-		t.logger.Infof("No handler for notification method: %s", notification.Method)
+		t.logger.Debugf("No handler for notification method: %s", notification.Method)
 		return
 	}
 
 	// Call handler in goroutine to avoid blocking.
 	go func() {
 		if err := handler(&notification); err != nil {
-			t.logger.Infof("Error handling notification %s: %v", notification.Method, err)
+			t.logger.Debugf("Error handling notification %s: %v", notification.Method, err)
 		}
 	}()
 }
@@ -444,7 +444,7 @@ func (t *stdioClientTransport) stderrLoop() {
 	for scanner.Scan() && !t.closed.Load() {
 		line := scanner.Text()
 		if line != "" {
-			t.logger.Infof("Server stderr: %s", line)
+			t.logger.Debugf("Server stderr: %s", line)
 		}
 	}
 }
@@ -458,9 +458,9 @@ func (t *stdioClientTransport) processWatcher() {
 	err := t.process.Wait()
 	if !t.closed.Load() {
 		if err != nil {
-			t.logger.Infof("Process exited with error: %v", err)
+			t.logger.Debugf("Process exited with error: %v", err)
 		} else {
-			t.logger.Infof("Process exited normally")
+			t.logger.Debugf("Process exited normally")
 		}
 		// Cancel context to signal shutdown.
 		t.cancel()
@@ -515,7 +515,7 @@ func (t *stdioClientTransport) close() error {
 	if t.process != nil && t.process.Process != nil {
 		// First try SIGTERM
 		if err := t.process.Process.Signal(os.Interrupt); err != nil {
-			t.logger.Infof("Failed to send SIGTERM: %v", err)
+			t.logger.Debugf("Failed to send SIGTERM: %v", err)
 		}
 
 		// Wait a bit for graceful shutdown.
@@ -527,13 +527,13 @@ func (t *stdioClientTransport) close() error {
 
 		select {
 		case <-done:
-			t.logger.Infof("Process terminated gracefully")
+			t.logger.Debugf("Process terminated gracefully")
 		case <-time.After(5 * time.Second):
 			// Force kill.
 			if err := t.process.Process.Kill(); err != nil {
 				errs = append(errs, fmt.Errorf("failed to kill process: %w", err))
 			} else {
-				t.logger.Infof("Process force-killed")
+				t.logger.Debugf("Process force-killed")
 			}
 		}
 	}

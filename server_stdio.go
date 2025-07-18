@@ -119,7 +119,7 @@ func (s *StdioServer) RegisterTool(tool *Tool, handler toolHandler) {
 		return
 	}
 	s.toolManager.registerTool(tool, handler)
-	s.logger.Infof("Registered tool: %s", tool.Name)
+	s.logger.Debugf("Registered tool: %s", tool.Name)
 }
 
 // UnregisterTools removes multiple tools by names and logs the operation.
@@ -145,7 +145,7 @@ func (s *StdioServer) RegisterPrompt(prompt *Prompt, handler promptHandler) {
 		return
 	}
 	s.promptManager.registerPrompt(prompt, handler)
-	s.logger.Infof("Registered prompt: %s", prompt.Name)
+	s.logger.Debugf("Registered prompt: %s", prompt.Name)
 }
 
 // RegisterResource registers a resource with its handler using the resource manager.
@@ -155,7 +155,7 @@ func (s *StdioServer) RegisterResource(resource *Resource, handler resourceHandl
 		return
 	}
 	s.resourceManager.registerResource(resource, handler)
-	s.logger.Infof("Registered resource: %s", resource.URI)
+	s.logger.Debugf("Registered resource: %s", resource.URI)
 }
 
 // RegisterResourceTemplate registers a resource template with its handler.
@@ -165,7 +165,7 @@ func (s *StdioServer) RegisterResourceTemplate(template *ResourceTemplate, handl
 		return
 	}
 	s.resourceManager.registerTemplate(template, handler)
-	s.logger.Infof("Registered resource template: %s", template.Name)
+	s.logger.Debugf("Registered resource template: %s", template.Name)
 }
 
 // Start starts the STDIO server.
@@ -552,7 +552,7 @@ func (s *stdioServerInternal) HandleNotification(ctx context.Context, rawMessage
 		return err
 	}
 
-	s.parent.logger.Infof("Received notification: %s", notification.Method)
+	s.parent.logger.Debugf("Received notification: %s", notification.Method)
 	return nil
 }
 
