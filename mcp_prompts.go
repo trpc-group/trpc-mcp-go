@@ -12,13 +12,17 @@ import (
 	"fmt"
 )
 
+// completionHandler defines the function type for handling completion requests
+type completionHandler func(ctx context.Context, req *CompletionCompleteRequest) (*CompletionCompleteResult, error)
+
 // promptHandler defines the function type for handling prompt requests
 type promptHandler func(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error)
 
 // registeredPrompt combines a Prompt with its handler function
 type registeredPrompt struct {
-	Prompt  *Prompt
-	Handler promptHandler
+	Prompt            *Prompt
+	Handler           promptHandler
+	CompletionHandler completionHandler
 }
 
 // ListPromptsRequest describes a request to list prompts.
@@ -46,6 +50,28 @@ type GetPromptResult struct {
 	Result
 	Description string          `json:"description,omitempty"`
 	Messages    []PromptMessage `json:"messages"`
+}
+
+// CompletionCompleteRequest describes a request to complete a prompt or resource.
+type CompletionCompleteRequest struct {
+	Request
+	Params struct {
+		Ref      map[string]string `json:"ref"`
+		Argument map[string]string `json:"argument"`
+	} `json:"params"`
+}
+
+// CompletionCompleteResult describes a result complete a prompt or resource.
+type CompletionCompleteResult struct {
+	Result
+	Completion Completion `json:"completion"`
+}
+
+// Completion describes the completion of a prompt or resource.
+type Completion struct {
+	Values  []string `json:"values"`
+	Total   int      `json:"total"`
+	HasMore bool     `json:"hasMore"`
 }
 
 // PromptListChangedNotification represents a notification that the prompt list has changed
