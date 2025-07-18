@@ -236,6 +236,13 @@ func (m *promptManager) handleCompletionComplete(ctx context.Context, req *JSONR
 	if !ok {
 		return errResp, nil
 	}
+
+	select {
+    case <-ctx.Done():
+        return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), nil
+    default:
+    }
+
 	// Business logic remains unchanged, can be further split if needed
 	return m.handlePromptCompletion(ctx, promptName, req)
 }
