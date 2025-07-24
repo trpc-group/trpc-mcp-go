@@ -31,6 +31,7 @@ type sseSession struct {
 	lastActivity        time.Time                 // Last activity time.
 	data                map[string]interface{}    // Session data.
 	dataMu              sync.RWMutex              // Data mutex.
+	Cancelers           sync.Map                  
 }
 
 // SessionID returns the session ID.
@@ -81,6 +82,32 @@ func (s *sseSession) SetData(key string, value interface{}) {
 		s.data = make(map[string]interface{})
 	}
 	s.data[key] = value
+}
+
+func (s *sseSession) RegisterCanceler(requestID any, cancelFunc context.CancelFunc) {
+	s.Cancelers.Store(requestID, cancelFunc)
+}
+
+func (s *sseSession) CancelRequest(requestID any) {
+	if cancelFunc, ok := s.Cancelers.LoadAndDelete(requestID); ok {
+		if cf, ok := cancelFunc.(context.CancelFunc); ok {
+			cf()
+		}
+	}
+}
+
+func (s *sseSession) CleanupRequest(requestID any) {
+	s.Cancelers.Delete(requestID)
+}
+
+func (s *sseSession) CancelAll() {
+	s.Cancelers.Range(func(key, value interface{}) bool {
+		if cf, ok := value.(context.CancelFunc); ok {
+			cf()
+		}
+		s.Cancelers.Delete(key)
+		return true
+	})
 }
 
 // Initialize marks the session as initialized.
