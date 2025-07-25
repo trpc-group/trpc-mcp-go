@@ -8,9 +8,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
+	"sync/atomic"
 )
 
 // Common errors
@@ -18,7 +21,24 @@ var (
 	ErrStatelessMode              = errors.New("cannot get active sessions in stateless mode")
 	ErrBroadcastFailed            = errors.New("failed to broadcast notification")
 	ErrFilteredNotificationFailed = errors.New("failed to send filtered notification")
+	ErrNoClientSession            = errors.New("no client session in context")
 )
+
+// clientSessionKey is the key for storing client session in context
+type clientSessionKey struct{}
+
+// ClientSessionFromContext retrieves current client session from context.
+func ClientSessionFromContext(ctx context.Context) Session {
+	if session, ok := ctx.Value(clientSessionKey{}).(Session); ok {
+		return session
+	}
+	return nil
+}
+
+// withClientSession adds client session to context.
+func withClientSession(ctx context.Context, session Session) context.Context {
+	return context.WithValue(ctx, clientSessionKey{}, session)
+}
 
 const (
 	// defaultServerAddress is the default address for the server
@@ -61,17 +81,25 @@ type serverConfig struct {
 	methodNameModifier MethodNameModifier
 }
 
+// ServerNotificationHandler defines a function that handles notifications on the server side.
+// It follows the same pattern as mcp-go's NotificationHandlerFunc, receiving a context
+// that contains session information, allowing handlers to call methods like ListRoots.
+type ServerNotificationHandler func(ctx context.Context, notification *JSONRPCNotification) error
+
 // Server MCP server
 type Server struct {
-	serverInfo      Implementation     // Server information.
-	config          *serverConfig      // Configuration.
-	logger          Logger             // Logger for the server and subcomponents.
-	httpHandler     *httpServerHandler // HTTP handler.
-	mcpHandler      *mcpHandler        // MCP handler.
-	toolManager     *toolManager       // Tool manager.
-	resourceManager *resourceManager   // Resource manager.
-	promptManager   *promptManager     // Prompt manager.
-	customServer    *http.Server       // Custom HTTP server.
+	serverInfo           Implementation                       // Server information.
+	config               *serverConfig                        // Configuration.
+	logger               Logger                               // Logger for the server and subcomponents.
+	httpHandler          *httpServerHandler                   // HTTP handler.
+	mcpHandler           *mcpHandler                          // MCP handler.
+	toolManager          *toolManager                         // Tool manager.
+	resourceManager      *resourceManager                     // Resource manager.
+	promptManager        *promptManager                       // Prompt manager.
+	customServer         *http.Server                         // Custom HTTP server.
+	requestID            atomic.Int64                         // Request ID counter for generating unique request IDs.
+	notificationHandlers map[string]ServerNotificationHandler // Map of notification handlers by method name.
+	notificationMu       sync.RWMutex                         // Mutex for notification handlers map.
 }
 
 // NewServer creates a new MCP server
@@ -93,7 +121,8 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 			Name:    name,
 			Version: version,
 		},
-		config: config,
+		config:               config,
+		notificationHandlers: make(map[string]ServerNotificationHandler),
 	}
 
 	// Apply options
@@ -107,86 +136,56 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 	return server
 }
 
-// initComponents initializes server components based on configuration.
+// initComponents initializes the server components
 func (s *Server) initComponents() {
-	// Create tool manager.
-	s.toolManager = newToolManager()
+	// Create lifecycle manager
+	lifecycleManager := newLifecycleManager(s.serverInfo)
 
-	// Set tool list filter if configured
-	if s.config.toolListFilter != nil {
-		s.toolManager.withToolListFilter(s.config.toolListFilter)
-	}
-
-	// Set method name modifier if configured.
+	// Create tool manager
+	toolManager := newToolManager()
+	toolManager.withServerProvider(s)
 	if s.config.methodNameModifier != nil {
-		s.toolManager.withMethodNameModifier(s.config.methodNameModifier)
+		toolManager.withMethodNameModifier(s.config.methodNameModifier)
 	}
+	toolManager.withToolListFilter(s.config.toolListFilter)
+	s.toolManager = toolManager
 
-	// Create resource manager.
-	s.resourceManager = newResourceManager()
+	// Create resource manager
+	resourceManager := newResourceManager()
 
-	// Create prompt manager.
-	s.promptManager = newPromptManager()
+	// Create prompt manager
+	promptManager := newPromptManager()
 
-	// Create lifecycle manager, inject logger if provided.
-	var lifecycleManager *lifecycleManager
-	if s.logger != nil {
-		lifecycleManager = newLifecycleManager(s.serverInfo).withLogger(s.logger)
-	} else {
-		lifecycleManager = newLifecycleManager(s.serverInfo)
-	}
-
-	// Configure stateless mode for lifecycle manager.
-	if s.config.isStateless {
-		lifecycleManager = lifecycleManager.withStatelessMode(true)
-	}
-
-	// Create MCP handler.
+	// Create MCP handler
 	s.mcpHandler = newMCPHandler(
-		withToolManager(s.toolManager),
 		withLifecycleManager(lifecycleManager),
-		withResourceManager(s.resourceManager),
-		withPromptManager(s.promptManager),
+		withToolManager(toolManager),
+		withResourceManager(resourceManager),
+		withPromptManager(promptManager),
+		withServer(s), // Set the server reference for notification handling
 	)
 
-	// Collect HTTP handler options.
-	var httpOptions []func(*httpServerHandler)
-
-	// Session configuration.
-	if !s.config.EnableSession {
-		httpOptions = append(httpOptions, withoutTransportSession())
-	} else if s.config.sessionManager != nil {
-		httpOptions = append(httpOptions, withTransportSessionManager(s.config.sessionManager))
-	}
-
-	// State mode configuration.
-	if s.config.isStateless {
-		httpOptions = append(httpOptions, withTransportStatelessMode())
-	}
-
-	// Response type configuration.
-	httpOptions = append(httpOptions,
+	// Create HTTP handler
+	s.httpHandler = newHTTPServerHandler(
+		s.mcpHandler,
+		s.config.path,
+		withTransportSessionManager(s.config.sessionManager),
+		withServerTransportLogger(s.logger),
+		withTransportHTTPContextFuncs(s.config.httpContextFuncs),
+		withTransportNotificationBufferSize(s.config.notificationBufferSize),
 		withServerPOSTSSEEnabled(s.config.postSSEEnabled),
 		withTransportGetSSEEnabled(s.config.getSSEEnabled),
-		withTransportNotificationBufferSize(s.config.notificationBufferSize),
 	)
 
-	// HTTP context functions configuration.
-	if len(s.config.httpContextFuncs) > 0 {
-		httpOptions = append(httpOptions, withTransportHTTPContextFuncs(s.config.httpContextFuncs))
+	// Set stateless mode if configured
+	if s.config.isStateless {
+		withTransportStatelessMode()(s.httpHandler)
 	}
 
-	// Inject logger into httpServerHandler if provided.
-	if s.logger != nil {
-		// This is the httpServerHandler option version.
-		httpOptions = append(httpOptions, withServerTransportLogger(s.logger))
+	// Disable sessions if configured
+	if !s.config.EnableSession {
+		withoutTransportSession()(s.httpHandler)
 	}
-
-	// Create HTTP handler.
-	s.httpHandler = newHTTPServerHandler(s.mcpHandler, s.config.path, httpOptions...)
-
-	// Set server instance as the tool manager's server provider.
-	s.toolManager.withServerProvider(s)
 }
 
 // ServerOption server option function.
@@ -338,13 +337,81 @@ func (s *Server) RegisterPrompt(prompt *Prompt, handler promptHandler) {
 	s.promptManager.registerPrompt(prompt, handler)
 }
 
-// SendNotification sends a notification to a specific session
+// SendNotification sends a notification to a specific session.
 func (s *Server) SendNotification(sessionID string, method string, params map[string]interface{}) error {
-	// Create a notification object
-	notification := NewJSONRPCNotificationFromMap(method, params)
+	if s.config.isStateless {
+		return ErrStatelessMode
+	}
 
-	// Use the internal httpHandler to send
-	return s.httpHandler.sendNotification(sessionID, notification)
+	notification := s.NewNotification(method, params)
+
+	successCount, failedCount, lastError := s.sendNotificationToSessions([]string{sessionID}, notification)
+	if failedCount > 0 {
+		return fmt.Errorf("failed to send notification to session %s: %w", sessionID, lastError)
+	}
+	if successCount == 0 {
+		return fmt.Errorf("no sessions found with ID %s", sessionID)
+	}
+
+	return nil
+}
+
+// ListRoots sends a request to the client asking for its list of roots.
+func (s *Server) ListRoots(ctx context.Context) (*ListRootsResult, error) {
+	if s.config.isStateless {
+		return nil, ErrStatelessMode
+	}
+
+	// Get the session from context
+	session := ClientSessionFromContext(ctx)
+	if session == nil {
+		return nil, ErrNoClientSession
+	}
+
+	sessionID := session.GetID()
+	if sessionID == "" {
+		return nil, fmt.Errorf("session has no ID")
+	}
+
+	// Check if session exists in session manager
+	_, exists := s.httpHandler.sessionManager.getSession(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Create standard JSON-RPC request
+	requestID := s.requestID.Add(1)
+	request := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodRootsList,
+		},
+	}
+
+	// Send request and wait for response using transport layer
+	response, err := s.SendRequest(ctx, sessionID, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send roots/list request: %w", err)
+	}
+
+	// Parse response as ListRootsResult
+	var listRootsResult ListRootsResult
+	if err := json.Unmarshal(*response, &listRootsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse ListRootsResult: %w", err)
+	}
+
+	return &listRootsResult, nil
+}
+
+// SendRequest sends a JSON-RPC request to a client and waits for response
+func (s *Server) SendRequest(ctx context.Context, sessionID string, request *JSONRPCRequest) (*json.RawMessage, error) {
+	if s.config.isStateless {
+		return nil, ErrStatelessMode
+	}
+
+	// Delegate to the HTTP handler's SendRequest method
+	return s.httpHandler.SendRequest(ctx, sessionID, request)
 }
 
 // NewNotification creates a new notification object
@@ -471,7 +538,7 @@ func (s *Server) HTTPHandler() http.Handler {
 	return s.httpHandler
 }
 
-// WithContext enriches a context with server-specific information
+// withContext enriches a context with server-specific information
 func (s *Server) withContext(ctx context.Context) context.Context {
 	return setServerToContext(ctx, s)
 }
@@ -488,4 +555,46 @@ func (s *Server) SetMethodNameModifier(modifier MethodNameModifier) {
 	if s.toolManager != nil {
 		s.toolManager.withMethodNameModifier(modifier)
 	}
+}
+
+// RegisterNotificationHandler registers a handler for the specified notification method.
+// This allows the server to respond to client notifications.
+func (s *Server) RegisterNotificationHandler(method string, handler ServerNotificationHandler) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	s.notificationHandlers[method] = handler
+	if s.logger != nil {
+		s.logger.Debugf("Registered notification handler for method: %s", method)
+	}
+}
+
+// UnregisterNotificationHandler removes a handler for the specified notification method.
+func (s *Server) UnregisterNotificationHandler(method string) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	delete(s.notificationHandlers, method)
+	if s.logger != nil {
+		s.logger.Debugf("Unregistered notification handler for method: %s", method)
+	}
+}
+
+// handleServerNotification calls the registered ServerNotificationHandler for the given notification method.
+// This method is called by the mcpHandler when it receives a notification.
+func (s *Server) handleServerNotification(ctx context.Context, notification *JSONRPCNotification) error {
+	s.notificationMu.RLock()
+	handler, exists := s.notificationHandlers[notification.Method]
+	s.notificationMu.RUnlock()
+
+	if exists {
+		// Call the handler with the notification and context
+		return handler(ctx, notification)
+	}
+
+	// No handler registered for this notification method
+	if s.logger != nil {
+		s.logger.Debugf("No handler registered for notification method: %s", notification.Method)
+	}
+	return nil
 }
