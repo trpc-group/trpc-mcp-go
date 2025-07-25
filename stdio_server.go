@@ -16,19 +16,28 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 // StdioServer provides API for STDIO MCP servers.
 type StdioServer struct {
-	serverInfo       Implementation
-	logger           Logger
-	contextFunc      StdioContextFunc
-	toolManager      *toolManager
-	resourceManager  *resourceManager
-	promptManager    *promptManager
-	lifecycleManager *lifecycleManager
-	internal         messageHandler
+	serverInfo           Implementation
+	logger               Logger
+	contextFunc          StdioContextFunc
+	toolManager          *toolManager
+	resourceManager      *resourceManager
+	promptManager        *promptManager
+	lifecycleManager     *lifecycleManager
+	internal             messageHandler
+	requestID            atomic.Int64                         // Request ID counter for generating unique request IDs.
+	responses            map[uint64]interface{}               // Map for storing response channels.
+	responsesMu          sync.RWMutex                         // Mutex for responses map.
+	notificationHandlers map[string]ServerNotificationHandler // Map of notification handlers by method name.
+	notificationMu       sync.RWMutex                         // Mutex for notification handlers map.
+
+	// STDIO transport components for sending requests to client.
+	outputMu sync.Mutex // Mutex for protecting stdout writer.
 }
 
 // messageHandler defines the core interface for handling JSON-RPC messages (internal use).
@@ -38,6 +47,9 @@ type messageHandler interface {
 
 	// HandleNotification processes a JSON-RPC notification
 	HandleNotification(ctx context.Context, rawMessage json.RawMessage) error
+
+	// HandleResponse processes a JSON-RPC response (for server-to-client requests).
+	HandleResponse(ctx context.Context, rawMessage json.RawMessage) error
 }
 
 // stdioServerConfig contains configuration for the STDIO server.
@@ -97,13 +109,18 @@ func NewStdioServer(name, version string, options ...StdioServerOption) *StdioSe
 			Name:    name,
 			Version: version,
 		},
-		logger:           config.logger,
-		contextFunc:      config.contextFunc,
-		toolManager:      toolManager,
-		resourceManager:  resourceManager,
-		promptManager:    promptManager,
-		lifecycleManager: lifecycleManager,
+		logger:               config.logger,
+		contextFunc:          config.contextFunc,
+		toolManager:          toolManager,
+		resourceManager:      resourceManager,
+		promptManager:        promptManager,
+		lifecycleManager:     lifecycleManager,
+		responses:            make(map[uint64]interface{}),
+		notificationHandlers: make(map[string]ServerNotificationHandler),
 	}
+
+	// Set server as server provider for toolManager (to inject server context in tool calls).
+	toolManager.withServerProvider(server)
 
 	server.internal = &stdioServerInternal{
 		parent: server,
@@ -183,6 +200,12 @@ func (s *StdioServer) GetServerInfo() Implementation {
 	return s.serverInfo
 }
 
+// withContext enriches a context with server-specific information.
+// Implements serverProvider interface for injecting server context in tool calls.
+func (s *StdioServer) withContext(ctx context.Context) context.Context {
+	return setServerToContext(ctx, s)
+}
+
 // stdioTransport is a low-level JSON-RPC transport for STDIO communication.
 type stdioTransport struct {
 	server      messageHandler
@@ -215,38 +238,46 @@ type stdioSession struct {
 	lastActivity  time.Time
 	data          map[string]interface{}
 	notifications chan JSONRPCNotification
+	messages      chan JSONRPCMessage // for sending any JSON-RPC message.
 	initialized   atomic.Bool
+	clientInfo    atomic.Value
 	mu            sync.RWMutex
 }
 
-func (s *stdioSession) getID() string {
+// GetID returns the session ID.
+func (s *stdioSession) GetID() string {
 	return s.id
 }
 
-func (s *stdioSession) getCreatedAt() time.Time {
+// GetCreatedAt returns the session creation time.
+func (s *stdioSession) GetCreatedAt() time.Time {
 	return s.createdAt
 }
 
-func (s *stdioSession) getLastActivity() time.Time {
+// GetLastActivity returns the last activity time.
+func (s *stdioSession) GetLastActivity() time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.lastActivity
 }
 
-func (s *stdioSession) updateActivity() {
+// UpdateActivity updates the last activity time.
+func (s *stdioSession) UpdateActivity() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastActivity = time.Now()
 }
 
-func (s *stdioSession) getData(key string) (interface{}, bool) {
+// GetData returns the data for the given key.
+func (s *stdioSession) GetData(key string) (interface{}, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	value, exists := s.data[key]
 	return value, exists
 }
 
-func (s *stdioSession) setData(key string, value interface{}) {
+// SetData sets the data for the given key.
+func (s *stdioSession) SetData(key string, value interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.data == nil {
@@ -255,43 +286,22 @@ func (s *stdioSession) setData(key string, value interface{}) {
 	s.data[key] = value
 }
 
-// Session interface implementation methods (exported for interface compliance)
-func (s *stdioSession) GetID() string {
-	return s.getID()
-}
-
-func (s *stdioSession) GetCreatedAt() time.Time {
-	return s.getCreatedAt()
-}
-
-func (s *stdioSession) GetLastActivity() time.Time {
-	return s.getLastActivity()
-}
-
-func (s *stdioSession) UpdateActivity() {
-	s.updateActivity()
-}
-
-func (s *stdioSession) GetData(key string) (interface{}, bool) {
-	return s.getData(key)
-}
-
-func (s *stdioSession) SetData(key string, value interface{}) {
-	s.setData(key, value)
-}
-
-func (s *stdioSession) SessionID() string {
-	return s.id
-}
-
+// NotificationChannel returns a channel for sending notifications to the client.
 func (s *stdioSession) NotificationChannel() chan<- JSONRPCNotification {
 	return s.notifications
 }
 
+// MessageChannel returns a channel for sending any JSON-RPC message to the client.
+func (s *stdioSession) MessageChannel() chan<- JSONRPCMessage {
+	return s.messages
+}
+
+// Initialize initializes the session.
 func (s *stdioSession) Initialize() {
 	s.initialized.Store(true)
 }
 
+// Initialized returns true if the session is initialized.
 func (s *stdioSession) Initialized() bool {
 	return s.initialized.Load()
 }
@@ -308,6 +318,7 @@ func newStdioTransport(server messageHandler, options ...stdioServerTransportOpt
 			lastActivity:  now,
 			data:          make(map[string]interface{}),
 			notifications: make(chan JSONRPCNotification, 100),
+			messages:      make(chan JSONRPCMessage, 100),
 		},
 	}
 
@@ -325,20 +336,27 @@ func (s *stdioTransport) listen(ctx context.Context, stdin io.Reader, stdout io.
 	}
 
 	reader := bufio.NewReader(stdin)
-	go s.handleNotifications(ctx, stdout)
+	go s.handleOutgoingMessages(ctx, stdout)
 
 	return s.processInputStream(ctx, reader, stdout)
 }
 
-// handleNotifications processes notifications from the session's notification channel.
-func (s *stdioTransport) handleNotifications(ctx context.Context, stdout io.Writer) {
+// handleOutgoingMessages processes all outgoing messages (notifications and other JSON-RPC messages)
+// from the session's channels and writes them to stdout.
+func (s *stdioTransport) handleOutgoingMessages(ctx context.Context, stdout io.Writer) {
 	for {
 		select {
 		case notification := <-s.session.notifications:
 			if err := s.writeResponse(notification, stdout); err != nil {
-				s.logger.Errorf("Error writing notification: %v", err)
+				s.logger.Errorf("handleOutgoingMessages: Error writing notification: %v", err)
+			}
+		case message := <-s.session.messages:
+			// Handle any JSON-RPC message (request, response, notification).
+			if err := s.writeResponse(message, stdout); err != nil {
+				s.logger.Errorf("handleOutgoingMessages: Error writing message: %v", err)
 			}
 		case <-ctx.Done():
+			s.logger.Debugf("handleOutgoingMessages: Context done, exiting")
 			return
 		}
 	}
@@ -359,12 +377,15 @@ func (s *stdioTransport) processInputStream(ctx context.Context, reader *bufio.R
 			return err
 		}
 
-		if err := s.processMessage(ctx, line, stdout); err != nil {
-			if err == io.EOF {
-				return nil
+		// Process message asynchronously to avoid blocking input reading.
+		go func(line string) {
+			if err := s.processMessage(ctx, line, stdout); err != nil {
+				if err == io.EOF {
+					return
+				}
+				s.logger.Errorf("Error handling message: %v", err)
 			}
-			s.logger.Errorf("Error handling message: %v", err)
-		}
+		}(line)
 	}
 }
 
@@ -378,10 +399,12 @@ func (s *stdioTransport) readNextLine(ctx context.Context, reader *bufio.Reader)
 	go func() {
 		select {
 		case <-done:
+			s.logger.Debugf("readNextLine: Goroutine cancelled\n")
 			return
 		default:
 			line, err := reader.ReadString('\n')
 			if err != nil {
+				s.logger.Debugf("readNextLine: ReadString error: %v\n", err)
 				select {
 				case errChan <- err:
 				case <-done:
@@ -391,6 +414,7 @@ func (s *stdioTransport) readNextLine(ctx context.Context, reader *bufio.Reader)
 			select {
 			case readChan <- line:
 			case <-done:
+				s.logger.Debugf("readNextLine: Done before sending to channel\n")
 			}
 		}
 	}()
@@ -436,10 +460,17 @@ func (s *stdioTransport) processMessage(ctx context.Context, line string, writer
 		if response != nil {
 			return s.writeResponse(response, writer)
 		}
+		s.logger.Debugf("processMessage: No response generated\n")
 
 	case JSONRPCMessageTypeNotification:
 		if err := s.server.HandleNotification(sessionCtx, rawMessage); err != nil {
 			s.logger.Errorf("Error handling notification: %v", err)
+		}
+
+	case JSONRPCMessageTypeResponse, JSONRPCMessageTypeError:
+		// Handle responses to server-initiated requests (like roots/list).
+		if err := s.server.HandleResponse(sessionCtx, rawMessage); err != nil {
+			s.logger.Errorf("Error handling response: %v", err)
 		}
 	}
 
@@ -461,6 +492,26 @@ func (s *stdioTransport) writeResponse(response interface{}, writer io.Writer) e
 		return fmt.Errorf("error writing newline: %w", err)
 	}
 
+	// Force flush buffer to ensure immediate delivery.
+	if file, ok := writer.(*os.File); ok {
+		// Use syscall to force flush.
+		if err := file.Sync(); err != nil {
+			// Sync may fail for pipes, try to ignore.
+			s.logger.Debugf("writeResponse: Sync failed (expected for pipes): %v\n", err)
+		}
+
+		// Also try to flush the file descriptor directly.
+		if err := syscall.Fsync(int(file.Fd())); err != nil {
+			s.logger.Debugf("writeResponse: Fsync failed (expected for pipes): %v\n", err)
+		}
+	}
+
+	// For any writer, try to flush if it has a Flush method.
+	if flusher, ok := writer.(interface{ Flush() error }); ok {
+		if err := flusher.Flush(); err != nil {
+			s.logger.Debugf("writeResponse: Error flushing: %v\n", err)
+		}
+	}
 	return nil
 }
 
@@ -553,9 +604,225 @@ func (s *stdioServerInternal) HandleNotification(ctx context.Context, rawMessage
 	}
 
 	s.parent.logger.Debugf("Received notification: %s", notification.Method)
+
+	// Check if there's a registered handler for this notification method.
+	s.parent.notificationMu.RLock()
+	handler, exists := s.parent.notificationHandlers[notification.Method]
+	s.parent.notificationMu.RUnlock()
+
+	if exists {
+		go func() {
+			// Call the handler with the notification pointer and context.
+			if err := handler(ctx, &notification); err != nil {
+				s.parent.logger.Errorf("Error handling notification %s: %v", notification.Method, err)
+			}
+		}()
+	} else {
+		s.parent.logger.Warnf("Received notification with no handler registered: %s", notification.Method)
+	}
+
 	return nil
+}
+
+// HandleResponse handles JSON-RPC responses from the client (for server-to-client requests).
+func (s *stdioServerInternal) HandleResponse(ctx context.Context, rawMessage json.RawMessage) error {
+	var response struct {
+		JSONRPC string      `json:"jsonrpc"`
+		ID      interface{} `json:"id"`
+		Result  interface{} `json:"result,omitempty"`
+		Error   interface{} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &response); err != nil {
+		s.parent.logger.Errorf("HandleResponse: Error unmarshaling response: %v", err)
+		return err
+	}
+
+	// Convert ID to uint64.
+	requestIDUint, ok := s.parseRequestID(response.ID)
+	if !ok {
+		s.parent.logger.Errorf("HandleResponse: Invalid request ID in response: %v", response.ID)
+		return nil
+	}
+
+	// Get the response channel.
+	s.parent.responsesMu.RLock()
+	responseChanInterface, exists := s.parent.responses[requestIDUint]
+	s.parent.responsesMu.RUnlock()
+
+	if !exists {
+		s.parent.logger.Warnf("HandleResponse: Received response for unknown request ID: %d", requestIDUint)
+		return nil
+	}
+
+	// Type assert to the correct channel type.
+	responseChan, ok := responseChanInterface.(chan *json.RawMessage)
+	if !ok {
+		s.parent.logger.Errorf("HandleResponse: Invalid response channel type for request ID: %d", requestIDUint)
+		return nil
+	}
+
+	// Handle error response.
+	if response.Error != nil {
+		// Create error result.
+		errorBytes, _ := json.Marshal(map[string]interface{}{
+			"error": response.Error,
+		})
+		errorMessage := json.RawMessage(errorBytes)
+
+		select {
+		case responseChan <- &errorMessage:
+		default:
+			s.parent.logger.Errorf("HandleResponse: Failed to deliver error response: channel full or closed")
+		}
+	} else if response.Result != nil {
+		// Handle success response.
+		resultBytes, err := json.Marshal(response.Result)
+		if err != nil {
+			s.parent.logger.Errorf("HandleResponse: Failed to marshal response result: %v", err)
+		} else {
+			resultMessage := json.RawMessage(resultBytes)
+			select {
+			case responseChan <- &resultMessage:
+			default:
+				s.parent.logger.Errorf("HandleResponse: Failed to deliver response: channel full or closed")
+			}
+		}
+	} else {
+		// Invalid response - neither error nor result.
+		s.parent.logger.Errorf("HandleResponse: Invalid JSON-RPC response: missing both result and error for ID: %d", requestIDUint)
+	}
+
+	return nil
+}
+
+// parseRequestID safely converts interface{} to uint64.
+func (s *stdioServerInternal) parseRequestID(id interface{}) (uint64, bool) {
+	switch v := id.(type) {
+	case int:
+		return uint64(v), true
+	case int64:
+		return uint64(v), true
+	case uint64:
+		return v, true
+	case float64:
+		return uint64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func (s *stdioServerInternal) handlePing(ctx context.Context, request JSONRPCRequest) (interface{}, error) {
 	return newJSONRPCResponse(request.ID, struct{}{}), nil
+}
+
+// ListRoots sends a request to the client asking for its list of roots.
+func (s *StdioServer) ListRoots(ctx context.Context) (*ListRootsResult, error) {
+	// Get the session from context.
+	session := ClientSessionFromContext(ctx)
+	if session == nil {
+		return nil, ErrNoClientSession
+	}
+
+	sessionID := session.GetID()
+	if sessionID == "" {
+		return nil, fmt.Errorf("session has no ID")
+	}
+
+	// Create standard JSON-RPC request.
+	requestID := s.requestID.Add(1)
+	request := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodRootsList,
+		},
+	}
+
+	// Send request and wait for response using transport layer.
+	response, err := s.SendRequest(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send roots/list request: %w", err)
+	}
+
+	// Parse response as ListRootsResult.
+	var listRootsResult ListRootsResult
+	if err := json.Unmarshal(*response, &listRootsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse ListRootsResult: %w", err)
+	}
+
+	return &listRootsResult, nil
+}
+
+// SendRequest sends a JSON-RPC request to the client and waits for response.
+func (s *StdioServer) SendRequest(ctx context.Context, request *JSONRPCRequest) (*json.RawMessage, error) {
+	// Generate unique request ID if not provided.
+	if request.ID == nil {
+		request.ID = s.requestID.Add(1)
+	}
+	// Get session from context.
+	session := sessionFromContext(ctx)
+	if session == nil {
+		return nil, fmt.Errorf("no session available for request")
+	}
+
+	// Create response channel.
+	requestIDUint := uint64(request.ID.(int64))
+	resultChan := make(chan *json.RawMessage, 1)
+
+	// Store the channel in the responses map.
+	s.responsesMu.Lock()
+	if s.responses == nil {
+		s.responses = make(map[uint64]interface{})
+	}
+	s.responses[requestIDUint] = resultChan
+	s.responsesMu.Unlock()
+
+	// Clean up the response channel when done.
+	defer func() {
+		s.responsesMu.Lock()
+		delete(s.responses, requestIDUint)
+		s.responsesMu.Unlock()
+	}()
+
+	select {
+	case session.MessageChannel() <- request:
+		// Wait for the response or timeout.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case response := <-resultChan:
+			return response, nil
+		case <-time.After(30 * time.Second):
+			return nil, fmt.Errorf("SendRequest: Request timeout for ID %d after 30s", requestIDUint)
+		}
+	default:
+		return nil, fmt.Errorf("failed to send request: MessageChannel full")
+	}
+}
+
+// RegisterNotificationHandler registers a handler for the specified notification method.
+// This allows the server to respond to client notifications.
+func (s *StdioServer) RegisterNotificationHandler(method string, handler ServerNotificationHandler) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	// Initialize the map if it's nil.
+	if s.notificationHandlers == nil {
+		s.notificationHandlers = make(map[string]ServerNotificationHandler)
+	}
+
+	s.notificationHandlers[method] = handler
+	s.logger.Debugf("Registered notification handler for method: %s", method)
+}
+
+// UnregisterNotificationHandler removes a handler for the specified notification method.
+func (s *StdioServer) UnregisterNotificationHandler(method string) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	if s.notificationHandlers != nil {
+		delete(s.notificationHandlers, method)
+		s.logger.Debugf("Unregistered notification handler for method: %s", method)
+	}
 }

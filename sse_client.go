@@ -51,6 +51,9 @@ type sseClientTransport struct {
 	// Fields for HTTP request handler configuration
 	serviceName           string                 // Service name for custom HTTP request handlers.
 	httpReqHandlerOptions []HTTPReqHandlerOption // HTTP request handler options for extensibility.
+
+	// Client reference for accessing rootsProvider.
+	client *Client // Reference to the parent client
 }
 
 // NewSSEClient creates a new client using the SSE transport from the 2024-11-05 spec.
@@ -86,6 +89,9 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 			}
 
 			c.transport = sseTransport
+
+			// Set client reference in transport for roots handling.
+			sseTransport.client = c
 		}),
 		WithProtocolVersion(ProtocolVersion_2024_11_05), // Use the 2024-11-05 protocol version.
 	}
@@ -272,10 +278,24 @@ func (t *sseClientTransport) handleMessageEvent(data string) {
 		return
 	}
 
-	// Check if the message is a response or a notification.
-	if _, hasID := message["id"]; hasID {
+	// Check if the message is a request, response, or notification.
+	hasID := false
+	hasMethod := false
+	if _, ok := message["id"]; ok {
+		hasID = true
+	}
+	if _, ok := message["method"]; ok {
+		hasMethod = true
+	}
+
+	if hasID && hasMethod {
+		// This is a request from the server to the client.
+		t.handleIncomingRequest(data)
+	} else if hasID {
+		// This is a response to a previous request.
 		t.handleResponse(data)
-	} else if _, hasMethod := message["method"]; hasMethod {
+	} else if hasMethod {
+		// This is a notification.
 		t.handleNotification(data)
 	} else {
 		if t.logger != nil {
@@ -342,6 +362,121 @@ func (t *sseClientTransport) handleNotification(data string) {
 
 	if handler != nil {
 		handler(&notification)
+	}
+}
+
+// handleIncomingRequest processes request messages from the server.
+func (t *sseClientTransport) handleIncomingRequest(data string) {
+	var request JSONRPCRequest
+	if err := json.Unmarshal([]byte(data), &request); err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error parsing incoming request: %v", err)
+		}
+		return
+	}
+
+	// Handle different types of requests.
+	switch request.Method {
+	case MethodRootsList:
+		t.handleRootsListRequest(&request)
+	default:
+		// Send method not found error.
+		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
+	}
+}
+
+// handleRootsListRequest handles roots/list requests from the server.
+func (t *sseClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
+	// Get roots from the client if it has a reference.
+	var roots []Root
+	if t.client != nil {
+		t.client.rootsMu.RLock()
+		provider := t.client.rootsProvider
+		t.client.rootsMu.RUnlock()
+
+		if provider != nil {
+			roots = provider.GetRoots()
+		}
+	}
+
+	if roots == nil {
+		roots = []Root{}
+	}
+
+	result := &ListRootsResult{
+		Roots: roots,
+	}
+
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  result,
+	}
+
+	// Send response.
+	t.sendResponseMessage(response)
+}
+
+// sendErrorResponse sends an error response to the server.
+func (t *sseClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
+	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	t.sendResponseMessage(errorResp)
+}
+
+// sendResponseMessage sends a response back to the server.
+func (t *sseClientTransport) sendResponseMessage(response interface{}) {
+	if t.endpoint == nil {
+		if t.logger != nil {
+			t.logger.Errorf("Cannot send response: endpoint not available")
+		}
+		return
+	}
+
+	respBytes, err := json.Marshal(response)
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error marshaling response: %v", err)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint.String(), bytes.NewReader(respBytes))
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error creating HTTP request for response: %v", err)
+		}
+		return
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Add custom headers.
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+
+	var resp *http.Response
+	resp, err = t.httpReqHandler.Handle(ctx, t.httpClient, httpReq) // Always use httpReqHandler consistently.
+
+	if err != nil {
+		t.logger.Errorf("Error sending response to server: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted { // According to MCP protocol, response should be 202 Accepted.
+		// Read response body for error details.
+		bodyBytes, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			t.logger.Errorf("Unexpected response status when sending response: %d, failed to read body: %v", resp.StatusCode, bodyErr)
+		} else {
+			t.logger.Errorf("Unexpected response status when sending response: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		}
 	}
 }
 

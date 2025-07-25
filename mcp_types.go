@@ -6,7 +6,11 @@
 
 package mcp
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+	"sync"
+)
 
 const (
 	// ContentTypeText represents text content type
@@ -240,4 +244,102 @@ func NewEmbeddedResource(resource ResourceContents) EmbeddedResource {
 		Type:     ContentTypeEmbeddedResource,
 		Resource: resource,
 	}
+}
+
+// RootsProvider defines the interface for root directory providers.
+type RootsProvider interface {
+	// GetRoots returns the list of currently available root directories.
+	GetRoots() []Root
+}
+
+// Root represents a filesystem root directory that a client provides to servers.
+type Root struct {
+	// The URI of the root directory. Must be a file:// URI.
+	URI string `json:"uri"`
+	// An optional name for the root directory.
+	Name string `json:"name,omitempty"`
+}
+
+// ListRootsResult represents the client's response to a roots/list request from the server.
+type ListRootsResult struct {
+	Result
+	Roots []Root `json:"roots"`
+}
+
+// DefaultRootsProvider implements a simple root directory provider.
+type DefaultRootsProvider struct {
+	mu    sync.RWMutex
+	roots []Root
+}
+
+// NewDefaultRootsProvider creates a new default root directory provider.
+func NewDefaultRootsProvider(roots ...Root) *DefaultRootsProvider {
+	return &DefaultRootsProvider{
+		roots: append([]Root{}, roots...),
+	}
+}
+
+// AddRoot adds a root directory to the provider.
+// If the URI doesn't start with "file://", it will be automatically prefixed.
+// For local filesystem paths, this ensures proper file:/// format per MCP specification.
+func (p *DefaultRootsProvider) AddRoot(uri, name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Ensure URI format is correct according to MCP specification.
+	if !strings.HasPrefix(uri, "file://") {
+		// For local filesystem paths, use file:/// format as per MCP spec.
+		if strings.HasPrefix(uri, "/") {
+			// Absolute path: file:/// + path
+			uri = "file://" + uri
+		} else {
+			// Relative path: convert to absolute then add file:///
+			// This ensures proper file:/// format for local filesystem.
+			uri = "file:///" + uri
+		}
+	}
+
+	p.roots = append(p.roots, Root{
+		URI:  uri,
+		Name: name,
+	})
+}
+
+// RemoveRoot removes a root directory from the provider.
+// If the URI doesn't start with "file://", it will be automatically prefixed for comparison.
+func (p *DefaultRootsProvider) RemoveRoot(uri string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Standardize URI format for comparison.
+	if !strings.HasPrefix(uri, "file://") {
+		// Apply same logic as AddRoot for consistent formatting.
+		if strings.HasPrefix(uri, "/") {
+			// Absolute path: file:/// + path.
+			uri = "file://" + uri
+		} else {
+			// Relative path: convert to file:/// format.
+			uri = "file:///" + uri
+		}
+	}
+
+	newRoots := make([]Root, 0, len(p.roots))
+	for _, root := range p.roots {
+		if root.URI != uri {
+			newRoots = append(newRoots, root)
+		}
+	}
+	p.roots = newRoots
+}
+
+// GetRoots implements the RootsProvider interface.
+// It returns a copy of the current root directories to prevent external modification.
+func (p *DefaultRootsProvider) GetRoots() []Root {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Return a copy of the roots.
+	result := make([]Root, len(p.roots))
+	copy(result, p.roots)
+	return result
 }

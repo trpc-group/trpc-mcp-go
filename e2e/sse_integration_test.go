@@ -175,6 +175,87 @@ func TestSSEClientServer_ConnectionManagement(t *testing.T) {
 	})
 }
 
+// TestSSEClientServer_RootsProvider tests server-to-client roots functionality over SSE transport.
+func TestSSEClientServer_RootsProvider(t *testing.T) {
+	server, sseEndpoint, cleanup := startSSEServer(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create SSE Client with RootsProvider capability
+	client, err := mcp.NewSSEClient(
+		sseEndpoint,
+		mcp.Implementation{
+			Name:    "roots-sse-test-client",
+			Version: "1.0.0",
+		},
+		mcp.WithClientLogger(mcp.GetDefaultLogger()),
+	)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Set up roots provider with test directories
+	rootsProvider := mcp.NewDefaultRootsProvider()
+	rootsProvider.AddRoot("/tmp", "Temporary Directory")
+	rootsProvider.AddRoot("/var", "Variable Directory")
+	client.SetRootsProvider(rootsProvider)
+
+	// Initialize with roots capability
+	initResult, err := client.Initialize(ctx, &mcp.InitializeRequest{
+		Params: mcp.InitializeParams{
+			ProtocolVersion: mcp.ProtocolVersion_2025_03_26,
+			ClientInfo: mcp.Implementation{
+				Name:    "roots-sse-test-client",
+				Version: "1.0.0",
+			},
+			Capabilities: mcp.ClientCapabilities{
+				Roots: &mcp.RootsCapability{
+					ListChanged: true,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, mcp.ProtocolVersion_2025_03_26, initResult.ProtocolVersion)
+
+	// Register a tool that uses ListRoots
+	listRootsTool := mcp.NewTool("list-sse-roots",
+		mcp.WithDescription("List client's root directories via SSE"),
+	)
+
+	server.RegisterTool(listRootsTool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Call ListRoots to get client roots
+		roots, err := server.ListRoots(ctx)
+		if err != nil {
+			return mcp.NewErrorResult(fmt.Sprintf("Failed to list roots: %v", err)), nil
+		}
+
+		// Format response
+		message := fmt.Sprintf("SSE client has %d root directories:\n", len(roots.Roots))
+		for i, root := range roots.Roots {
+			message += fmt.Sprintf("%d. %s (%s)\n", i+1, root.Name, root.URI)
+		}
+
+		return mcp.NewTextResult(message), nil
+	})
+
+	// Call the tool to test ListRoots functionality
+	result, err := client.CallTool(ctx, &mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "list-sse-roots",
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Content)
+
+	// Verify the response contains our root directories
+	textContent, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Temporary Directory")
+	assert.Contains(t, textContent.Text, "Variable Directory")
+}
+
 // startSSEServer starts an SSE server for testing.
 func startSSEServer(t *testing.T) (*mcp.SSEServer, string, func()) {
 	t.Helper()

@@ -256,6 +256,9 @@ func (m *toolManager) handleCallTool(
 		ctx = m.serverProvider.withContext(ctx)
 	}
 
+	// Inject client session into context for tool handler.
+	ctx = withClientSession(ctx, session)
+
 	// Modify method name for monitoring if modifier is available.
 	if m.methodNameModifier != nil {
 		m.methodNameModifier(ctx, MethodToolsCall, toolName)

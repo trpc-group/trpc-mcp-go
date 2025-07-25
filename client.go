@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"sync"
 	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
@@ -60,6 +61,10 @@ type Connector interface {
 	RegisterNotificationHandler(method string, handler NotificationHandler)
 	// UnregisterNotificationHandler removes a notification handler.
 	UnregisterNotificationHandler(method string)
+	// SetRootsProvider sets the provider for responding to server's roots/list requests.
+	SetRootsProvider(provider RootsProvider)
+	// SendRootsListChangedNotification notifies server that roots changed.
+	SendRootsListChangedNotification(ctx context.Context) error
 }
 
 // SessionClient extends Connector with session management capabilities.
@@ -115,6 +120,10 @@ type Client struct {
 	transportConfig *transportConfig
 
 	logger Logger // Logger for client transport (optional).
+
+	// Roots support.
+	rootsProvider RootsProvider // Provider for roots information.
+	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
 }
 
 // ClientOption client option function
@@ -149,6 +158,11 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 	// Create transport layer if not previously set via options.
 	if client.transport == nil {
 		client.transport = newStreamableHTTPClientTransport(client.transportConfig, client.transportOptions...)
+
+		// Set client reference in transport for roots handling.
+		if streamableTransport, ok := client.transport.(*streamableHTTPClientTransport); ok {
+			streamableTransport.client = client
+		}
 	}
 
 	return client, nil
@@ -606,6 +620,20 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 
 	// Parse response using specialized parser
 	return parseReadResourceResultFromJSON(rawResp)
+}
+
+// SetRootsProvider sets the provider for responding to server's roots/list requests.
+func (c *Client) SetRootsProvider(provider RootsProvider) {
+	c.rootsMu.Lock()
+	defer c.rootsMu.Unlock()
+	c.rootsProvider = provider
+}
+
+// SendRootsListChangedNotification notifies server that roots changed.
+func (c *Client) SendRootsListChangedNotification(ctx context.Context) error {
+	// Create roots list changed notification.
+	notification := NewJSONRPCNotificationFromMap(MethodNotificationsRootsListChanged, nil)
+	return c.transport.sendNotification(ctx, notification)
 }
 
 func isZeroStruct(x interface{}) bool {

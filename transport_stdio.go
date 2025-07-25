@@ -64,6 +64,9 @@ type stdioClientTransport struct {
 
 	sessionID string
 	logger    Logger
+
+	// Client reference for accessing rootsProvider.
+	client *StdioClient
 }
 
 // stdioTransportOption defines options for stdio transport.
@@ -269,7 +272,28 @@ func (t *stdioClientTransport) sendResponse(ctx context.Context, resp *JSONRPCRe
 
 	t.requestMutex.Lock()
 	err := t.encoder.Encode(resp)
+
+	// Force flush the stdin pipe to ensure immediate delivery.
+	if t.stdin != nil {
+		if flusher, ok := t.stdin.(interface{ Flush() error }); ok {
+			if flushErr := flusher.Flush(); flushErr != nil {
+				t.logger.Warnf("Client sendResponse: Flush error: %v\n", flushErr)
+			}
+		}
+
+		// Try to sync if it's a file.
+		if file, ok := t.stdin.(*os.File); ok {
+			if syncErr := file.Sync(); syncErr != nil {
+				t.logger.Warnf("Client sendResponse: Sync error: %v\n", syncErr)
+			}
+		}
+	}
+
 	t.requestMutex.Unlock()
+
+	if err != nil {
+		t.logger.Errorf("Client sendResponse: Error encoding response: %v", err)
+	}
 
 	return err
 }
@@ -306,6 +330,8 @@ func (t *stdioClientTransport) readLoop() {
 			t.handleErrorResponse(rawMessage)
 		case JSONRPCMessageTypeNotification:
 			t.handleNotification(rawMessage)
+		case JSONRPCMessageTypeRequest:
+			t.handleIncomingRequest(rawMessage)
 		default:
 			t.logger.Warnf("Unexpected message type: %s", msgType)
 		}
@@ -432,6 +458,79 @@ func (t *stdioClientTransport) handleNotification(rawMessage json.RawMessage) {
 			t.logger.Debugf("Error handling notification %s: %v", notification.Method, err)
 		}
 	}()
+}
+
+// handleIncomingRequest handles JSON-RPC requests from the server.
+func (t *stdioClientTransport) handleIncomingRequest(rawMessage json.RawMessage) {
+	var request JSONRPCRequest
+	if err := json.Unmarshal(rawMessage, &request); err != nil {
+		t.logger.Errorf("Client handleIncomingRequest: Error unmarshaling incoming request: %v", err)
+		return
+	}
+
+	// Handle different types of requests.
+	switch request.Method {
+	case MethodRootsList:
+		t.handleRootsListRequest(&request)
+	default:
+		t.logger.Warnf("Client handleIncomingRequest: Unknown method: %s", request.Method)
+		// Send method not found error
+		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
+	}
+}
+
+// handleRootsListRequest handles roots/list requests from the server.
+func (t *stdioClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
+	// Get roots from the client if it has a reference.
+	var roots []Root
+	if t.client != nil {
+		t.client.rootsMu.RLock()
+		provider := t.client.rootsProvider
+		t.client.rootsMu.RUnlock()
+
+		if provider != nil {
+			roots = provider.GetRoots()
+		} else {
+			t.logger.Debugf("Client handleRootsListRequest: No roots provider available")
+		}
+	} else {
+		t.logger.Debugf("Client handleRootsListRequest: No client reference available")
+	}
+
+	if roots == nil {
+		roots = []Root{}
+	}
+
+	result := &ListRootsResult{
+		Roots: roots,
+	}
+
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  result,
+	}
+
+	// Send response.
+	if err := t.sendResponse(context.Background(), response); err != nil {
+		t.logger.Errorf("Client handleRootsListRequest: Failed to send roots/list response: %v", err)
+	}
+}
+
+// sendErrorResponse sends an error response to the server.
+func (t *stdioClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
+	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+
+	// Convert JSONRPCError to bytes and send.
+	errorBytes, err := json.Marshal(errorResp)
+	if err != nil {
+		t.logger.Errorf("Failed to marshal error response: %v", err)
+		return
+	}
+
+	if err := t.encoder.Encode(json.RawMessage(errorBytes)); err != nil {
+		t.logger.Errorf("Failed to send error response: %v", err)
+	}
 }
 
 // stderrLoop reads and logs stderr output.
