@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 )
 
 const (
@@ -39,6 +40,8 @@ type mcpHandler struct {
 
 	// Prompt manager
 	promptManager *promptManager
+
+	cancelRequestFunc func(id interface{},reason interface{}) error
 }
 
 // newMCPHandler creates an MCP protocol handler
@@ -192,6 +195,8 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 	switch notification.Method {
 	case MethodNotificationsInitialized:
 		return h.lifecycleManager.handleInitialized(ctx, notification, session)
+	case MethodNotificationsCancelled:
+		return h.handleNotificationCancel(ctx, notification, session)
 	default:
 		// Ignore unknown notifications
 		return nil
@@ -202,4 +207,26 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 func (h *mcpHandler) onSessionTerminated(sessionID string) {
 	// Notify lifecycle manager that session has terminated
 	h.lifecycleManager.onSessionTerminated(sessionID)
+}
+
+func (h *mcpHandler) setCancelRequestFunc(cancelRequestFunc func(id interface{},reason interface{}) error) {
+	h.cancelRequestFunc = cancelRequestFunc
+}
+
+func (h *mcpHandler) handleNotificationCancel(ctx context.Context, notification *JSONRPCNotification, session Session) error {
+	requestID,ok := notification.Params.AdditionalFields["requestID"]
+	if !ok {
+		return fmt.Errorf("requestID not found in params")
+	}
+	reason,ok := notification.Params.AdditionalFields["reason"]
+	if !ok {
+		return fmt.Errorf("reason not found in params")
+	}
+	if initialRequestID,ok := session.GetData("initialRequestID");ok && initialRequestID == requestID {
+		return nil
+	}
+	if h.cancelRequestFunc != nil {
+		return h.cancelRequestFunc(requestID,reason)
+	}
+	return nil
 }

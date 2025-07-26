@@ -419,6 +419,54 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 	return parseCallToolResult(rawResp)
 }
 
+func (c *Client) CallToolAsync(ctx context.Context, callToolReq *CallToolRequest) (requestID int64, resultChan <-chan *CallToolResult, errChan <-chan error) {
+	resultCh := make(chan *CallToolResult, 1)
+	errCh := make(chan error, 1)
+
+	if !c.initialized {
+		errCh <- errors.ErrNotInitialized
+		return
+	}
+
+	requestID = c.requestID.Add(1)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodToolsCall,
+		},
+		Params: callToolReq.Params,
+	}
+
+	go func() {
+		rawResp, err := c.transport.sendRequest(ctx, req)
+		if err != nil {
+			errCh <- fmt.Errorf("tool call request failed: %w", err)
+			return
+		}
+
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				errCh <- fmt.Errorf("failed to parse error response: %w", err)
+			}
+			errCh <- fmt.Errorf("tool call error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+			return
+		}
+
+		result, err := parseCallToolResult(rawResp)
+		if err != nil {
+			errCh <- fmt.Errorf("failed to parse tool call result: %w", err)
+			return
+		}
+
+		resultCh <- result
+	}()
+
+	return requestID, resultCh, errCh
+}
+
 // Close closes the client connection and cleans up resources.
 func (c *Client) Close() error {
 	if c.transport != nil {
@@ -606,6 +654,23 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 	return parseReadResourceResultFromJSON(rawResp)
 }
 
+func (c *Client) CancelRequest(ctx context.Context, requestID int64, reason string) error {
+	notification := newJSONRPCNotification(Notification{
+		Method: MethodNotificationsCancelled,
+		Params: NotificationParams{
+			AdditionalFields: map[string]interface{}{
+				"requestID": requestID,
+				"reason":    reason,
+			},
+		},
+	})
+	return c.transport.sendNotification(ctx, notification)
+}
+
 func isZeroStruct(x interface{}) bool {
 	return reflect.ValueOf(x).IsZero()
+}
+
+func (c *Client) GetTransport() httpTransport {
+	return c.transport
 }
