@@ -204,6 +204,12 @@ func (m *resourceManager) notifyUpdate(uri string) {
 
 // handleListResources handles listing resources requests
 func (m *resourceManager) handleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	resources := m.getResources()
 
 	// Convert []*mcp.Resource to []mcp.Resource for the result
@@ -223,6 +229,12 @@ func (m *resourceManager) handleListResources(ctx context.Context, req *JSONRPCR
 
 // handleReadResource handles reading resource requests
 func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
@@ -272,6 +284,12 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 
 // handleListTemplates handles listing templates requests
 func (m *resourceManager) handleListTemplates(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	templates := m.getTemplates()
 
 	// Convert []*mcp.ResourceTemplate to []mcp.ResourceTemplate for the result
@@ -290,6 +308,12 @@ func (m *resourceManager) handleListTemplates(ctx context.Context, req *JSONRPCR
 
 // handleSubscribe handles subscription requests
 func (m *resourceManager) handleSubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
@@ -322,6 +346,12 @@ func (m *resourceManager) handleSubscribe(ctx context.Context, req *JSONRPCReque
 
 // handleUnsubscribe handles unsubscription requests
 func (m *resourceManager) handleUnsubscribe(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {

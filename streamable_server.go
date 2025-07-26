@@ -68,6 +68,9 @@ type httpServerHandler struct {
 
 	// Server path.
 	serverPath string
+
+	// Pending cancels mapping (request ID -> cancel function)
+	pendingCancels sync.Map
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -97,6 +100,7 @@ func newHTTPServerHandler(handler requestHandler, serverPath string, options ...
 		enableGetSSE:           true, // Default: GET SSE enabled
 		getSSEConnections:      make(map[string]*getSSEConnection),
 		serverPath:             serverPath,
+		pendingCancels:         sync.Map{},
 	}
 
 	// Apply options
@@ -281,7 +285,13 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 
 	// Branch: request or notification
 	if base.ID != nil && base.Method != "" {
-		h.handlePostRequest(enrichedCtx, w, r, rawMessage, base, session)
+		reqCtx, cancel := context.WithCancel(enrichedCtx)
+		if base.Method != MethodInitialize {
+			h.pendingCancels.Store(base.ID, cancel)
+		}
+		defer h.pendingCancels.Delete(base.ID)
+		defer cancel()
+		h.handlePostRequest(reqCtx, w, r, rawMessage, base, session)
 		return
 	}
 	if base.ID == nil && base.Method != "" {
@@ -351,6 +361,9 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 	// Use normal JSON response mode
 	noopSender := &noopNotificationSender{}
 	reqCtx := withNotificationSender(ctx, noopSender)
+	if req.Request.Method == MethodInitialize {
+		session.SetData("initialRequestID", req.ID)
+	}
 	if session != nil {
 		reqCtx = setSessionToContext(reqCtx, session)
 	}

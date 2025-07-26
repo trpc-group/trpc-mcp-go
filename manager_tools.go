@@ -190,6 +190,12 @@ func (m *toolManager) handleCallTool(
 	req *JSONRPCRequest,
 	session Session,
 ) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	// Parse request parameters
 	if req.Params == nil {
 		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
