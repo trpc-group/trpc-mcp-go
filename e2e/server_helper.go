@@ -47,7 +47,7 @@ func WithServerOptions(opts ...mcp.ServerOption) ServerOption {
 }
 
 // StartTestServer starts a test server and returns its URL and cleanup function.
-func StartTestServer(t *testing.T, opts ...ServerOption) (string, func()) {
+func StartTestServer(t *testing.T, opts ...ServerOption) (string, func(), *mcp.Server) {
 	t.Helper()
 
 	// Create basic server config.
@@ -77,7 +77,7 @@ func StartTestServer(t *testing.T, opts ...ServerOption) (string, func()) {
 		httpServer.Close()
 	}
 
-	return serverURL, cleanup
+	return serverURL, cleanup, s
 }
 
 // StartSSETestServer starts a test server with SSE enabled, returns its URL and cleanup function.

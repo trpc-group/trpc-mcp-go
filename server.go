@@ -185,6 +185,19 @@ func (s *Server) initComponents() {
 	// Create HTTP handler.
 	s.httpHandler = newHTTPServerHandler(s.mcpHandler, s.config.path, httpOptions...)
 
+	s.mcpHandler.setCancelRequestFunc(func(id interface{}, reason interface{}) error {
+		if value, ok := s.httpHandler.pendingCancels.Load(id); ok {
+			if cancel, ok := value.(context.CancelFunc); ok {
+				cancel()
+				s.httpHandler.pendingCancels.Delete(id)
+				return nil
+			} else {
+				return fmt.Errorf("invalid cancel function type: %T", value)
+			}
+		}
+		return fmt.Errorf("cancel function not found for ID: %v", id)
+	})
+
 	// Set server instance as the tool manager's server provider.
 	s.toolManager.withServerProvider(s)
 }
@@ -488,4 +501,12 @@ func (s *Server) SetMethodNameModifier(modifier MethodNameModifier) {
 	if s.toolManager != nil {
 		s.toolManager.withMethodNameModifier(modifier)
 	}
+}
+
+func (s *Server) CancelRequest(sessionID string, requestID int64, reason string) error {
+	notification := s.NewNotification(MethodNotificationsCancelled, map[string]interface{}{
+		"requestID": requestID,
+		"reason":    reason,
+	})
+	return s.httpHandler.sendNotification(sessionID, notification)
 }

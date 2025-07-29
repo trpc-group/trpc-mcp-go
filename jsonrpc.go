@@ -24,6 +24,7 @@ const (
 	ErrCodeMethodNotFound = -32601
 	ErrCodeInvalidParams  = -32602
 	ErrCodeInternal       = -32603
+	ErrCodeRequestCancelled = -32000
 
 	// MCP custom error code range: -32000 to -32099
 )

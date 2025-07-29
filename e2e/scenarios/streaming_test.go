@@ -19,7 +19,7 @@ import (
 // TestStreamingContent tests streaming content transmission from server to client.
 func TestStreamingContent(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -58,7 +58,7 @@ func TestStreamingContent(t *testing.T) {
 // TestDelayedResponse tests delayed response.
 func TestDelayedResponse(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -104,7 +104,7 @@ func TestDelayedResponse(t *testing.T) {
 // TestContextCancellation tests context cancellation.
 func TestContextCancellation(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -132,5 +132,43 @@ func TestContextCancellation(t *testing.T) {
 		// Verify error.
 		require.Error(t, err, "should return timeout error")
 		assert.Contains(t, err.Error(), "context", "error should be related to context cancellation")
+	})
+}
+
+func TestRequestCancellation(t *testing.T) {
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
+	defer cleanup()
+
+	client := e2e.CreateTestClient(t, serverURL)
+	defer e2e.CleanupClient(t, client)
+
+	e2e.InitializeClient(t, client)
+
+	t.Run("CancelRequest", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		callToolReq := &mcp.CallToolRequest{}
+		callToolReq.Params.Name = "delay-tool"
+		callToolReq.Params.Arguments = map[string]interface{}{
+			"delay_ms": 2000,
+			"message":  "This message should not be received",
+		}
+
+		requestID, resultCh, errCh := client.CallToolAsync(ctx, callToolReq)
+
+		time.Sleep(200 * time.Millisecond)
+
+		client.CancelRequest(ctx, requestID, "test cancel")
+
+		select {
+		case err := <-errCh:
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cancel")
+		case <-resultCh:
+			t.Fatal("should not receive result")
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout waiting for result or error")
+		}
 	})
 }
