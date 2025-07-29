@@ -507,7 +507,14 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 
 	// Check status code
 	if httpResp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("HTTP request failed with status code: %d", httpResp.StatusCode)
+		bodyBytes, bodyErr := io.ReadAll(httpResp.Body)
+		if bodyErr != nil {
+			t.logger.Warnf("Unexpected response status when sending response: %d, failed to read body: %v",
+				httpResp.StatusCode, bodyErr)
+		} else {
+			t.logger.Warnf("Unexpected response status when sending response: %d, body: %s",
+				httpResp.StatusCode, string(bodyBytes))
+		}
 	}
 
 	return nil
