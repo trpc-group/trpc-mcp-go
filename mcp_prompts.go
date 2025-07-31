@@ -103,7 +103,7 @@ func (pm *PromptMessage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("failed to unmarshal prompt message structure: %w", err)
 	}
 
-	if temp.Content != nil && len(temp.Content) > 0 {
+	if len(temp.Content) > 0 {
 		// Check for JSON null value first
 		if string(temp.Content) == "null" {
 			pm.Content = nil

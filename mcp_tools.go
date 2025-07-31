@@ -143,7 +143,7 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}
@@ -159,7 +159,7 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}
@@ -175,7 +175,7 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}
@@ -191,7 +191,7 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}
@@ -208,7 +208,7 @@ func WithObject(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}
@@ -270,7 +270,7 @@ func WithArray(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
 		}
 	}

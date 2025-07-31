@@ -53,7 +53,7 @@ func (p NotificationParams) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
 	// Add Meta if it exists and is not empty
-	if p.Meta != nil && len(p.Meta) > 0 {
+	if len(p.Meta) > 0 {
 		m["_meta"] = p.Meta
 	}
 
