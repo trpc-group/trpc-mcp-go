@@ -169,7 +169,7 @@ func handleSSEProgress(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 			if sender, ok := mcp.GetNotificationSender(ctx); ok {
 				err := sender.SendProgress(progress, fmt.Sprintf("Step %d/%d", i, steps))
 				if err != nil {
-					return nil, fmt.Errorf("Failed to send progress notification: %v", err)
+					return nil, fmt.Errorf("failed to send progress notification: %v", err)
 				}
 				// Send log message.
 				sender.SendLogMessage("info", fmt.Sprintf("Finished step %d", i))

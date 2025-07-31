@@ -59,7 +59,7 @@ func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.Call
 			Content: []mcp.Content{
 				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
-		}, fmt.Errorf("Failed to get session from context")
+		}, fmt.Errorf("failed to get session from context")
 	}
 
 	// Get counter from session data.
@@ -99,7 +99,7 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 			Content: []mcp.Content{
 				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
-		}, fmt.Errorf("Failed to get session from context")
+		}, fmt.Errorf("failed to get session from context")
 	}
 
 	// Get message and delay from parameters.
