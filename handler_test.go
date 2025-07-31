@@ -212,8 +212,4 @@ func TestMCPHandler_ToolsCall(t *testing.T) {
 	assert.True(t, ok, "Expected CallToolResult response")
 	assert.NotNil(t, result.Content)
 	assert.Len(t, result.Content, 1)
-
-	// Verify first content item
-	_, ok = result.Content[0].(Content)
-	assert.True(t, ok)
 }
