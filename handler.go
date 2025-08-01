@@ -174,6 +174,8 @@ func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, ses
 
 // Private methods for each case branch
 func (h *mcpHandler) handleInitialize(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	// Mark this request as an initialize request in the session
+	session.SetData("__initialize_request_id", req.ID)
 	return h.lifecycleManager.handleInitialize(ctx, req, session)
 }
 
@@ -242,16 +244,19 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 			return nil
 		}
 
+		// Check if trying to cancel initialize request
+		// The initialize request MUST NOT be cancelled by clients (MCP specification)
+		if initReqID, exists := session.GetData("__initialize_request_id"); exists {
+			if requestId == initReqID {
+				// Silently ignore attempts to cancel initialize requests
+				return nil
+			}
+		}
+
 		// Extract optional reason
 		reason := ""
 		if reasonValue, ok := additionalFields["reason"].(string); ok {
 			reason = reasonValue
-		}
-
-		// Check if trying to cancel initialize request
-		if reqID, ok := requestId.(string); ok && reqID == "initialize" {
-			// The initialize request MUST NOT be cancelled by clients
-			return nil
 		}
 
 		// Log reason if available
