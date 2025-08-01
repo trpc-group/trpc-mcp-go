@@ -217,6 +217,7 @@ type stdioSession struct {
 	notifications chan JSONRPCNotification
 	initialized   atomic.Bool
 	mu            sync.RWMutex
+	Cancelers     sync.Map 
 }
 
 func (s *stdioSession) getID() string {
@@ -278,6 +279,32 @@ func (s *stdioSession) GetData(key string) (interface{}, bool) {
 
 func (s *stdioSession) SetData(key string, value interface{}) {
 	s.setData(key, value)
+}
+
+func (s *stdioSession) RegisterCanceler(requestID any, cancelFunc context.CancelFunc) {
+	s.Cancelers.Store(requestID, cancelFunc)
+}
+
+func (s *stdioSession) CancelRequest(requestID any) {
+	if cancelFunc, ok := s.Cancelers.LoadAndDelete(requestID); ok {
+		if cf, ok := cancelFunc.(context.CancelFunc); ok {
+			cf()
+		}
+	}
+}
+
+func (s *stdioSession) CleanupRequest(requestID any) {
+	s.Cancelers.Delete(requestID)
+}
+
+func (s *stdioSession) CancelAll() {
+	s.Cancelers.Range(func(key, value interface{}) bool {
+		if cf, ok := value.(context.CancelFunc); ok {
+			cf()
+		}
+		s.Cancelers.Delete(key)
+		return true
+	})
 }
 
 func (s *stdioSession) SessionID() string {
