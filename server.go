@@ -59,6 +59,9 @@ type serverConfig struct {
 
 	// Method name modifier for external customization.
 	methodNameModifier MethodNameModifier
+
+	// Middleware chain for server request processing
+	middlewares []MiddlewareFunc
 }
 
 // Server MCP server
@@ -85,6 +88,7 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 		postSSEEnabled:         true,
 		getSSEEnabled:          true,
 		notificationBufferSize: defaultNotificationBufferSize,
+		middlewares:            []MiddlewareFunc{}, // Initialize middleware slice
 	}
 
 	// Create server with provided serverInfo
@@ -147,6 +151,7 @@ func (s *Server) initComponents() {
 		withLifecycleManager(lifecycleManager),
 		withResourceManager(s.resourceManager),
 		withPromptManager(s.promptManager),
+		withMiddlewares(s.config.middlewares),
 	)
 
 	// Collect HTTP handler options.
@@ -277,6 +282,20 @@ func WithStatelessMode(enabled bool) ServerOption {
 func WithToolListFilter(filter ToolListFilter) ServerOption {
 	return func(s *Server) {
 		s.config.toolListFilter = filter
+	}
+}
+
+// WithServerMiddleware adds a middleware to the server's request processing chain.
+func WithServerMiddleware(m MiddlewareFunc) ServerOption {
+	return func(s *Server) {
+		s.config.middlewares = append(s.config.middlewares, m)
+	}
+}
+
+// WithServerMiddlewares adds multiple middlewares to the server's request processing chain.
+func WithServerMiddlewares(middlewares ...MiddlewareFunc) ServerOption {
+	return func(s *Server) {
+		s.config.middlewares = append(s.config.middlewares, middlewares...)
 	}
 }
 
@@ -488,4 +507,9 @@ func (s *Server) SetMethodNameModifier(modifier MethodNameModifier) {
 	if s.toolManager != nil {
 		s.toolManager.withMethodNameModifier(modifier)
 	}
+}
+
+// GetMiddlewares returns the server's middleware chain.
+func (s *Server) GetMiddlewares() []MiddlewareFunc {
+	return s.config.middlewares
 }
