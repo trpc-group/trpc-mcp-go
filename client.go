@@ -114,7 +114,8 @@ type Client struct {
 	// transport configuration.
 	transportConfig *transportConfig
 
-	logger Logger // Logger for client transport (optional).
+	logger      Logger           // Logger for client transport (optional).
+	middlewares []MiddlewareFunc // Middleware chain for request processing.
 }
 
 // ClientOption client option function
@@ -136,6 +137,7 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 		state:            StateDisconnected,
 		transportOptions: []transportOption{},
 		transportConfig:  newDefaultTransportConfig(),
+		middlewares:      []MiddlewareFunc{}, // Initialize middleware slice.
 	}
 
 	// set server URL.
@@ -265,6 +267,20 @@ func WithHTTPReqHandlerOption(options ...HTTPReqHandlerOption) ClientOption {
 	}
 }
 
+// WithMiddleware adds a middleware to the client's request processing chain.
+func WithMiddleware(m MiddlewareFunc) ClientOption {
+	return func(c *Client) {
+		c.middlewares = append(c.middlewares, m)
+	}
+}
+
+// WithMiddlewares adds multiple middlewares to the client's request processing chain.
+func WithMiddlewares(middlewares ...MiddlewareFunc) ClientOption {
+	return func(c *Client) {
+		c.middlewares = append(c.middlewares, middlewares...)
+	}
+}
+
 // GetState returns the current client state.
 func (c *Client) GetState() State {
 	return c.state
@@ -355,34 +371,50 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Create request.
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodToolsList,
-		},
-		Params: listToolsReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("list tools request failed: %v", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		toolsReq := req.(*ListToolsRequest)
+		
+		// Create JSON-RPC request.
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodToolsList,
+			},
+			Params: toolsReq.Params,
 		}
-		return nil, fmt.Errorf("list tools error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("list tools request failed: %v", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("list tools error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+
+		// Parse response using specialized parser
+		return parseListToolsResultFromJSON(rawResp)
 	}
 
-	// Parse response using specialized parser
-	return parseListToolsResultFromJSON(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with ListToolsRequest for middleware processing.
+	resp, err := chainedHandler(ctx, listToolsReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*ListToolsResult), nil
 }
 
 // CallTool calls a tool.
@@ -392,33 +424,48 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Create request
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodToolsCall,
-		},
-		Params: callToolReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("tool call request failed: %w", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		toolReq := req.(*CallToolRequest)
+		
+		// Create JSON-RPC request
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodToolsCall,
+			},
+			Params: toolReq.Params,
 		}
-		return nil, fmt.Errorf("tool call error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("tool call request failed: %w", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("tool call error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+		return parseCallToolResult(rawResp)
 	}
 
-	return parseCallToolResult(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with CallToolRequest for middleware processing.
+	resp, err := chainedHandler(ctx, callToolReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*CallToolResult), nil
 }
 
 // Close closes the client connection and cleans up resources.
@@ -467,34 +514,50 @@ func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsReq
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Create request
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodPromptsList,
-		},
-		Params: listPromptsReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("list prompts request failed: %w", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		promptsReq := req.(*ListPromptsRequest)
+		
+		// Create JSON-RPC request
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodPromptsList,
+			},
+			Params: promptsReq.Params,
 		}
-		return nil, fmt.Errorf("list prompts error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("list prompts request failed: %w", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("list prompts error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+
+		// Parse response using specialized parser
+		return parseListPromptsResultFromJSON(rawResp)
 	}
 
-	// Parse response using specialized parser
-	return parseListPromptsResultFromJSON(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with ListPromptsRequest for middleware processing.
+	resp, err := chainedHandler(ctx, listPromptsReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*ListPromptsResult), nil
 }
 
 // GetPrompt gets a specific prompt.
@@ -504,34 +567,50 @@ func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) 
 		return nil, errors.ErrNotInitialized
 	}
 
-	// Create request.
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodPromptsGet,
-		},
-		Params: getPromptReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("get prompt request failed: %v", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		promptReq := req.(*GetPromptRequest)
+		
+		// Create JSON-RPC request.
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodPromptsGet,
+			},
+			Params: promptReq.Params,
 		}
-		return nil, fmt.Errorf("get prompt error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("get prompt request failed: %v", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("get prompt error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+
+		// Parse response using specialized parser
+		return parseGetPromptResultFromJSON(rawResp)
 	}
 
-	// Parse response using specialized parser
-	return parseGetPromptResultFromJSON(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with GetPromptRequest for middleware processing.
+	resp, err := chainedHandler(ctx, getPromptReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*GetPromptResult), nil
 }
 
 // ListResources lists available resources.
@@ -541,34 +620,50 @@ func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResour
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
 	}
 
-	// Create request.
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodResourcesList,
-		},
-		Params: listResourcesReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("list resources request failed: %v", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		resourcesReq := req.(*ListResourcesRequest)
+		
+		// Create JSON-RPC request.
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodResourcesList,
+			},
+			Params: resourcesReq.Params,
 		}
-		return nil, fmt.Errorf("list resources error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("list resources request failed: %v", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("list resources error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+
+		// Parse response using specialized parser
+		return parseListResourcesResultFromJSON(rawResp)
 	}
 
-	// Parse response using specialized parser
-	return parseListResourcesResultFromJSON(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with ListResourcesRequest for middleware processing.
+	resp, err := chainedHandler(ctx, listResourcesReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*ListResourcesResult), nil
 }
 
 // ReadResource reads a specific resource.
@@ -578,34 +673,50 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
 	}
 
-	// Create request.
-	requestID := c.requestID.Add(1)
-	req := &JSONRPCRequest{
-		JSONRPC: JSONRPCVersion,
-		ID:      requestID,
-		Request: Request{
-			Method: MethodResourcesRead,
-		},
-		Params: readResourceReq.Params,
-	}
-
-	rawResp, err := c.transport.sendRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("read resource request failed: %v", err)
-	}
-
-	// Check for error response
-	if isErrorResponse(rawResp) {
-		errResp, err := parseRawMessageToError(rawResp)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse error response: %w", err)
+	// Define the final handler that sends the request.
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		resourceReq := req.(*ReadResourceRequest)
+		
+		// Create JSON-RPC request.
+		requestID := c.requestID.Add(1)
+		jsonReq := &JSONRPCRequest{
+			JSONRPC: JSONRPCVersion,
+			ID:      requestID,
+			Request: Request{
+				Method: MethodResourcesRead,
+			},
+			Params: resourceReq.Params,
 		}
-		return nil, fmt.Errorf("read resource error: %s (code: %d)",
-			errResp.Error.Message, errResp.Error.Code)
+
+		rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+		if err != nil {
+			return nil, fmt.Errorf("read resource request failed: %v", err)
+		}
+
+		// Check for error response
+		if isErrorResponse(rawResp) {
+			errResp, err := parseRawMessageToError(rawResp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse error response: %w", err)
+			}
+			return nil, fmt.Errorf("read resource error: %s (code: %d)",
+				errResp.Error.Message, errResp.Error.Code)
+		}
+
+		// Parse response using specialized parser
+		return parseReadResourceResultFromJSON(rawResp)
 	}
 
-	// Parse response using specialized parser
-	return parseReadResourceResultFromJSON(rawResp)
+	// Wrap the handler with the middleware chain.
+	chainedHandler := Chain(handler, c.middlewares...)
+
+	// Execute the chain with ReadResourceRequest for middleware processing.
+	resp, err := chainedHandler(ctx, readResourceReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.(*ReadResourceResult), nil
 }
 
 func isZeroStruct(x interface{}) bool {

@@ -8,7 +8,23 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 )
+
+// parseJSONRPCParams parses JSON-RPC parameters into a target structure
+func parseJSONRPCParams(params interface{}, target interface{}) error {
+	if params == nil {
+		return nil
+	}
+	
+	// Convert params to JSON and then unmarshal into target
+	paramBytes, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	
+	return json.Unmarshal(paramBytes, target)
+}
 
 const (
 	// defaultServerName is the default name for the server
@@ -39,6 +55,9 @@ type mcpHandler struct {
 
 	// Prompt manager
 	promptManager *promptManager
+
+	// Middleware chain for server request processing
+	middlewares []MiddlewareFunc
 }
 
 // newMCPHandler creates an MCP protocol handler
@@ -77,6 +96,13 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 	h.lifecycleManager.withPromptManager(h.promptManager)
 
 	return h
+}
+
+// withMiddlewares sets the middleware chain for the handler
+func withMiddlewares(middlewares []MiddlewareFunc) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.middlewares = middlewares
+	}
 }
 
 // withToolManager sets the tool manager
@@ -151,6 +177,44 @@ func (h *mcpHandler) handleToolsList(ctx context.Context, req *JSONRPCRequest, s
 }
 
 func (h *mcpHandler) handleToolsCall(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	// Apply middleware chain for tool calls if middlewares are configured
+	if len(h.middlewares) > 0 {
+		// Parse the request to get CallToolRequest
+		var callToolReq CallToolRequest
+		if err := parseJSONRPCParams(req.Params, &callToolReq.Params); err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid params", err.Error()), nil
+		}
+
+		// Define the final handler that calls the tool manager
+		handler := func(ctx context.Context, request interface{}) (interface{}, error) {
+			// Cast back to CallToolRequest
+			toolReq := request.(*CallToolRequest)
+			
+			// Create a new JSON-RPC request with the potentially modified params
+			modifiedReq := &JSONRPCRequest{
+				JSONRPC: req.JSONRPC,
+				ID:      req.ID,
+				Request: Request{
+					Method: req.Method,
+				},
+				Params:  toolReq.Params,
+			}
+			
+			return h.toolManager.handleCallTool(ctx, modifiedReq, session)
+		}
+
+		// Execute the middleware chain
+		chainedHandler := Chain(handler, h.middlewares...)
+		result, err := chainedHandler(ctx, &callToolReq)
+		
+		if err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "tool call failed", err.Error()), nil
+		}
+		
+		return result.(JSONRPCMessage), nil
+	}
+	
+	// Fallback to direct call without middleware
 	return h.toolManager.handleCallTool(ctx, req, session)
 }
 
@@ -159,6 +223,44 @@ func (h *mcpHandler) handleResourcesList(ctx context.Context, req *JSONRPCReques
 }
 
 func (h *mcpHandler) handleResourcesRead(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	// Apply middleware chain for resource reads if middlewares are configured
+	if len(h.middlewares) > 0 {
+		// Parse the request to get ReadResourceRequest
+		var readResourceReq ReadResourceRequest
+		if err := parseJSONRPCParams(req.Params, &readResourceReq.Params); err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid params", err.Error()), nil
+		}
+
+		// Define the final handler that calls the resource manager
+		handler := func(ctx context.Context, request interface{}) (interface{}, error) {
+			// Cast back to ReadResourceRequest
+			resourceReq := request.(*ReadResourceRequest)
+			
+			// Create a new JSON-RPC request with the potentially modified params
+			modifiedReq := &JSONRPCRequest{
+				JSONRPC: req.JSONRPC,
+				ID:      req.ID,
+				Request: Request{
+					Method: req.Method,
+				},
+				Params:  resourceReq.Params,
+			}
+			
+			return h.resourceManager.handleReadResource(ctx, modifiedReq)
+		}
+
+		// Execute the middleware chain
+		chainedHandler := Chain(handler, h.middlewares...)
+		result, err := chainedHandler(ctx, &readResourceReq)
+		
+		if err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "resource read failed", err.Error()), nil
+		}
+		
+		return result.(JSONRPCMessage), nil
+	}
+	
+	// Fallback to direct call without middleware
 	return h.resourceManager.handleReadResource(ctx, req)
 }
 
@@ -179,6 +281,44 @@ func (h *mcpHandler) handlePromptsList(ctx context.Context, req *JSONRPCRequest,
 }
 
 func (h *mcpHandler) handlePromptsGet(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	// Apply middleware chain for prompt gets if middlewares are configured
+	if len(h.middlewares) > 0 {
+		// Parse the request to get GetPromptRequest
+		var getPromptReq GetPromptRequest
+		if err := parseJSONRPCParams(req.Params, &getPromptReq.Params); err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "invalid params", err.Error()), nil
+		}
+
+		// Define the final handler that calls the prompt manager
+		handler := func(ctx context.Context, request interface{}) (interface{}, error) {
+			// Cast back to GetPromptRequest
+			promptReq := request.(*GetPromptRequest)
+			
+			// Create a new JSON-RPC request with the potentially modified params
+			modifiedReq := &JSONRPCRequest{
+				JSONRPC: req.JSONRPC,
+				ID:      req.ID,
+				Request: Request{
+					Method: req.Method,
+				},
+				Params:  promptReq.Params,
+			}
+			
+			return h.promptManager.handleGetPrompt(ctx, modifiedReq)
+		}
+
+		// Execute the middleware chain
+		chainedHandler := Chain(handler, h.middlewares...)
+		result, err := chainedHandler(ctx, &getPromptReq)
+		
+		if err != nil {
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "prompt get failed", err.Error()), nil
+		}
+		
+		return result.(JSONRPCMessage), nil
+	}
+	
+	// Fallback to direct call without middleware
 	return h.promptManager.handleGetPrompt(ctx, req)
 }
 
