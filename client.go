@@ -254,12 +254,14 @@ func WithServiceName(serviceName string) ClientOption {
 	}
 }
 
-// WithHTTPReqHandlerOption adds an option for HTTP request handler.
+// WithHTTPReqHandlerOption adds one or more options for HTTP request handler.
 // This is typically only needed when using custom implementations of HTTPReqHandler
 // that support additional configuration options.
-func WithHTTPReqHandlerOption(option HTTPReqHandlerOption) ClientOption {
+func WithHTTPReqHandlerOption(options ...HTTPReqHandlerOption) ClientOption {
 	return func(c *Client) {
-		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
+		for _, option := range options {
+			c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
+		}
 	}
 }
 
