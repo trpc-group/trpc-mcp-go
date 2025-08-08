@@ -338,6 +338,14 @@ func (s *Server) RegisterPrompt(prompt *Prompt, handler promptHandler) {
 	s.promptManager.registerPrompt(prompt, handler)
 }
 
+// RegisterPromptWithCompletion registers a prompt with both handler and completion handler functions
+//
+// This method allows you to register a prompt that supports both prompt rendering
+// and argument completion suggestions.
+func (s *Server) RegisterPromptWithCompletion(prompt *Prompt, handler promptHandler, completionHandler completionHandler) {
+	s.promptManager.registerPromptWithCompletion(prompt, handler, completionHandler)
+}
+
 // SendNotification sends a notification to a specific session
 func (s *Server) SendNotification(sessionID string, method string, params map[string]interface{}) error {
 	// Create a notification object
