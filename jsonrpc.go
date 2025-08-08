@@ -26,6 +26,7 @@ const (
 	ErrCodeInternal       = -32603
 
 	// MCP custom error code range: -32000 to -32099
+	ErrCodeRequestCancelled = -32000
 )
 
 // JSONRPCMessage represents a JSON-RPC message.
