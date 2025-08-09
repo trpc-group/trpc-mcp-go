@@ -19,7 +19,7 @@ import (
 // TestSessionCreation tests session creation.
 func TestSessionCreation(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -39,7 +39,7 @@ func TestSessionCreation(t *testing.T) {
 // TestSessionTermination tests session termination.
 func TestSessionTermination(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -64,7 +64,7 @@ func TestSessionTermination(t *testing.T) {
 // TestMultipleSessions tests multiple sessions.
 func TestMultipleSessions(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create and initialize first client.
@@ -90,7 +90,7 @@ func TestMultipleSessions(t *testing.T) {
 // TestSessionReconnect tests reconnection after disconnection.
 func TestSessionReconnect(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create and initialize client.

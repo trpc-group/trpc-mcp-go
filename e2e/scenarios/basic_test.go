@@ -22,7 +22,7 @@ import (
 // Includes connection, initialization, tool listing, tool calling, and disconnection.
 func TestBasicWorkflow(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -53,7 +53,7 @@ func TestBasicWorkflow(t *testing.T) {
 // TestErrorHandling tests error handling logic.
 func TestErrorHandling(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.
@@ -89,7 +89,7 @@ func TestErrorHandling(t *testing.T) {
 // TestMultipleCalls tests multiple consecutive calls.
 func TestMultipleCalls(t *testing.T) {
 	// Set up test server.
-	serverURL, cleanup := e2e.StartTestServer(t, e2e.WithTestTools())
+	serverURL, cleanup, _ := e2e.StartTestServer(t, e2e.WithTestTools())
 	defer cleanup()
 
 	// Create test client.

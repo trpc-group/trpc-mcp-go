@@ -94,6 +94,12 @@ func (m *promptManager) getPrompts() []*Prompt {
 
 // handleListPrompts handles listing prompts requests
 func (m *promptManager) handleListPrompts(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	prompts := m.getPrompts()
 
 	// Convert []*mcp.Prompt to []mcp.Prompt for the result
@@ -156,6 +162,12 @@ func buildPromptMessages(prompt *Prompt, arguments map[string]interface{}) []Pro
 
 // Refactored: handleGetPrompt with logic unchanged, now using helpers
 func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	name, arguments, errResp, ok := parseGetPromptParams(req)
 	if !ok {
 		return errResp, nil
@@ -232,6 +244,12 @@ func parseCompletionCompleteParams(req *JSONRPCRequest) (promptName string, errR
 
 // Refactored: handleCompletionComplete with logic unchanged, now using helpers
 func (m *promptManager) handleCompletionComplete(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	select {
+	case <-ctx.Done():
+		return newJSONRPCErrorResponse(req.ID, ErrCodeRequestCancelled, "request cancelled", nil), ctx.Err()
+	default:
+	}
+
 	promptName, errResp, ok := parseCompletionCompleteParams(req)
 	if !ok {
 		return errResp, nil

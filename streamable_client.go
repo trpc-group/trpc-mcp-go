@@ -77,6 +77,9 @@ type streamableHTTPClientTransport struct {
 	// These options are typically not used by the default handler, but may be used by custom
 	// implementations that replace the default NewHTTPReqHandler function for extensibility.
 	httpReqHandlerOptions []HTTPReqHandlerOption
+
+	// Pending cancels mapping (request ID -> cancel function)
+	pendingCancels sync.Map
 }
 
 // NotificationHandler is a handler for notifications.
@@ -100,6 +103,7 @@ func newStreamableHTTPClientTransport(config *transportConfig, options ...transp
 		httpClient:            config.httpClient,
 		httpHeaders:           config.httpHeaders,
 		notificationHandlers:  make(map[string]NotificationHandler),
+		pendingCancels:        sync.Map{},
 		enableGetSSE:          config.enableGetSSE,
 		logger:                config.logger,
 		serviceName:           config.serviceName,
@@ -193,7 +197,12 @@ func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
-	return t.send(ctx, req, nil)
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if req.ID != nil && req.Request.Method != MethodInitialize {
+		t.pendingCancels.Store(req.ID, cancel)
+	}
+	return t.send(ctx2, req, nil)
 }
 
 // send sends a request and handles the response
@@ -242,6 +251,10 @@ func (t *streamableHTTPClientTransport) send(
 	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
+	}
+
+	if req.ID != nil && req.Request.Method != MethodInitialize {
+		t.pendingCancels.Delete(req.ID)
 	}
 
 	// Handle session ID
@@ -807,4 +820,18 @@ func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
 	}
 
 	t.establishGetSSE()
+}
+
+func (c *Client) HandleCancelRequest(requestID interface{}, reason interface{}) error {
+	f, _ := requestID.(float64)
+	if cancelFunc, ok := c.transport.(*streamableHTTPClientTransport).pendingCancels.Load(int64(f)); ok {
+		if cancel, ok := cancelFunc.(context.CancelFunc); ok {
+			cancel()
+		} else {
+			return fmt.Errorf("cancel function is not a context.CancelFunc")
+		}
+	} else {
+		return fmt.Errorf("no cancel function found for request ID: %v", requestID)
+	}
+	return nil
 }
