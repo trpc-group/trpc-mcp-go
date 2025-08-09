@@ -837,7 +837,7 @@ func (t *streamableHTTPClientTransport) handleRootsListRequest(request *JSONRPCR
 
 // sendErrorResponse sends an error response to the server.
 func (t *streamableHTTPClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
-	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	errorResp := NewJSONRPCErrorResponse(request.ID, code, message, nil)
 	t.sendResponseToServer(errorResp)
 }
 

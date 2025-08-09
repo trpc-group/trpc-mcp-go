@@ -164,14 +164,14 @@ func (m *lifecycleManager) handleInitialize(ctx context.Context, req *JSONRPCReq
 // checkInitializeParams validates the request parameters for initialization
 func (m *lifecycleManager) checkInitializeParams(req *JSONRPCRequest) JSONRPCMessage {
 	if req.Params == nil {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
 	}
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil)
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil)
 	}
 	if _, ok := paramsMap["protocolVersion"].(string); !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil)
 	}
 	return nil
 }

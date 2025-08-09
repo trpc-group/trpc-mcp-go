@@ -88,18 +88,24 @@ type ServerNotificationHandler func(ctx context.Context, notification *JSONRPCNo
 
 // Server MCP server
 type Server struct {
-	serverInfo           Implementation                       // Server information.
-	config               *serverConfig                        // Configuration.
-	logger               Logger                               // Logger for the server and subcomponents.
-	httpHandler          *httpServerHandler                   // HTTP handler.
-	mcpHandler           *mcpHandler                          // MCP handler.
-	toolManager          *toolManager                         // Tool manager.
-	resourceManager      *resourceManager                     // Resource manager.
-	promptManager        *promptManager                       // Prompt manager.
-	customServer         *http.Server                         // Custom HTTP server.
-	requestID            atomic.Int64                         // Request ID counter for generating unique request IDs.
-	notificationHandlers map[string]ServerNotificationHandler // Map of notification handlers by method name.
-	notificationMu       sync.RWMutex                         // Mutex for notification handlers map.
+	serverInfo           Implementation
+	config               *serverConfig
+	logger               Logger
+	httpHandler          *httpServerHandler
+	mcpHandler           *mcpHandler
+	toolManager          *toolManager
+	resourceManager      *resourceManager
+	promptManager        *promptManager
+	customServer         *http.Server
+	requestID            atomic.Int64
+	notificationHandlers map[string]ServerNotificationHandler
+	notificationMu       sync.RWMutex
+	middlewares          []MiddlewareFunc
+}
+
+// Use adds a middleware to the server's middleware chain.
+func (s *Server) Use(m MiddlewareFunc) {
+	s.middlewares = append(s.middlewares, m)
 }
 
 // NewServer creates a new MCP server
@@ -171,11 +177,12 @@ func (s *Server) initComponents() {
 
 	// Create MCP handler.
 	s.mcpHandler = newMCPHandler(
-		withToolManager(toolManager),
+		withToolManager(s.toolManager),
 		withLifecycleManager(lifecycleManager),
 		withResourceManager(resourceManager),
 		withPromptManager(promptManager),
-		withServer(s), // Set the server reference for notification handling.
+		withServer(s), // s satisfies the serverNotificationDispatcher interface
+		withMiddlewares(s.middlewares), // Pass the middleware list directly
 	)
 
 	// Collect HTTP handler options.
@@ -292,7 +299,7 @@ func WithStatelessMode(enabled bool) ServerOption {
 //
 //	server := mcp.NewServer("my-server", "1.0",
 //	    mcp.WithHTTPContextFunc(extractUserInfo), // Extract user info from headers
-//	    mcp.WithToolListFilter(func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
+//	    m.cp.WithToolListFilter(func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
 //	        userRole := mcp.GetUserRole(ctx)
 //	        if userRole == "admin" {
 //	            return tools // Admin sees all tools

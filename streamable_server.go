@@ -341,7 +341,16 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 		if err != nil {
 			h.logger.Infof("Request processing failed: %v", err)
-			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+			errorResp := NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+			err = sseResponder.respond(ctx, w, r, errorResp, session)
+			if err != nil {
+				h.logger.Infof("Failed to send SSE error response: %v", err)
+			}
+			return
+		}
+		// Check if the response from the handler is already an error response.
+		// If so, send it directly instead of wrapping it in a result.
+		if errorResp, ok := resp.(*JSONRPCError); ok {
 			err = sseResponder.respond(ctx, w, r, errorResp, session)
 			if err != nil {
 				h.logger.Infof("Failed to send SSE error response: %v", err)
@@ -368,7 +377,13 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 	resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 	if err != nil {
 		h.logger.Infof("Request processing failed: %v", err)
-		errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+		errorResp := NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
+		responder.respond(respCtx, w, r, errorResp, session)
+		return
+	}
+	// Check if the response from the handler is already an error response.
+	// If so, send it directly instead of wrapping it in a result.
+	if errorResp, ok := resp.(*JSONRPCError); ok {
 		responder.respond(respCtx, w, r, errorResp, session)
 		return
 	}
@@ -492,7 +507,7 @@ func (h *httpServerHandler) handleDelete(ctx context.Context, w http.ResponseWri
 			h.cleanupSession(sessionID)
 
 			// Return success response
-			h.sendEmptyResponse(w, http.StatusOK, nil)
+			h.sendEmptyResponse(w, nil)
 			return
 		}
 
@@ -682,11 +697,11 @@ func (h *httpServerHandler) handleStreamResumption(ctx context.Context, conn *ge
 }
 
 // sendEmptyResponse sends an empty response with the specified status code
-func (h *httpServerHandler) sendEmptyResponse(w http.ResponseWriter, statusCode int, session Session) {
+func (h *httpServerHandler) sendEmptyResponse(w http.ResponseWriter, session Session) {
 	if !h.isStateless && session != nil {
 		w.Header().Set(httputil.SessionIDHeader, session.GetID())
 	}
-	w.WriteHeader(statusCode)
+	w.WriteHeader(http.StatusOK)
 }
 
 // sendNotificationResponse sends a 202 Accepted response for notifications

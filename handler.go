@@ -42,19 +42,15 @@ type mcpHandler struct {
 
 	// Server reference for notification handling.
 	server serverNotificationDispatcher
+
+	// Middleware chain for request handling.
+	middlewares []MiddlewareFunc
 }
 
 // serverNotificationDispatcher defines the interface for dispatching notifications to handlers.
 type serverNotificationDispatcher interface {
 	// handleServerNotification dispatches a notification to registered handlers.
 	handleServerNotification(ctx context.Context, notification *JSONRPCNotification) error
-}
-
-// withServer sets the server reference.
-func withServer(server serverNotificationDispatcher) func(*mcpHandler) {
-	return func(h *mcpHandler) {
-		h.server = server
-	}
 }
 
 // newMCPHandler creates an MCP protocol handler
@@ -95,6 +91,20 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 	return h
 }
 
+// withServer sets the server reference.
+func withServer(server serverNotificationDispatcher) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.server = server
+	}
+}
+
+// withMiddlewares sets the middlewares for the handler.
+func withMiddlewares(middlewares []MiddlewareFunc) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.middlewares = middlewares
+	}
+}
+
 // withToolManager sets the tool manager
 func withToolManager(manager *toolManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
@@ -123,12 +133,9 @@ func withPromptManager(manager *promptManager) func(*mcpHandler) {
 	}
 }
 
-// Definition: request dispatch table type
-type requestHandlerFunc func(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
-
 // Initialization: request dispatch table
-func (h *mcpHandler) requestDispatchTable() map[string]requestHandlerFunc {
-	return map[string]requestHandlerFunc{
+func (h *mcpHandler) requestDispatchTable() map[string]HandleFunc {
+	return map[string]HandleFunc{
 		MethodInitialize:             h.handleInitialize,
 		MethodPing:                   h.handlePing,
 		MethodToolsList:              h.handleToolsList,
@@ -144,13 +151,18 @@ func (h *mcpHandler) requestDispatchTable() map[string]requestHandlerFunc {
 	}
 }
 
-// Refactored handleRequest
+// Refactored handleRequest to include middleware chain.
 func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
-	dispatchTable := h.requestDispatchTable()
-	if handler, ok := dispatchTable[req.Method]; ok {
-		return handler(ctx, req, session)
+	originalHandler, ok := h.requestDispatchTable()[req.Method]
+	if !ok {
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
 	}
-	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+
+	// Create and execute the middleware chain.
+	chain := NewMiddlewareChain(h.middlewares...)
+	chainedHandler := chain.Then(originalHandler)
+
+	return chainedHandler(ctx, req, session)
 }
 
 // Private methods for each case branch

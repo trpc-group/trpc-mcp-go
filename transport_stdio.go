@@ -527,7 +527,7 @@ func (t *stdioClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
 
 // sendErrorResponse sends an error response to the server.
 func (t *stdioClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
-	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	errorResp := NewJSONRPCErrorResponse(request.ID, code, message, nil)
 
 	// Convert JSONRPCError to bytes and send.
 	errorBytes, err := json.Marshal(errorResp)

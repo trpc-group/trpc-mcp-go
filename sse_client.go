@@ -438,7 +438,7 @@ func (t *sseClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
 
 // sendErrorResponse sends an error response to the server.
 func (t *sseClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
-	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	errorResp := NewJSONRPCErrorResponse(request.ID, code, message, nil)
 	t.sendResponseMessage(errorResp)
 }
 
