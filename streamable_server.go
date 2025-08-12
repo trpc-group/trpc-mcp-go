@@ -12,9 +12,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
-
 	"sync/atomic"
+	"time"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
