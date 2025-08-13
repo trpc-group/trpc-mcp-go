@@ -56,7 +56,54 @@ func main() {
 
 	server.RegisterTool(addTool, addHandler)
 
-	log.Printf("Registered tools: echo, add")
+	// Register a tool to test roots functionality
+	listRootsTool := mcp.NewTool("list-roots",
+		mcp.WithDescription("List client's root directories"),
+	)
+
+	listRootsHandler := func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Call ListRoots to get client roots
+		roots, err := server.ListRoots(ctx)
+		if err != nil {
+			return mcp.NewErrorResult(fmt.Sprintf("Failed to list roots: %v", err)), nil
+		}
+
+		// Format response
+		message := fmt.Sprintf("Client has %d root directories:\n", len(roots.Roots))
+		for i, root := range roots.Roots {
+			message += fmt.Sprintf("%d. %s (%s)\n", i+1, root.Name, root.URI)
+		}
+
+		return mcp.NewTextResult(message), nil
+	}
+
+	server.RegisterTool(listRootsTool, listRootsHandler)
+
+	// Register notification handlers
+	server.RegisterNotificationHandler("notifications/initialized", func(ctx context.Context, notification *mcp.JSONRPCNotification) error {
+		log.Printf("Received initialized notification")
+		return nil
+	})
+
+	server.RegisterNotificationHandler("notifications/roots/list_changed", func(ctx context.Context, notification *mcp.JSONRPCNotification) error {
+		log.Printf("Received roots/list_changed notification")
+
+		// Call ListRoots when notification is received
+		roots, err := server.ListRoots(ctx)
+		if err != nil {
+			log.Printf("Failed to list roots after notification: %v", err)
+			return nil
+		}
+
+		log.Printf("Received %d roots after notification:", len(roots.Roots))
+		for i, root := range roots.Roots {
+			log.Printf("  %d. %s (%s)", i+1, root.Name, root.URI)
+		}
+		return nil
+	})
+
+	log.Printf("Registered tools: echo, add, list-roots")
+	log.Printf("Registered notification handlers: notifications/initialized, notifications/roots/list_changed")
 	log.Printf("Starting E2E Test STDIO MCP Server...")
 	log.Printf("Server: e2e-test-server v1.0.0")
 

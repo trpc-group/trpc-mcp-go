@@ -122,9 +122,6 @@ func (r *sseResponder) sendNotification(w http.ResponseWriter, notification inte
 		return "", ErrInvalidResponseType
 	}
 
-	// Generate event ID
-	eventID := r.sseWriter.GenerateEventID()
-
 	// Ensure notification object is a mcp.Notification type with correct jsonrpc field
 	var notifBytes []byte
 	var err error
@@ -145,12 +142,36 @@ func (r *sseResponder) sendNotification(w http.ResponseWriter, notification inte
 		return "", fmt.Errorf("%w: %v", ErrNotificationSerialization, err)
 	}
 
-	err = r.sseWriter.WriteEvent(w, sseutil.Event{ID: eventID, Data: notifBytes})
+	return r.sendSSEMessage(w, notifBytes)
+}
+
+// sendSSEMessage sends a message via SSE (common logic for requests and notifications).
+func (r *sseResponder) sendSSEMessage(w http.ResponseWriter, messageBytes []byte) (string, error) {
+	// Generate event ID
+	eventID := r.sseWriter.GenerateEventID()
+
+	err := r.sseWriter.WriteEvent(w, sseutil.Event{ID: eventID, Data: messageBytes})
 	if err != nil {
 		return "", err
 	}
 
 	return eventID, nil
+}
+
+// sendRequest sends a JSON-RPC request via SSE.
+func (r *sseResponder) sendRequest(w http.ResponseWriter, request *JSONRPCRequest) (string, error) {
+	// Ensure request has proper jsonrpc field.
+	if request.JSONRPC == "" {
+		request.JSONRPC = JSONRPCVersion
+	}
+
+	// Serialize request.
+	reqBytes, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize request: %w", err)
+	}
+
+	return r.sendSSEMessage(w, reqBytes)
 }
 
 // Generate the next event ID - This method is now effectively a proxy to sseWriter.

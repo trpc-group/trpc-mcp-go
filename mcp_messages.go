@@ -191,6 +191,10 @@ const (
 	MethodResourcesSubscribe     = "resources/subscribe"
 	MethodResourcesUnsubscribe   = "resources/unsubscribe"
 
+	// Roots related
+	MethodRootsList                     = "roots/list"
+	MethodNotificationsRootsListChanged = "notifications/roots/list_changed"
+
 	// Utilities
 	MethodLoggingSetLevel = "logging/setLevel"
 	MethodPing            = "ping"

@@ -9,6 +9,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -41,6 +42,10 @@ type StdioClient struct {
 	capabilities    map[string]interface{}
 	state           atomic.Value // stores State
 	logger          Logger
+
+	// Roots support.
+	rootsProvider RootsProvider // Provider for roots information.
+	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
 }
 
 // StdioClientOption defines configuration options for StdioClient.
@@ -80,6 +85,9 @@ func NewStdioClient(config StdioTransportConfig, clientInfo Implementation, opti
 
 	// Create transport.
 	client.transport = newStdioClientTransport(config.ServerParams, transportOptions...)
+
+	// Set client reference in transport for roots handling.
+	client.transport.client = client
 
 	return client, nil
 }
@@ -444,6 +452,26 @@ func (c *StdioClient) GetTransportInfo() TransportInfo {
 		Description:  "Standard Input/Output transport with process management",
 		Capabilities: capabilities,
 	}
+}
+
+// SetRootsProvider sets the provider for responding to server's roots/list requests.
+func (c *StdioClient) SetRootsProvider(provider RootsProvider) {
+	c.rootsMu.Lock()
+	defer c.rootsMu.Unlock()
+	c.rootsProvider = provider
+}
+
+// SendRootsListChangedNotification notifies server that roots changed.
+func (c *StdioClient) SendRootsListChangedNotification(ctx context.Context) error {
+	// Create roots list changed notification.
+	notification := &JSONRPCNotification{
+		JSONRPC: JSONRPCVersion,
+		Notification: Notification{
+			Method: MethodNotificationsRootsListChanged,
+		},
+	}
+
+	return c.transport.sendNotification(ctx, notification)
 }
 
 // NewNpxStdioClient creates a new stdio client for NPX-based servers.
