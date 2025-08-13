@@ -114,7 +114,7 @@ func registerExampleResources(s *mcp.Server) {
 		result.Completion.HasMore = false
 		return result, nil
 	}
-	s.RegisterResource(textResourceCompletion, nil,
+	s.RegisterResource(textResourceCompletion, textHandler,
 		mcp.WithResourceCompletion(resourceCompletionHandler),
 	)
 	log.Printf("Registered text resource completion: %s", textResourceCompletion.Name)
@@ -126,6 +126,16 @@ func registerExampleResources(s *mcp.Server) {
 		mcp.WithTemplateDescription("Example file resource template with completion"),
 		mcp.WithTemplateMIMEType("text/plain"),
 	)
+
+	// Define file template handler
+	fileTemplateHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      fileTemplate.URITemplate.Raw(),
+				MIMEType: "text/plain",
+				Text:     "This is an example file resource template content.",
+			}}, nil
+	}
 
 	// Define completion handler for file paths
 	fileCompletionHandler := func(ctx context.Context, req *mcp.CompleteCompletionRequest, params map[string]string) (*mcp.CompleteCompletionResult, error) {
@@ -150,7 +160,7 @@ func registerExampleResources(s *mcp.Server) {
 
 	s.RegisterResourceTemplate(
 		fileTemplate,
-		nil,
+		fileTemplateHandler,
 		mcp.WithTemplateCompletion(fileCompletionHandler),
 	)
 	log.Printf("Registered file resource template completion: %s", fileTemplate.Name)
