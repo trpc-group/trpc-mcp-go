@@ -71,17 +71,20 @@ func registerExampleResources(s *mcp.Server) {
 	}
 
 	// Define image resource handler
-	imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
+	imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		// In a real application, you would read the actual image data
 		// For this example, we'll return a placeholder base64-encoded image
-		return mcp.BlobResourceContents{
-			URI:      imageResource.URI,
-			MIMEType: imageResource.MimeType,
-			Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+		return []mcp.ResourceContents{
+			mcp.BlobResourceContents{
+				URI:      imageResource.URI,
+				MIMEType: imageResource.MimeType,
+				Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+			},
 		}, nil
 	}
 
-	s.RegisterResource(imageResource, imageHandler)
+	// Recommend: Use RegisterResources() for resources with multiple contents.
+	s.RegisterResources(imageResource, imageHandler)
 	log.Printf("Registered image resource: %s", imageResource.Name)
 }
 

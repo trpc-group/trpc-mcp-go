@@ -520,7 +520,9 @@ func main() {
 
 ### Resource Management
 
-Register and serve resources:
+#### Single Content Resources
+
+Register and serve resources with single content:
 
 ```go
 // Register text resource
@@ -542,29 +544,47 @@ textHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.Reso
 
 // Register the text resource
 server.RegisterResource(textResource, textHandler)
+```
 
-// Register image resource
-imageResource := &mcp.Resource{
-    URI:         "resource://example/image",
-    Name:        "example-image",
-    Description: "Example image resource",
-    MimeType:    "image/png",
+#### Multiple Contents Resources (Recommended)
+
+Register resources that can provide multiple content representations:
+
+```go
+// Register a resource with multiple content formats
+multiResource := &mcp.Resource{
+    URI:         "resource://example/document",
+    Name:        "example-document",
+    Description: "Document available in multiple formats",
+    MimeType:    "text/plain",
 }
 
-// Define image resource handler
-imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
-    // In a real application, you would read the actual image data
-    // For this example, we'll return a placeholder base64-encoded image
-    return mcp.BlobResourceContents{
-        URI:      imageResource.URI,
-        MIMEType: imageResource.MimeType,
-        Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+// Define multiple contents handler
+multiHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+    return []mcp.ResourceContents{
+        // Text representation
+        mcp.TextResourceContents{
+            URI:      req.Params.URI,
+            MIMEType: "text/plain",
+            Text:     "Document content in plain text format.",
+        },
+        // JSON representation
+        mcp.BlobResourceContents{
+            URI:      req.Params.URI,
+            MIMEType: "application/json",
+            Blob:     "eyJjb250ZW50IjogIkRvY3VtZW50IGNvbnRlbnQgaW4gSlNPTiBmb3JtYXQuIn0=", // base64 encoded JSON
+        },
     }, nil
 }
 
-// Register the image resource
-server.RegisterResource(imageResource, imageHandler)
+// Register the resource with multiple contents (recommended)
+server.RegisterResources(multiResource, multiHandler)
 ```
+
+The `RegisterResources` method is recommended as it:
+- Aligns with the MCP protocol specification
+- Allows a single resource to provide multiple content representations
+- Supports use cases like serving the same data in different formats (text, JSON, XML, etc.)
 
 ### Prompt
 

@@ -175,6 +175,16 @@ func (s *StdioServer) RegisterResource(resource *Resource, handler resourceHandl
 	s.logger.Debugf("Registered resource: %s", resource.URI)
 }
 
+// RegisterResources registers a resource with its handler for multiple contents using the resource manager.
+func (s *StdioServer) RegisterResources(resource *Resource, handler resourcesHandler) {
+	if resource == nil || handler == nil {
+		s.logger.Errorf("RegisterResources: resource and handler cannot be nil")
+		return
+	}
+	s.resourceManager.registerResources(resource, handler)
+	s.logger.Debugf("Registered resources: %s", resource.URI)
+}
+
 // RegisterResourceTemplate registers a resource template with its handler.
 func (s *StdioServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler) {
 	if template == nil || handler == nil {
