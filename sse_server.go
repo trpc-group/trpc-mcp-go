@@ -1059,30 +1059,30 @@ func (s *SSEServer) UnregisterTools(names ...string) error {
 }
 
 // RegisterResource registers a resource with its handler.
-func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler) {
+func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler, options ...registeredResourceOption) {
 	if resource == nil || handler == nil {
 		s.logger.Errorf("RegisterResource: resource and handler cannot be nil")
 		return
 	}
-	s.resourceManager.registerResource(resource, handler)
+	s.resourceManager.registerResource(resource, handler, options...)
 }
 
 // RegisterResourceTemplate registers a resource template with its handler.
-func (s *SSEServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler) {
+func (s *SSEServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler, options ...registerResourceTemplateOption) {
 	if template == nil || handler == nil {
 		s.logger.Errorf("RegisterResourceTemplate: template and handler cannot be nil")
 		return
 	}
-	s.resourceManager.registerTemplate(template, handler)
+	s.resourceManager.registerTemplate(template, handler, options...)
 }
 
 // RegisterPrompt registers a prompt with its handler.
-func (s *SSEServer) RegisterPrompt(prompt *Prompt, handler promptHandler) {
+func (s *SSEServer) RegisterPrompt(prompt *Prompt, handler promptHandler, options ...registerdPromptOption) {
 	if prompt == nil || handler == nil {
 		s.logger.Errorf("RegisterPrompt: prompt and handler cannot be nil")
 		return
 	}
-	s.promptManager.registerPrompt(prompt, handler)
+	s.promptManager.registerPrompt(prompt, handler, options...)
 }
 
 // GetServerInfo returns the server information.
