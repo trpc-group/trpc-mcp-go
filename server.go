@@ -342,16 +342,17 @@ func (s *Server) UnregisterTools(names ...string) error {
 }
 
 // RegisterResource registers a resource with its handler function
-func (s *Server) RegisterResource(resource *Resource, handler resourceHandler) {
-	s.resourceManager.registerResource(resource, handler)
+func (s *Server) RegisterResource(resource *Resource, handler resourceHandler, options ...registeredResourceOption) {
+	s.resourceManager.registerResource(resource, handler, options...)
 }
 
 // RegisterResourceTemplate registers a resource template with its handler function.
 func (s *Server) RegisterResourceTemplate(
 	template *ResourceTemplate,
 	handler resourceTemplateHandler,
+	options ...registerResourceTemplateOption,
 ) {
-	s.resourceManager.registerTemplate(template, handler)
+	s.resourceManager.registerTemplate(template, handler, options...)
 }
 
 // RegisterPrompt registers a prompt with its handler function
@@ -360,8 +361,8 @@ func (s *Server) RegisterResourceTemplate(
 // no additional configuration is needed.
 // When the prompt feature is enabled but no prompts are registered, client requests
 // will return an empty list rather than an error.
-func (s *Server) RegisterPrompt(prompt *Prompt, handler promptHandler) {
-	s.promptManager.registerPrompt(prompt, handler)
+func (s *Server) RegisterPrompt(prompt *Prompt, handler promptHandler, options ...registerdPromptOption) {
+	s.promptManager.registerPrompt(prompt, handler, options...)
 }
 
 // SendNotification sends a notification to a specific session.
