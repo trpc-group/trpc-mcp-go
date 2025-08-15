@@ -1067,6 +1067,15 @@ func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler
 	s.resourceManager.registerResource(resource, handler)
 }
 
+// RegisterResources registers a resource with its handler for multiple contents.
+func (s *SSEServer) RegisterResources(resource *Resource, handler resourcesHandler) {
+	if resource == nil || handler == nil {
+		s.logger.Errorf("RegisterResources: resource and handler cannot be nil")
+		return
+	}
+	s.resourceManager.registerResources(resource, handler)
+}
+
 // RegisterResourceTemplate registers a resource template with its handler.
 func (s *SSEServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler) {
 	if template == nil || handler == nil {

@@ -346,6 +346,11 @@ func (s *Server) RegisterResource(resource *Resource, handler resourceHandler) {
 	s.resourceManager.registerResource(resource, handler)
 }
 
+// RegisterResources registers a resource with its handler function for multiple contents
+func (s *Server) RegisterResources(resource *Resource, handler resourcesHandler) {
+	s.resourceManager.registerResources(resource, handler)
+}
+
 // RegisterResourceTemplate registers a resource template with its handler function.
 func (s *Server) RegisterResourceTemplate(
 	template *ResourceTemplate,

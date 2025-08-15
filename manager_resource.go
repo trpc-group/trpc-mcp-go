@@ -70,7 +70,31 @@ func (m *resourceManager) registerResource(resource *Resource, handler resourceH
 	}
 
 	if _, exists := m.resources[resource.URI]; !exists {
-		// Only add to order slice if it's a new resource
+		m.resourcesOrder = append(m.resourcesOrder, resource.URI)
+	}
+
+	m.resources[resource.URI] = &registeredResource{
+		Resource: resource,
+		Handler: func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error) {
+			content, err := handler(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			return []ResourceContents{content}, nil
+		},
+	}
+}
+
+// registerResources registers a resource with multiple contents handler.
+func (m *resourceManager) registerResources(resource *Resource, handler resourcesHandler) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if resource == nil || resource.URI == "" {
+		return
+	}
+
+	if _, exists := m.resources[resource.URI]; !exists {
 		m.resourcesOrder = append(m.resourcesOrder, resource.URI)
 	}
 
@@ -114,11 +138,10 @@ func (m *resourceManager) getResource(uri string) (*Resource, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	registeredResource, exists := m.resources[uri]
-	if !exists {
-		return nil, false
+	if registeredResource, exists := m.resources[uri]; exists {
+		return registeredResource.Resource, true
 	}
-	return registeredResource.Resource, true
+	return nil, false
 }
 
 // getResources retrieves all resources
@@ -126,11 +149,14 @@ func (m *resourceManager) getResources() []*Resource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	resources := make([]*Resource, 0, len(m.resources))
-	for _, registeredResource := range m.resources {
-		resources = append(resources, registeredResource.Resource)
+	orderedResources := make([]*Resource, 0, len(m.resources))
+	for _, uri := range m.resourcesOrder {
+		if registeredResource, exists := m.resources[uri]; exists {
+			orderedResources = append(orderedResources, registeredResource.Resource)
+		}
 	}
-	return resources
+
+	return orderedResources
 }
 
 // getTemplates retrieves all resource templates
@@ -257,14 +283,14 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 	}
 
 	// Call resource handler
-	content, err := registeredResource.Handler(ctx, readReq)
+	contents, err := registeredResource.Handler(ctx, readReq)
 	if err != nil {
 		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
 	}
 
 	// Create result
 	result := ReadResourceResult{
-		Contents: []ResourceContents{content},
+		Contents: contents,
 	}
 
 	return result, nil
