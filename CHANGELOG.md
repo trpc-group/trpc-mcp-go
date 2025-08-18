@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.2 (2025-08-18)
+
+- feat: support register multiple resources (#55)
+- feat: add server-initiated requests and Roots capability support (#45)
+- fix: support multiple options in WithHTTPReqHandlerOption (#53)
+- enhance: ease the 202 check on notifications for compatibility reasons (#47)
+
 ## 0.0.1 (2025-07-24)
 
 - Initial release
