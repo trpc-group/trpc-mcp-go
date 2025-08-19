@@ -494,8 +494,14 @@ func (s *SSEServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply context function first.
+	ctx := r.Context()
+	if s.contextFunc != nil {
+		ctx = s.contextFunc(ctx, r)
+	}
+
 	// Create context with session.
-	ctx := s.createSessionContext(r.Context(), session)
+	ctx = s.createSessionContext(ctx, session)
 
 	// Immediately return HTTP 202 Accepted status code, indicating request has been received.
 	w.WriteHeader(http.StatusAccepted)
@@ -702,9 +708,8 @@ func (s *SSEServer) parseJSONRPCRequest(r *http.Request) (*JSONRPCRequest, error
 
 // createSessionContext creates a context with session information.
 func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSession) context.Context {
-	// Use sessionKey structure as context key.
-	type sessionKey struct{}
-	ctx = context.WithValue(ctx, sessionKey{}, session)
+	// Use the global setSessionToContext function to ensure consistent context key.
+	ctx = setSessionToContext(ctx, session)
 
 	// Set server instance to context.
 	ctx = setServerToContext(ctx, s)
