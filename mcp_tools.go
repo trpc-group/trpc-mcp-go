@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/openapi"
 )
 
 // ListToolsRequest represents a request to list available tools
@@ -113,7 +114,7 @@ func NewTool(
 	tool := &Tool{
 		Name: name,
 		// Original: InputSchema: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeObject}, Properties: make(openapi3.Schemas), Required: []string{}}
-		InputSchema: compat.CreateObjectSchemaCompat(),
+		InputSchema: openapi.DefaultCompat.CreateObjectSchema(),
 	}
 
 	for _, opt := range opts {
@@ -134,7 +135,7 @@ func WithDescription(description string) ToolOption {
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}
-		schema := compat.CreateStringSchemaCompat()
+		schema := openapi.DefaultCompat.CreateStringSchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -149,7 +150,7 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeNumber}}
-		schema := compat.CreateNumberSchemaCompat()
+		schema := openapi.DefaultCompat.CreateNumberSchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -164,7 +165,7 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 func WithInteger(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}
-		schema := compat.CreateIntegerSchemaCompat()
+		schema := openapi.DefaultCompat.CreateIntegerSchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -179,7 +180,7 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}
-		schema := compat.CreateBooleanSchemaCompat()
+		schema := openapi.DefaultCompat.CreateBooleanSchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -194,7 +195,7 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 func WithObject(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeObject}, Properties: make(openapi3.Schemas)}
-		schema := compat.CreateObjectSchemaCompat()
+		schema := openapi.DefaultCompat.CreateObjectSchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -255,7 +256,7 @@ func Properties(props openapi3.Schemas) PropertyOption {
 func WithArray(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeArray}}
-		schema := compat.CreateArraySchemaCompat()
+		schema := openapi.DefaultCompat.CreateArraySchema()
 		for _, opt := range opts {
 			opt(schema)
 		}
