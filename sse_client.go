@@ -82,8 +82,10 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 				httpReqHandlerOptions: config.httpReqHandlerOptions,
 			}
 
-			// create HTTP request handler only if not already set.
-			if sseTransport.httpReqHandler == nil {
+			// Set HTTP request handler from config if provided, otherwise create default.
+			if config.httpReqHandler != nil {
+				sseTransport.httpReqHandler = config.httpReqHandler
+			} else if sseTransport.httpReqHandler == nil {
 				sseTransport.httpReqHandler = NewHTTPReqHandler(
 					sseTransport.serviceName, sseTransport.httpReqHandlerOptions...)
 			}

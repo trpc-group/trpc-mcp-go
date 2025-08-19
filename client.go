@@ -177,6 +177,10 @@ type transportConfig struct {
 	enableGetSSE bool   // for streamable transport
 	path         string // for streamable transport
 
+	// HTTP request handler for custom implementations.
+	// This field stores the custom HTTP request handler to be used by transport layers.
+	httpReqHandler HTTPReqHandler
+
 	// Service name for custom HTTP request handlers.
 	// This field is typically not used by the default handler, but may be used by custom
 	// implementations that replace the default NewHTTPReqHandler function.
@@ -247,6 +251,9 @@ func WithClientPath(path string) ClientOption {
 // WithHTTPReqHandler sets a custom HTTP request handler for the client
 func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 	return func(c *Client) {
+		// This is needed for SSE clients which read directly from transportConfig.
+		c.transportConfig.httpReqHandler = handler
+		// Also set in transportOptions for streamable transport compatibility.
 		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandler(handler))
 	}
 }
@@ -256,6 +263,14 @@ func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 // including initialization, tool calls, notifications, and SSE connections.
 func WithHTTPHeaders(headers http.Header) ClientOption {
 	return func(c *Client) {
+		// Set headers in transportConfig for direct use by extractTransportConfig.
+		if c.transportConfig.httpHeaders == nil {
+			c.transportConfig.httpHeaders = make(http.Header)
+		}
+		for k, v := range headers {
+			c.transportConfig.httpHeaders[k] = v
+		}
+		// Also set in transportOptions for streamable transport compatibility.
 		c.transportOptions = append(c.transportOptions, withTransportHTTPHeaders(headers))
 	}
 }

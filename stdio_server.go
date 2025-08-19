@@ -458,7 +458,7 @@ func (s *stdioTransport) processMessage(ctx context.Context, line string, writer
 		return nil
 	}
 
-	sessionCtx := context.WithValue(ctx, sessionKey{}, s.session)
+	sessionCtx := setSessionToContext(ctx, s.session)
 
 	switch msgType {
 	case JSONRPCMessageTypeRequest:
@@ -540,13 +540,13 @@ func serveStdioWithContext(ctx context.Context, server messageHandler, options .
 	return transport.listen(ctx, os.Stdin, os.Stdout)
 }
 
-// sessionKey is an internal context key (unexported).
-type sessionKey struct{}
-
-// sessionFromContext extracts the stdio session from context (internal use).
+// sessionFromContext extracts the stdio session from context.
 func sessionFromContext(ctx context.Context) *stdioSession {
-	if session, ok := ctx.Value(sessionKey{}).(*stdioSession); ok {
-		return session
+	// Use the global GetSessionFromContext function to ensure consistent context key.
+	if session, ok := GetSessionFromContext(ctx); ok {
+		if stdioSession, ok := session.(*stdioSession); ok {
+			return stdioSession
+		}
 	}
 	return nil
 }
