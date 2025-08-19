@@ -112,11 +112,8 @@ func NewTool(
 ) *Tool {
 	tool := &Tool{
 		Name: name,
-		InputSchema: &openapi3.Schema{
-			Type:       &openapi3.Types{openapi3.TypeObject},
-			Properties: make(openapi3.Schemas),
-			Required:   []string{},
-		},
+		// Original: InputSchema: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeObject}, Properties: make(openapi3.Schemas), Required: []string{}}
+		InputSchema: compat.CreateObjectSchemaCompat(),
 	}
 
 	for _, opt := range opts {
@@ -136,9 +133,8 @@ func WithDescription(description string) ToolOption {
 // WithString adds a string parameter to the tool's input schema
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeString},
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}
+		schema := compat.CreateStringSchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -152,9 +148,8 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 // WithNumber adds a number parameter to the tool's input schema
 func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeNumber},
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeNumber}}
+		schema := compat.CreateNumberSchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -168,9 +163,8 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 // WithInteger adds an integer parameter to the tool's input schema
 func WithInteger(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeInteger},
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}
+		schema := compat.CreateIntegerSchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -184,9 +178,8 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 // WithBoolean adds a boolean parameter to the tool's input schema
 func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeBoolean},
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}
+		schema := compat.CreateBooleanSchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -200,10 +193,8 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 // WithObject adds an object parameter to the tool's input schema.
 func WithObject(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type:       &openapi3.Types{openapi3.TypeObject},
-			Properties: make(openapi3.Schemas),
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeObject}, Properties: make(openapi3.Schemas)}
+		schema := compat.CreateObjectSchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
@@ -263,9 +254,8 @@ func Properties(props openapi3.Schemas) PropertyOption {
 // WithArray adds an array to the tool's input schema.
 func WithArray(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
-		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeArray},
-		}
+		// Original: schema := &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeArray}}
+		schema := compat.CreateArraySchemaCompat()
 		for _, opt := range opts {
 			opt(schema)
 		}
