@@ -70,7 +70,7 @@ func (m *resourceManager) withResourceListFilter(filter ResourceListFilter) *res
 }
 
 // registerResource registers a resource
-func (m *resourceManager) registerResource(resource *Resource, handler resourceHandler) {
+func (m *resourceManager) registerResource(resource *Resource, handler resourceHandler, options ...registeredResourceOption) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -92,10 +92,15 @@ func (m *resourceManager) registerResource(resource *Resource, handler resourceH
 			return []ResourceContents{content}, nil
 		},
 	}
+
+	// Apply options to the registered resource
+	for _, opt := range options {
+		opt(m.resources[resource.URI])
+	}
 }
 
 // registerResources registers a resource with multiple contents handler.
-func (m *resourceManager) registerResources(resource *Resource, handler resourcesHandler) {
+func (m *resourceManager) registerResources(resource *Resource, handler resourcesHandler, options ...registeredResourceOption) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -111,10 +116,15 @@ func (m *resourceManager) registerResources(resource *Resource, handler resource
 		Resource: resource,
 		Handler:  handler,
 	}
+
+	// Apply options to the registered resources
+	for _, opt := range options {
+		opt(m.resources[resource.URI])
+	}
 }
 
 // registerTemplate registers a resource template
-func (m *resourceManager) registerTemplate(template *ResourceTemplate, handler resourceTemplateHandler) error {
+func (m *resourceManager) registerTemplate(template *ResourceTemplate, handler resourceTemplateHandler, options ...registerResourceTemplateOption) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -137,6 +147,11 @@ func (m *resourceManager) registerTemplate(template *ResourceTemplate, handler r
 	m.templates[template.Name] = &registerResourceTemplate{
 		resourceTemplate: template,
 		Handler:          handler,
+	}
+
+	// Apply options to the registered template
+	for _, opt := range options {
+		opt(m.templates[template.Name])
 	}
 
 	return nil
@@ -168,6 +183,25 @@ func (m *resourceManager) getResources() []*Resource {
 	return orderedResources
 }
 
+// hasCompletionCompleteHandler checks if any resource has a completionComplete handler
+func (m *resourceManager) hasCompletionCompleteHandler() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, registeredResource := range m.resources {
+		if registeredResource.CompletionCompleteHandler != nil {
+			return true
+		}
+	}
+
+	for _, registeredTemplate := range m.templates {
+		if registeredTemplate.CompletionCompleteHandler != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // getTemplates retrieves all resource templates
 func (m *resourceManager) getTemplates() []*ResourceTemplate {
 	m.mu.RLock()
@@ -178,6 +212,28 @@ func (m *resourceManager) getTemplates() []*ResourceTemplate {
 		templates = append(templates, template.resourceTemplate)
 	}
 	return templates
+}
+
+// matchResourceTemplate attempts to match a URI against registered templates
+func (m *resourceManager) matchResourceTemplate(uri string) (template *registerResourceTemplate, params map[string]string, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, template := range m.templates {
+		if template.resourceTemplate.URITemplate != nil {
+			// Try to match the URI against this template
+			values := template.resourceTemplate.URITemplate.Match(uri)
+			if len(values) > 0 {
+				// Extract variables from the matched URI
+				params := make(map[string]string)
+				for key, value := range values {
+					params[key] = value.String()
+				}
+				return template, params, true
+			}
+		}
+	}
+	return nil, nil, false
 }
 
 // subscribe subscribes to resource updates
@@ -306,6 +362,16 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 		}
 	}
 
+	// Check if resource handler is available
+	if registeredResource.Handler == nil {
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeMethodNotFound,
+			fmt.Sprintf("%v: %s", errors.ErrMethodNotFound, uri),
+			nil,
+		), nil
+	}
+
 	// Call resource handler
 	contents, err := registeredResource.Handler(ctx, readReq)
 	if err != nil {
@@ -395,4 +461,95 @@ func (m *resourceManager) handleUnsubscribe(ctx context.Context, req *JSONRPCReq
 	}
 
 	return result, nil
+}
+
+// handleCompletionComplete handles completion complete requests
+func (m *resourceManager) handleCompletionComplete(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	_, _, resourceURI, argName, argValue, ctxArguments, errResp, ok := parseCompletionCompleteParams(req)
+	if !ok {
+		return errResp, nil
+	}
+
+	// create a new request for completion
+	completionReq := &CompleteCompletionRequest{}
+	completionReq.Params.Ref.Type = "ref/resource"
+	completionReq.Params.Ref.URI = resourceURI
+	completionReq.Params.Argument.Name = argName
+	completionReq.Params.Argument.Value = argValue
+
+	// Convert ctxArguments to map[string]string if needed
+	if len(ctxArguments) > 0 {
+		completionReq.Params.Context = struct {
+			Arguments map[string]string `json:"arguments,omitempty"`
+		}{
+			Arguments: make(map[string]string),
+		}
+		// Convert arguments to string map
+		for k, v := range ctxArguments {
+			if str, ok := v.(string); ok {
+				completionReq.Params.Context.Arguments[k] = str
+			}
+		}
+	}
+
+	// Business logic remains unchanged, can be further split if needed
+	return m.handleResourceCompletion(ctx, completionReq, req)
+}
+
+// handleResourceCompletion handles resource completion business logic
+func (m *resourceManager) handleResourceCompletion(ctx context.Context, completionReq *CompleteCompletionRequest, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	// Try matching resource for static URIs
+	resource, exists := m.resources[completionReq.Params.Ref.URI]
+	if exists {
+		if resource.CompletionCompleteHandler == nil {
+			return newJSONRPCErrorResponse(
+				req.ID,
+				ErrCodeMethodNotFound,
+				fmt.Sprintf("%v: %s", errors.ErrMethodNotFound, completionReq.Params.Ref.URI),
+				nil,
+			), nil
+		}
+
+		result, err := resource.CompletionCompleteHandler(ctx, completionReq)
+		if err != nil {
+			return newJSONRPCErrorResponse(
+				req.ID,
+				ErrCodeInternal,
+				err.Error(),
+				nil,
+			), nil
+		}
+		return result, nil
+	}
+
+	// Try template matching resource for dynamic URIs
+	matchedTemplate, params, exist := m.matchResourceTemplate(completionReq.Params.Ref.URI)
+	if exist {
+		if matchedTemplate.CompletionCompleteHandler == nil {
+			return newJSONRPCErrorResponse(
+				req.ID,
+				ErrCodeMethodNotFound,
+				fmt.Sprintf("%v: %s", errors.ErrMethodNotFound, completionReq.Params.Ref.URI),
+				nil,
+			), nil
+		}
+
+		result, err := matchedTemplate.CompletionCompleteHandler(ctx, completionReq, params)
+		if err != nil {
+			return newJSONRPCErrorResponse(
+				req.ID,
+				ErrCodeInternal,
+				err.Error(),
+				nil,
+			), nil
+		}
+		return result, nil
+	}
+
+	return newJSONRPCErrorResponse(
+		req.ID,
+		ErrCodeMethodNotFound,
+		fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, completionReq.Params.Ref.URI),
+		nil,
+	), nil
 }

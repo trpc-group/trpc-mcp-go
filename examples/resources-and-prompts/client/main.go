@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -46,6 +47,11 @@ func main() {
 		log.Printf("Error: %v", err)
 	}
 
+	// Handle completions
+	if err := handleCompletions(ctx, client); err != nil {
+		log.Printf("Error: %v", err)
+	}
+
 	log.Printf("Test finished!")
 }
 
@@ -70,6 +76,10 @@ func initializeClient(ctx context.Context) (*mcp.Client, error) {
 		return nil, fmt.Errorf("initialization error: %v", err)
 	}
 	log.Printf("Connected to server: %s %s", initResult.ServerInfo.Name, initResult.ServerInfo.Version)
+
+	// Check server capabilities
+	capabilitiesJSON, _ := json.Marshal(initResult.Capabilities)
+	log.Printf("Server capabilities:%v", string(capabilitiesJSON))
 
 	return newClient, nil
 }
@@ -201,6 +211,79 @@ func handlePrompts(ctx context.Context, client *mcp.Client) error {
 
 	for i, msg := range promptContent.Messages {
 		printPromptContent(msg.Content, i, msg.Role)
+	}
+
+	return nil
+}
+
+// handleCompletions demonstrates completion functionality for prompts and resources
+func handleCompletions(ctx context.Context, client *mcp.Client) error {
+	log.Printf("===== Prompt completion =====")
+
+	// Test completion for prompt arguments (code_review -> language)
+	promptCompletionReq := &mcp.CompleteCompletionRequest{}
+	promptCompletionReq.Params.Ref.Type = "ref/prompt"
+	promptCompletionReq.Params.Ref.Name = "code_review"
+	promptCompletionReq.Params.Argument.Name = "language"
+	promptCompletionReq.Params.Argument.Value = "p"
+
+	promptCompletionResult, err := client.CompleteCompletion(ctx, promptCompletionReq)
+	if err != nil {
+		log.Printf("Prompt completion error: %v", err)
+	} else {
+		log.Printf("Prompt completion for '%s' with '%s': found %d suggestions",
+			promptCompletionReq.Params.Ref.Name,
+			promptCompletionReq.Params.Argument.Value,
+			len(promptCompletionResult.Completion.Values))
+		for i, value := range promptCompletionResult.Completion.Values {
+			log.Printf("  [%d] %s", i, value)
+		}
+	}
+
+	log.Printf("===== Resource completion =====")
+	// Test completion for resource (resource://example/completion)
+	resourceCompletionReq := &mcp.CompleteCompletionRequest{}
+	resourceCompletionReq.Params.Ref.Type = "ref/resource"
+	resourceCompletionReq.Params.Ref.URI = "resource://example/completion"
+	resourceCompletionReq.Params.Argument.Name = "query"
+	resourceCompletionReq.Params.Argument.Value = "get-context"
+	resourceCompletionReq.Params.Context.Arguments = map[string]string{"context": "example context"}
+
+	resourceCompletionResult, err := client.CompleteCompletion(ctx, resourceCompletionReq)
+	if err != nil {
+		log.Printf("Resource completion error: %v", err)
+	} else {
+		log.Printf("Resource completion from '%s' for '%s' with '%s': found %d suggestions",
+			resourceCompletionReq.Params.Ref.URI,
+			resourceCompletionReq.Params.Argument.Name,
+			resourceCompletionReq.Params.Argument.Value,
+			len(resourceCompletionResult.Completion.Values))
+		for i, value := range resourceCompletionResult.Completion.Values {
+			log.Printf("  [%d] %s", i, value)
+		}
+	}
+
+	log.Printf("===== Resource template completion =====")
+
+	// Test completion for resource template (file-template -> path)
+	resourceTemplateCompletionReq := &mcp.CompleteCompletionRequest{}
+	resourceTemplateCompletionReq.Params.Ref.Type = "ref/resource"
+	resourceTemplateCompletionReq.Params.Ref.URI = "file://example_file"
+	resourceTemplateCompletionReq.Params.Argument.Name = "keyword"
+	resourceTemplateCompletionReq.Params.Argument.Value = "completion"
+
+	resourceTemplateCompletionResult, err := client.CompleteCompletion(ctx, resourceTemplateCompletionReq)
+	if err != nil {
+		log.Printf("Resource template completion error: %v", err)
+	} else {
+		log.Printf("Resource template completion from '%s' for '%s' with '%s': found %d suggestions",
+			resourceTemplateCompletionReq.Params.Ref.URI,
+			resourceTemplateCompletionReq.Params.Argument.Name,
+			resourceTemplateCompletionReq.Params.Argument.Value,
+			len(resourceTemplateCompletionResult.Completion.Values))
+		for i, value := range resourceTemplateCompletionResult.Completion.Values {
+			log.Printf("  [%d] %s", i, value)
+		}
 	}
 
 	return nil
