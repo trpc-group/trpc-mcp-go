@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // State represents the client state.
@@ -121,6 +122,9 @@ type Client struct {
 
 	logger Logger // Logger for client transport (optional).
 
+	// Retry configuration.
+	retryConfig *retry.Config // Configuration for retry behavior (optional).
+
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
 	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
@@ -163,6 +167,11 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 		if streamableTransport, ok := client.transport.(*streamableHTTPClientTransport); ok {
 			streamableTransport.client = client
 		}
+	}
+
+	// Set retry config on transport if configured
+	if client.retryConfig != nil {
+		client.transport.setRetryConfig(client.retryConfig)
 	}
 
 	return client, nil

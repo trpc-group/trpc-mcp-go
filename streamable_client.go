@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // streamableHTTPClientTransport implements an HTTP-based MCP transport
@@ -49,6 +50,9 @@ type streamableHTTPClientTransport struct {
 
 	// Whether GET SSE is enabled
 	enableGetSSE bool
+
+	// Retry configuration
+	retryConfig *retry.Config
 
 	// GET SSE connection
 	getSSEConn struct {
@@ -192,12 +196,37 @@ func (t *streamableHTTPClientTransport) start(ctx context.Context) error {
 	return nil
 }
 
-// SendRequest sends a request and waits for a response
+// setRetryConfig sets the retry configuration for this transport
+func (t *streamableHTTPClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// SendRequest sends a request and waits for a response with retry support
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
-	return t.send(ctx, req, nil)
+	// If no retry config, use original implementation
+	if t.retryConfig == nil {
+		return t.send(ctx, req, nil)
+	}
+
+	// Define the operation to be retried
+	var result *json.RawMessage
+	operation := func() error {
+		var err error
+		result, err = t.send(ctx, req, nil)
+		return err
+	}
+
+	// Execute with retry
+	operationName := fmt.Sprintf("sendRequest(%s)", req.Request.Method)
+	err := retry.Execute(ctx, operation, t.retryConfig, operationName)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // send sends a request and handles the response

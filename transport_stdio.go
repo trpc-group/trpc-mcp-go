@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // StdioServerParameters defines parameters for launching a stdio MCP server.
@@ -53,6 +55,7 @@ type stdioClientTransport struct {
 	requestMutex    sync.Mutex
 	pendingRequests map[int64]chan *json.RawMessage
 	pendingMutex    sync.RWMutex
+	retryConfig     *retry.Config // Retry configuration for requests
 
 	notificationHandlers map[string]NotificationHandler
 	handlersMutex        sync.RWMutex
@@ -183,7 +186,12 @@ func (t *stdioClientTransport) startProcess() error {
 	return nil
 }
 
-// sendRequest sends a request and waits for a response.
+// setRetryConfig sets the retry configuration for this transport
+func (t *stdioClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// sendRequest sends a request and waits for a response with retry support.
 func (t *stdioClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	if t.closed.Load() {
 		return nil, fmt.Errorf("transport is closed")

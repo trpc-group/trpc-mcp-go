@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // HTTPReqHandler is a custom HTTP request handler interface.
@@ -112,6 +114,9 @@ type transport interface {
 
 	// Close the transport
 	close() error
+
+	// Set retry configuration for this transport
+	setRetryConfig(config *retry.Config)
 }
 
 // httpTransport represents the interface for HTTP transport
