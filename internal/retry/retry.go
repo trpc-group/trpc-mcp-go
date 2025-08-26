@@ -14,6 +14,24 @@ import (
 	"time"
 )
 
+// Validation range constants for retry configuration parameters.
+const (
+	// MaxRetries validation range
+	MinMaxRetries = 0
+	MaxMaxRetries = 10
+
+	// InitialBackoff validation range
+	MinInitialBackoff = time.Millisecond
+	MaxInitialBackoff = 30 * time.Second
+
+	// BackoffFactor validation range
+	MinBackoffFactor = 1.0
+	MaxBackoffFactor = 10.0
+
+	// MaxBackoff validation range
+	MaxMaxBackoff = 5 * time.Minute
+)
+
 // retryableStatusCodes contains HTTP status codes that should be retried.
 // Pre-computed at package level for optimal performance.
 var retryableStatusCodes = []string{
@@ -55,31 +73,31 @@ func (c Config) Validate() Config {
 	validated := c
 
 	// Clamp MaxRetries to reasonable range
-	if validated.MaxRetries < 0 {
-		validated.MaxRetries = 0
-	} else if validated.MaxRetries > 10 {
-		validated.MaxRetries = 10
+	if validated.MaxRetries < MinMaxRetries {
+		validated.MaxRetries = MinMaxRetries
+	} else if validated.MaxRetries > MaxMaxRetries {
+		validated.MaxRetries = MaxMaxRetries
 	}
 
 	// Clamp InitialBackoff to reasonable range
-	if validated.InitialBackoff < time.Millisecond {
-		validated.InitialBackoff = time.Millisecond
-	} else if validated.InitialBackoff > 30*time.Second {
-		validated.InitialBackoff = 30 * time.Second
+	if validated.InitialBackoff < MinInitialBackoff {
+		validated.InitialBackoff = MinInitialBackoff
+	} else if validated.InitialBackoff > MaxInitialBackoff {
+		validated.InitialBackoff = MaxInitialBackoff
 	}
 
 	// Clamp BackoffFactor to reasonable range
-	if validated.BackoffFactor < 1.0 {
-		validated.BackoffFactor = 1.0
-	} else if validated.BackoffFactor > 10.0 {
-		validated.BackoffFactor = 10.0
+	if validated.BackoffFactor < MinBackoffFactor {
+		validated.BackoffFactor = MinBackoffFactor
+	} else if validated.BackoffFactor > MaxBackoffFactor {
+		validated.BackoffFactor = MaxBackoffFactor
 	}
 
 	// Clamp MaxBackoff to reasonable range, ensure it's >= InitialBackoff
 	if validated.MaxBackoff < validated.InitialBackoff {
 		validated.MaxBackoff = validated.InitialBackoff
-	} else if validated.MaxBackoff > 5*time.Minute {
-		validated.MaxBackoff = 5 * time.Minute
+	} else if validated.MaxBackoff > MaxMaxBackoff {
+		validated.MaxBackoff = MaxMaxBackoff
 	}
 
 	return validated

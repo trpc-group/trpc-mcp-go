@@ -15,13 +15,17 @@ import (
 // RetryConfig defines configuration for MCP client retry behavior.
 type RetryConfig struct {
 	// MaxRetries specifies the maximum number of retry attempts for requests.
+	// Valid range: 0-10, default: 2
 	MaxRetries int `json:"max_retries"`
 	// InitialBackoff specifies the initial backoff duration before the first retry.
+	// Valid range: 1ms-30s, default: 500ms
 	InitialBackoff time.Duration `json:"initial_backoff"`
 	// BackoffFactor specifies the factor to multiply the backoff duration for each retry.
 	// For example, with factor 2.0: 100ms -> 200ms -> 400ms -> 800ms
+	// Valid range: 1.0-10.0, default: 2.0
 	BackoffFactor float64 `json:"backoff_factor"`
 	// MaxBackoff specifies the maximum backoff duration to cap exponential growth.
+	// Valid range: minimum is InitialBackoff, maximum: 5 minutes, default: 8s
 	MaxBackoff time.Duration `json:"max_backoff"`
 }
 
