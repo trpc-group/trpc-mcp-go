@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -508,11 +507,6 @@ func (s *stdioTransport) writeResponse(response interface{}, writer io.Writer) e
 		if err := file.Sync(); err != nil {
 			// Sync may fail for pipes, try to ignore.
 			s.logger.Debugf("writeResponse: Sync failed (expected for pipes): %v\n", err)
-		}
-
-		// Also try to flush the file descriptor directly.
-		if err := syscall.Fsync(int(file.Fd())); err != nil {
-			s.logger.Debugf("writeResponse: Fsync failed (expected for pipes): %v\n", err)
 		}
 	}
 
