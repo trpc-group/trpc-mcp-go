@@ -940,6 +940,49 @@ curl -X POST http://localhost:3000/mcp \
 - **Performance**: Filters run only when tools are listed, not on every request
 - **Security**: Tools are completely hidden from unauthorized users
 
+### 4. How to configure retry mechanism for network errors?
+
+The library provides automatic retry functionality at the transport layer to handle temporary network failures.
+
+#### Simple Retry Configuration
+
+```go
+// Enable retry with 3 attempts (recommended for most use cases)
+client, err := mcp.NewClient(serverURL, clientInfo,
+    mcp.WithSimpleRetry(3),
+)
+```
+
+#### Advanced Retry Configuration
+
+```go
+// Custom retry configuration for specific scenarios
+client, err := mcp.NewClient(serverURL, clientInfo,
+    mcp.WithRetry(mcp.RetryConfig{
+        MaxRetries:     5,                      // Maximum retry attempts
+        InitialBackoff: 1 * time.Second,       // Initial delay before first retry
+        BackoffFactor:  1.5,                   // Exponential backoff multiplier
+        MaxBackoff:     15 * time.Second,      // Maximum delay cap
+    }),
+)
+```
+
+#### What Errors Are Retried?
+
+The retry mechanism automatically handles:
+- **Connection errors**: `connection refused`, `connection reset`, `connection timeout`
+- **I/O timeouts**: `i/o timeout`, `read timeout`, `dial timeout`
+- **Network errors**: `EOF`, `broken pipe`
+- **HTTP server errors**: Status codes 408, 409, 429, and all 5xx errors
+
+#### Key Features
+
+- **Transport Layer**: Retry works across all MCP operations (tools, resources, prompts)
+- **Exponential Backoff**: Intelligent delay strategy to avoid overwhelming servers
+- **Error Classification**: Only retries temporary failures, not permanent errors (auth, bad requests)
+- **Silent Operation**: No logging noise by default, retry happens transparently
+- **Network Transports**: Works with Streamable HTTP and SSE transports (STDIO doesn't use retry due to its process-based nature)
+
 ## Copyright
 
 The copyright notice pertaining to the Tencent code in this repo was previously in the name of “THL A29 Limited.”  That entity has now been de-registered.  You should treat all previously distributed copies of the code as if the copyright notice was in the name of “Tencent.”

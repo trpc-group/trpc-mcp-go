@@ -174,9 +174,6 @@ func Execute(
 			break
 		}
 
-		// Log retry attempt (optional: can be enabled for debugging)
-		// println(fmt.Sprintf("Retry attempt %d/%d for %s failed: %v", attempt, config.MaxRetries, operationName, lastErr))
-
 		// Calculate backoff duration with exponential growth
 		var multiplier float64 = 1
 		for i := 1; i < attempt; i++ {
