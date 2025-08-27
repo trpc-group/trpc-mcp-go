@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.3 (2025-08-27)
+
+- fix: remove syscall.Fsync to support Windows builds (#60)
+- feat: add MCP send request retry mechanism (#59)
+- fix: fix SSE client headers and server session context management (#58)
+
 ## 0.0.2 (2025-08-18)
 
 - feat: support register multiple resources (#55)
