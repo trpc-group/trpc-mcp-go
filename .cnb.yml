@@ -1,7 +1,8 @@
 $:
   vscode:
     - docker:
-        image: mcr.microsoft.com/devcontainers/universal
+        build: .ide/Dockerfile
+        # image: mcr.microsoft.com/devcontainers/universal
         #image: mcr.microsoft.com/devcontainers/go:1.24
       services:
         - vscode
