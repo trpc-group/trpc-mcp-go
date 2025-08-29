@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.4 (2025-08-29)
+
+- sse: remove SSE response size limit (#63)
+
 ## 0.0.3 (2025-08-27)
 
 - fix: remove syscall.Fsync to support Windows builds (#60)
