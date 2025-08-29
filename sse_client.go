@@ -207,14 +207,29 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
+	br := bufio.NewReader(body)
 	var eventType, eventData string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				// Process any pending event before exit.
+				if eventType != "" && eventData != "" {
+					t.handleEvent(eventType, eventData)
+				}
+				break
+			}
+			if t.logger != nil {
+				t.logger.Errorf("Error reading SSE stream: %v", err)
+			}
+			break
+		}
 
-		// Empty line signals the end of an event.
+		// Remove only newline markers.
+		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
+			// Empty line means end of event.
 			if eventType != "" && eventData != "" {
 				t.handleEvent(eventType, eventData)
 				eventType, eventData = "", ""
@@ -227,12 +242,6 @@ func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 			eventType = strings.TrimSpace(line[6:])
 		} else if strings.HasPrefix(line, "data:") {
 			eventData = strings.TrimSpace(line[5:])
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		if t.logger != nil {
-			t.logger.Errorf("Error reading SSE stream: %v", err)
 		}
 	}
 
