@@ -1,0 +1,32 @@
+name: Sync to CNB
+# on: [push]
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+      - name: get repo name
+        id: repo-name
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          echo "name=$REPO_NAME" >> $GITHUB_OUTPUT
+
+      - name: Sync to CNB Repository
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:${{ github.workspace }} \
+            -w ${{ github.workspace }} \
+            -e PLUGIN_TARGET_URL="https://cnb.cool/spencezhang/${{ steps.repo-name.outputs.name }}.git" \
+            -e PLUGIN_AUTH_TYPE="https" \
+            -e PLUGIN_USERNAME="cnb" \
+            -e PLUGIN_PASSWORD=${{ secrets.CNB_TOKEN }} \
+            -e PLUGIN_FORCE="true" \
+            tencentcom/git-sync
