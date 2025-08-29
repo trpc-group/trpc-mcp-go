@@ -9,6 +9,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 - **Full MCP Specification Support**: Implements MCP, supporting protocol versions up to 2025-03-26 (defaulting to 2024-11-05 for client compatibility in examples).
 - **Streaming Support**: Real-time data streaming with Server-Sent Events (SSE)
 - **Tool Framework**: Register and execute tools with structured parameter handling
+- **Struct-First API**: Generate schemas automatically from Go structs with type safety
 - **Resource Management**: Serve text and binary resources with RESTful interfaces
 - **Prompt Templates**: Create and manage prompt templates for LLM interactions
 - **Progress Notifications**: Built-in support for progress updates on long-running operations
@@ -23,6 +24,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 
 - **Stateless**: Simple request-response pattern without persistent sessions
 - **Stateful**: Persistent connections with session management
+
 
 ## Installation
 
@@ -625,12 +627,55 @@ basicPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp
 server.RegisterPrompt(basicPrompt, basicPromptHandler)
 ```
 
+## Struct-First API (Recommended)
+
+Define MCP tools using Go structs for automatic schema generation and type safety:
+
+```go
+// Define input/output structures
+type WeatherInput struct {
+    Location string `json:"location" jsonschema:"required,description=City name"`
+    Units    string `json:"units,omitempty" jsonschema:"description=Temperature units,enum=celsius,enum=fahrenheit,default=celsius"`
+}
+
+type WeatherOutput struct {
+    Temperature float64 `json:"temperature" jsonschema:"description=Current temperature"`
+    Description string  `json:"description" jsonschema:"description=Weather description"`
+}
+
+// Create tool with automatic schema generation
+weatherTool := mcp.NewTool(
+    "get_weather",
+    mcp.WithDescription("Get weather information"),
+    mcp.WithInputStruct[WeatherInput](),   // 🚀 Auto-generate input schema
+    mcp.WithOutputStruct[WeatherOutput](), // 🚀 Auto-generate output schema
+)
+
+// Type-safe handler with automatic validation
+weatherHandler := mcp.NewTypedToolHandler(func(ctx context.Context, req *mcp.CallToolRequest, input WeatherInput) (WeatherOutput, error) {
+    return WeatherOutput{
+        Temperature: 22.5,
+        Description: "Partly cloudy",
+    }, nil
+})
+```
+
+**Benefits:**
+- 🛡️ **Type Safety**: Compile-time type checking and automatic validation
+- 📋 **Rich Schemas**: Auto-generated OpenAPI schemas with descriptions, enums, defaults
+- 🔄 **Structured Output**: Type-safe responses with backward compatibility
+- 🎯 **DRY Principle**: Single source of truth for data structures
+
+See [`examples/struct/`](examples/struct/) for a complete example.
+
+
 ## Example Patterns
 
 The project includes several example patterns:
 
 | Pattern | Description |
 |---------|-------------|
+| `struct` | **Struct-first API** - Auto-generate schemas from Go structs |
 | `basic` | Simple tool registration and usage |
 | `resource_prompt_example` | Resource and prompt template examples |
 | `stateful_json` | Stateful connections with JSON-RPC |

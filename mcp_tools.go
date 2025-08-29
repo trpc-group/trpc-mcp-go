@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/schema"
 )
 
 // ListToolsRequest represents a request to list available tools
@@ -56,8 +57,9 @@ type RequestMeta struct {
 // CallToolResult represents tool call result
 type CallToolResult struct {
 	Result
-	Content []Content `json:"content"`
-	IsError bool      `json:"isError,omitempty"`
+	Content           []Content   `json:"content"`
+	StructuredContent interface{} `json:"structuredContent,omitempty"`
+	IsError           bool        `json:"isError,omitempty"`
 }
 
 // ResultMeta represents result metadata
@@ -81,6 +83,9 @@ type Tool struct {
 	// Input parameter schema
 	InputSchema *openapi3.Schema `json:"inputSchema"`
 
+	// Output schema for structured responses
+	OutputSchema *openapi3.Schema `json:"outputSchema,omitempty"`
+
 	// Raw schema (for custom schemas)
 	RawInputSchema json.RawMessage `json:"-"`
 }
@@ -96,6 +101,9 @@ type registeredTool struct {
 
 // ToolOption represents a function that configures a Tool
 type ToolOption func(*Tool)
+
+// TypedToolHandler defines a handler function that receives typed input and returns typed output
+type TypedToolHandler[I any, O any] func(ctx context.Context, req *CallToolRequest, input I) (O, error)
 
 // PropertyOption represents a function that configures a schema property
 type PropertyOption func(*openapi3.Schema)
@@ -133,6 +141,20 @@ func WithDescription(description string) ToolOption {
 	}
 }
 
+// WithInputStruct generates input schema from a Go struct type
+func WithInputStruct[T any]() ToolOption {
+	return func(t *Tool) {
+		t.InputSchema = schema.ConvertStructToOpenAPISchema[T]()
+	}
+}
+
+// WithOutputStruct generates output schema from a Go struct type
+func WithOutputStruct[T any]() ToolOption {
+	return func(t *Tool) {
+		t.OutputSchema = schema.ConvertStructToOpenAPISchema[T]()
+	}
+}
+
 // WithString adds a string parameter to the tool's input schema
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
@@ -143,8 +165,9 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -159,8 +182,9 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -175,8 +199,9 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -191,8 +216,9 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -208,8 +234,9 @@ func WithObject(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -270,8 +297,9 @@ func WithArray(name string, opts ...PropertyOption) ToolOption {
 			opt(schema)
 		}
 		t.InputSchema.Properties[name] = openapi3.NewSchemaRef("", schema)
-		if schema.Required != nil && len(schema.Required) > 0 {
+		if len(schema.Required) > 0 {
 			t.InputSchema.Required = append(t.InputSchema.Required, name)
+			schema.Required = nil // Clean up the temporary marker
 		}
 	}
 }
@@ -367,6 +395,12 @@ func parseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 		}
 
 		result.Content = append(result.Content, content)
+	}
+
+	// Parse structuredContent if present
+	structuredContent, ok := jsonContent["structuredContent"]
+	if ok {
+		result.StructuredContent = structuredContent
 	}
 
 	return &result, nil
