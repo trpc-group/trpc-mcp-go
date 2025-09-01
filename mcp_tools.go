@@ -86,8 +86,10 @@ type Tool struct {
 	// Output schema for structured responses
 	OutputSchema *openapi3.Schema `json:"outputSchema,omitempty"`
 
-	// Raw schema (for custom schemas)
+	// Raw input schema
 	RawInputSchema json.RawMessage `json:"-"`
+	// Raw output schema
+	RawOutputSchema json.RawMessage `json:"-"`
 }
 
 // toolHandler defines the function type for handling tool execution
