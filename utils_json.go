@@ -108,29 +108,30 @@ func parseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult
 		for _, item := range toolsArray {
 			if toolMap, ok := item.(map[string]interface{}); ok {
 				// Parse tool item using internal function.
-				name, description, rawSchema, err := utils.ParseToolItem(toolMap)
+				name, description, rawInputSchema, rawOutputSchema, err := utils.ParseToolItem(toolMap)
 				if err != nil {
 					continue
 				}
 
 				tool := Tool{
-					Name:           name,
-					Description:    description,
-					RawInputSchema: rawSchema,
+					Name:            name,
+					Description:     description,
+					RawInputSchema:  rawInputSchema,
+					RawOutputSchema: rawOutputSchema,
 				}
 
 				// Convert RawInputSchema to InputSchema object.
-				if rawSchema != nil {
-					// First try to parse rawSchema directly to openapi3.Schema.
+				if rawInputSchema != nil {
+					// First try to parse rawInputSchema directly to openapi3.Schema.
 					var schema openapi3.Schema
-					err := json.Unmarshal(rawSchema, &schema)
+					err := json.Unmarshal(rawInputSchema, &schema)
 					if err == nil {
 						tool.InputSchema = &schema
 					} else {
 						// If the direct parsing fails, it may be due to type mismatch.
 						// Use a more flexible processing method.
 						var rawSchemaMap map[string]interface{}
-						if jsonErr := json.Unmarshal(rawSchema, &rawSchemaMap); jsonErr != nil {
+						if jsonErr := json.Unmarshal(rawInputSchema, &rawSchemaMap); jsonErr != nil {
 							// If the map cannot be parsed, skip processing.
 							continue
 						}
@@ -150,6 +151,40 @@ func parseListToolsResultFromJSON(rawMessage *json.RawMessage) (*ListToolsResult
 						}
 
 						tool.InputSchema = &fixedSchema
+					}
+				}
+
+				// Convert RawOutputSchema to OutputSchema object.
+				if rawOutputSchema != nil {
+					// First try to parse rawOutputSchema directly to openapi3.Schema.
+					var schema openapi3.Schema
+					err := json.Unmarshal(rawOutputSchema, &schema)
+					if err == nil {
+						tool.OutputSchema = &schema
+					} else {
+						// If the direct parsing fails, it may be due to type mismatch.
+						// Use a more flexible processing method.
+						var rawSchemaMap map[string]interface{}
+						if jsonErr := json.Unmarshal(rawOutputSchema, &rawSchemaMap); jsonErr != nil {
+							// If the map cannot be parsed, skip processing.
+							continue
+						}
+
+						// Process special field types.
+						handleSchemaNumberBoolFields(rawSchemaMap)
+
+						// Re-serialize and deserialize.
+						fixedData, jsonErr := json.Marshal(rawSchemaMap)
+						if jsonErr != nil {
+							continue
+						}
+
+						var fixedSchema openapi3.Schema
+						if jsonErr := json.Unmarshal(fixedData, &fixedSchema); jsonErr != nil {
+							continue
+						}
+
+						tool.OutputSchema = &fixedSchema
 					}
 				}
 
