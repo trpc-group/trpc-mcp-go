@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -11,11 +11,28 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // HTTPReqHandler is a custom HTTP request handler interface.
 type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)
+}
+
+// HTTPReqHandlerOption defines options for HTTP request handler.
+// The default implementation does not use these options, but custom
+// implementations may use them for additional configuration.
+type HTTPReqHandlerOption interface{}
+
+// NewHTTPReqHandler returns a new default HTTP request handler.
+// This can be replaced by custom implementations to customize HTTP request handling.
+// It accepts an optional serviceName and additional options for extensibility.
+// Note: The default implementation ignores both serviceName and options parameters,
+// but custom implementations may use them for specific functionality.
+var NewHTTPReqHandler = func(serviceName string, options ...HTTPReqHandlerOption) HTTPReqHandler {
+	// The default implementation ignores serviceName and options.
+	return NewDefaultHTTPReqHandler()
 }
 
 // defaultHTTPReqHandler is the default implementation of HTTPReqHandler
@@ -97,6 +114,9 @@ type transport interface {
 
 	// Close the transport
 	close() error
+
+	// Set retry configuration for this transport
+	setRetryConfig(config *retry.Config)
 }
 
 // httpTransport represents the interface for HTTP transport

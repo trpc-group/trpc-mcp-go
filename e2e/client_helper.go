@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -167,8 +167,11 @@ func ExecuteSSETestTool(t *testing.T, c *mcp.Client, toolName string, args map[s
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Register notification handler.
-	c.RegisterNotificationHandler(toolName, collector.GetHandlers()[toolName])
+	// Register notification handlers for both progress and message notifications.
+	handlers := collector.GetHandlers()
+	for method, handler := range handlers {
+		c.RegisterNotificationHandler(method, handler)
+	}
 
 	// Call tool with streaming method.
 	callToolReq := &mcp.CallToolRequest{}

@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -34,7 +34,7 @@ func TestNewJSONRPCRequest(t *testing.T) {
 				Request: Request{
 					Method: "test.method",
 				},
-				Params: (map[string]interface{}(nil)),
+				Params: map[string]interface{}{},
 			},
 		},
 		{

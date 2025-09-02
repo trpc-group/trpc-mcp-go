@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -102,6 +102,43 @@ func (m *toolManager) getTool(name string) (*Tool, bool) {
 	return registeredTool.Tool, true
 }
 
+// unregisterTools removes multiple tools by names and returns the count of unregistered tools.
+func (m *toolManager) unregisterTools(names ...string) int {
+	if len(names) == 0 {
+		return 0
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	unregisteredCount := 0
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+
+		// Check if tool exists
+		if _, exists := m.tools[name]; !exists {
+			continue
+		}
+
+		// Remove from tools map
+		delete(m.tools, name)
+		unregisteredCount++
+
+		// Remove from order slice
+		for i, toolName := range m.toolsOrder {
+			if toolName == name {
+				// Remove element at index i
+				m.toolsOrder = append(m.toolsOrder[:i], m.toolsOrder[i+1:]...)
+				break
+			}
+		}
+	}
+
+	return unregisteredCount
+}
+
 // getTools gets all registered tools
 func (m *toolManager) getTools(protocolVersion string) []*Tool {
 	m.mu.RLock()
@@ -170,8 +207,11 @@ func (m *toolManager) handleCallTool(
 		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, "missing tool name", nil), nil
 	}
 
-	// Get tool
+	// Get tool with proper locking.
+	m.mu.RLock()
 	registeredTool, ok := m.tools[toolName]
+	m.mu.RUnlock()
+
 	if !ok {
 		return newJSONRPCErrorResponse(
 			req.ID,
@@ -215,6 +255,9 @@ func (m *toolManager) handleCallTool(
 	if m.serverProvider != nil {
 		ctx = m.serverProvider.withContext(ctx)
 	}
+
+	// Inject client session into context for tool handler.
+	ctx = withClientSession(ctx, session)
 
 	// Modify method name for monitoring if modifier is available.
 	if m.methodNameModifier != nil {

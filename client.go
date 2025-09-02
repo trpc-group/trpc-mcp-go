@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"sync"
 	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // State represents the client state.
@@ -60,6 +62,10 @@ type Connector interface {
 	RegisterNotificationHandler(method string, handler NotificationHandler)
 	// UnregisterNotificationHandler removes a notification handler.
 	UnregisterNotificationHandler(method string)
+	// SetRootsProvider sets the provider for responding to server's roots/list requests.
+	SetRootsProvider(provider RootsProvider)
+	// SendRootsListChangedNotification notifies server that roots changed.
+	SendRootsListChangedNotification(ctx context.Context) error
 }
 
 // SessionClient extends Connector with session management capabilities.
@@ -111,7 +117,17 @@ type Client struct {
 	state            State                  // State.
 	transportOptions []transportOption
 
+	// transport configuration.
+	transportConfig *transportConfig
+
 	logger Logger // Logger for client transport (optional).
+
+	// Retry configuration.
+	retryConfig *retry.Config // Configuration for retry behavior (optional).
+
+	// Roots support.
+	rootsProvider RootsProvider // Provider for roots information.
+	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
 }
 
 // ClientOption client option function
@@ -132,7 +148,11 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 		capabilities:     make(map[string]interface{}),
 		state:            StateDisconnected,
 		transportOptions: []transportOption{},
+		transportConfig:  newDefaultTransportConfig(),
 	}
+
+	// set server URL.
+	client.transportConfig.serverURL = parsedURL
 
 	// Apply options.
 	for _, option := range options {
@@ -141,10 +161,71 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 
 	// Create transport layer if not previously set via options.
 	if client.transport == nil {
-		client.transport = newStreamableHTTPClientTransport(parsedURL, client.transportOptions...)
+		client.transport = newStreamableHTTPClientTransport(client.transportConfig, client.transportOptions...)
+
+		// Set client reference in transport for roots handling.
+		if streamableTransport, ok := client.transport.(*streamableHTTPClientTransport); ok {
+			streamableTransport.client = client
+		}
+	}
+
+	// Set retry config on transport if configured
+	if client.retryConfig != nil {
+		client.transport.setRetryConfig(client.retryConfig)
 	}
 
 	return client, nil
+}
+
+// transportConfig includes transport layer configuration.
+type transportConfig struct {
+	serverURL    *url.URL // server URL
+	httpClient   *http.Client
+	httpHeaders  http.Header
+	logger       Logger
+	enableGetSSE bool   // for streamable transport
+	path         string // for streamable transport
+
+	// HTTP request handler for custom implementations.
+	// This field stores the custom HTTP request handler to be used by transport layers.
+	httpReqHandler HTTPReqHandler
+
+	// Service name for custom HTTP request handlers.
+	// This field is typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function.
+	serviceName string
+	// HTTP request handler options.
+	// These options are typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function for extensibility.
+	httpReqHandlerOptions []HTTPReqHandlerOption
+}
+
+// newDefaultTransportConfig creates a default transport configuration.
+func newDefaultTransportConfig() *transportConfig {
+	return &transportConfig{
+		httpClient:            &http.Client{},
+		httpHeaders:           make(http.Header),
+		logger:                GetDefaultLogger(),
+		serviceName:           "",
+		httpReqHandlerOptions: []HTTPReqHandlerOption{},
+		enableGetSSE:          true,
+		path:                  "",
+	}
+}
+
+// extractTransportConfig extracts transport configuration from client options.
+func extractTransportConfig(options []ClientOption) *transportConfig {
+	// create a temporary client to collect configuration.
+	tempClient := &Client{
+		transportConfig: newDefaultTransportConfig(),
+	}
+
+	// apply all options.
+	for _, option := range options {
+		option(tempClient)
+	}
+
+	return tempClient.transportConfig
 }
 
 // WithProtocolVersion sets the protocol version.
@@ -179,6 +260,9 @@ func WithClientPath(path string) ClientOption {
 // WithHTTPReqHandler sets a custom HTTP request handler for the client
 func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 	return func(c *Client) {
+		// This is needed for SSE clients which read directly from transportConfig.
+		c.transportConfig.httpReqHandler = handler
+		// Also set in transportOptions for streamable transport compatibility.
 		c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandler(handler))
 	}
 }
@@ -188,7 +272,34 @@ func WithHTTPReqHandler(handler HTTPReqHandler) ClientOption {
 // including initialization, tool calls, notifications, and SSE connections.
 func WithHTTPHeaders(headers http.Header) ClientOption {
 	return func(c *Client) {
+		// Set headers in transportConfig for direct use by extractTransportConfig.
+		if c.transportConfig.httpHeaders == nil {
+			c.transportConfig.httpHeaders = make(http.Header)
+		}
+		for k, v := range headers {
+			c.transportConfig.httpHeaders[k] = v
+		}
+		// Also set in transportOptions for streamable transport compatibility.
 		c.transportOptions = append(c.transportOptions, withTransportHTTPHeaders(headers))
+	}
+}
+
+// WithServiceName sets the service name for custom HTTP request handlers.
+// This is typically only needed when using custom implementations of HTTPReqHandler.
+func WithServiceName(serviceName string) ClientOption {
+	return func(c *Client) {
+		c.transportOptions = append(c.transportOptions, withTransportServiceName(serviceName))
+	}
+}
+
+// WithHTTPReqHandlerOption adds one or more options for HTTP request handler.
+// This is typically only needed when using custom implementations of HTTPReqHandler
+// that support additional configuration options.
+func WithHTTPReqHandlerOption(options ...HTTPReqHandlerOption) ClientOption {
+	return func(c *Client) {
+		for _, option := range options {
+			c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
+		}
 	}
 }
 
@@ -533,6 +644,20 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 
 	// Parse response using specialized parser
 	return parseReadResourceResultFromJSON(rawResp)
+}
+
+// SetRootsProvider sets the provider for responding to server's roots/list requests.
+func (c *Client) SetRootsProvider(provider RootsProvider) {
+	c.rootsMu.Lock()
+	defer c.rootsMu.Unlock()
+	c.rootsProvider = provider
+}
+
+// SendRootsListChangedNotification notifies server that roots changed.
+func (c *Client) SendRootsListChangedNotification(ctx context.Context) error {
+	// Create roots list changed notification.
+	notification := NewJSONRPCNotificationFromMap(MethodNotificationsRootsListChanged, nil)
+	return c.transport.sendNotification(ctx, notification)
 }
 
 func isZeroStruct(x interface{}) bool {

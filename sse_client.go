@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // sseClientTransport implements SSE-based MCP transport following the 2024-11-05 spec.
@@ -45,12 +47,17 @@ type sseClientTransport struct {
 
 	started      atomic.Bool   // Flag indicating if transport is started.
 	closed       atomic.Bool   // Flag indicating if transport is closed.
+	retryConfig  *retry.Config // Retry configuration for requests.
 	endpointChan chan struct{} // Channel to signal when endpoint is received.
 	logger       Logger        // Logger for this client transport.
-}
 
-// sseClientOption defines options for the SSE client transport.
-type sseClientOption func(*sseClientTransport)
+	// Fields for HTTP request handler configuration
+	serviceName           string                 // Service name for custom HTTP request handlers.
+	httpReqHandlerOptions []HTTPReqHandlerOption // HTTP request handler options for extensibility.
+
+	// Client reference for accessing rootsProvider.
+	client *Client // Reference to the parent client
+}
 
 // NewSSEClient creates a new client using the SSE transport from the 2024-11-05 spec.
 func NewSSEClient(serverURL string, clientInfo Implementation, options ...ClientOption) (*Client, error) {
@@ -59,19 +66,37 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 		return nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
+	// extract transport configuration.
+	config := extractTransportConfig(options)
+	config.serverURL = parsedURL
+
 	// Create client options with standard options.
 	clientOptions := []ClientOption{
 		WithCustomTransport(func(c *Client) {
+			// create SSE transport.
 			sseTransport := &sseClientTransport{
-				baseURL:        parsedURL,
-				httpClient:     &http.Client{},
-				httpReqHandler: NewDefaultHTTPReqHandler(),
-				httpHeaders:    make(http.Header),
-				responses:      make(map[string]chan *json.RawMessage),
-				endpointChan:   make(chan struct{}),
-				logger:         c.logger, // Use the client logger.
+				baseURL:               parsedURL,
+				httpClient:            config.httpClient,
+				httpHeaders:           config.httpHeaders,
+				responses:             make(map[string]chan *json.RawMessage),
+				endpointChan:          make(chan struct{}),
+				logger:                config.logger,
+				serviceName:           config.serviceName,
+				httpReqHandlerOptions: config.httpReqHandlerOptions,
 			}
+
+			// Set HTTP request handler from config if provided, otherwise create default.
+			if config.httpReqHandler != nil {
+				sseTransport.httpReqHandler = config.httpReqHandler
+			} else if sseTransport.httpReqHandler == nil {
+				sseTransport.httpReqHandler = NewHTTPReqHandler(
+					sseTransport.serviceName, sseTransport.httpReqHandlerOptions...)
+			}
+
 			c.transport = sseTransport
+
+			// Set client reference in transport for roots handling.
+			sseTransport.client = c
 		}),
 		WithProtocolVersion(ProtocolVersion_2024_11_05), // Use the 2024-11-05 protocol version.
 	}
@@ -182,14 +207,29 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
+	br := bufio.NewReader(body)
 	var eventType, eventData string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				// Process any pending event before exit.
+				if eventType != "" && eventData != "" {
+					t.handleEvent(eventType, eventData)
+				}
+				break
+			}
+			if t.logger != nil {
+				t.logger.Errorf("Error reading SSE stream: %v", err)
+			}
+			break
+		}
 
-		// Empty line signals the end of an event.
+		// Remove only newline markers.
+		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
+			// Empty line means end of event.
 			if eventType != "" && eventData != "" {
 				t.handleEvent(eventType, eventData)
 				eventType, eventData = "", ""
@@ -202,12 +242,6 @@ func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 			eventType = strings.TrimSpace(line[6:])
 		} else if strings.HasPrefix(line, "data:") {
 			eventData = strings.TrimSpace(line[5:])
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		if t.logger != nil {
-			t.logger.Errorf("Error reading SSE stream: %v", err)
 		}
 	}
 
@@ -258,10 +292,24 @@ func (t *sseClientTransport) handleMessageEvent(data string) {
 		return
 	}
 
-	// Check if the message is a response or a notification.
-	if _, hasID := message["id"]; hasID {
+	// Check if the message is a request, response, or notification.
+	hasID := false
+	hasMethod := false
+	if _, ok := message["id"]; ok {
+		hasID = true
+	}
+	if _, ok := message["method"]; ok {
+		hasMethod = true
+	}
+
+	if hasID && hasMethod {
+		// This is a request from the server to the client.
+		t.handleIncomingRequest(data)
+	} else if hasID {
+		// This is a response to a previous request.
 		t.handleResponse(data)
-	} else if _, hasMethod := message["method"]; hasMethod {
+	} else if hasMethod {
+		// This is a notification.
 		t.handleNotification(data)
 	} else {
 		if t.logger != nil {
@@ -331,8 +379,153 @@ func (t *sseClientTransport) handleNotification(data string) {
 	}
 }
 
-// sendRequest sends a request and waits for a response.
+// handleIncomingRequest processes request messages from the server.
+func (t *sseClientTransport) handleIncomingRequest(data string) {
+	var request JSONRPCRequest
+	if err := json.Unmarshal([]byte(data), &request); err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error parsing incoming request: %v", err)
+		}
+		return
+	}
+
+	// Handle different types of requests.
+	switch request.Method {
+	case MethodRootsList:
+		t.handleRootsListRequest(&request)
+	default:
+		// Send method not found error.
+		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
+	}
+}
+
+// handleRootsListRequest handles roots/list requests from the server.
+func (t *sseClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
+	// Get roots from the client if it has a reference.
+	var roots []Root
+	if t.client != nil {
+		t.client.rootsMu.RLock()
+		provider := t.client.rootsProvider
+		t.client.rootsMu.RUnlock()
+
+		if provider != nil {
+			roots = provider.GetRoots()
+		}
+	}
+
+	if roots == nil {
+		roots = []Root{}
+	}
+
+	result := &ListRootsResult{
+		Roots: roots,
+	}
+
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  result,
+	}
+
+	// Send response.
+	t.sendResponseMessage(response)
+}
+
+// sendErrorResponse sends an error response to the server.
+func (t *sseClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
+	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	t.sendResponseMessage(errorResp)
+}
+
+// sendResponseMessage sends a response back to the server.
+func (t *sseClientTransport) sendResponseMessage(response interface{}) {
+	if t.endpoint == nil {
+		if t.logger != nil {
+			t.logger.Errorf("Cannot send response: endpoint not available")
+		}
+		return
+	}
+
+	respBytes, err := json.Marshal(response)
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error marshaling response: %v", err)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint.String(), bytes.NewReader(respBytes))
+	if err != nil {
+		if t.logger != nil {
+			t.logger.Errorf("Error creating HTTP request for response: %v", err)
+		}
+		return
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Add custom headers.
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+
+	var resp *http.Response
+	resp, err = t.httpReqHandler.Handle(ctx, t.httpClient, httpReq) // Always use httpReqHandler consistently.
+
+	if err != nil {
+		t.logger.Errorf("Error sending response to server: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted { // According to MCP protocol, response should be 202 Accepted.
+		// Read response body for error details.
+		bodyBytes, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			t.logger.Errorf("Unexpected response status when sending response: %d, failed to read body: %v", resp.StatusCode, bodyErr)
+		} else {
+			t.logger.Errorf("Unexpected response status when sending response: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		}
+	}
+}
+
+// setRetryConfig sets the retry configuration for this transport
+func (t *sseClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// sendRequest sends a request and waits for a response with retry support.
 func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+	// If no retry config, use original implementation
+	if t.retryConfig == nil {
+		return t.sendRequestInternal(ctx, req)
+	}
+
+	// Define the operation to be retried
+	var result *json.RawMessage
+	operation := func() error {
+		var err error
+		result, err = t.sendRequestInternal(ctx, req)
+		return err
+	}
+
+	// Execute with retry
+	operationName := fmt.Sprintf("sendRequest(%s)", req.Request.Method)
+	err := retry.Execute(ctx, operation, t.retryConfig, operationName)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// sendRequestInternal is the original implementation without retry logic
+func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	// Auto-start the transport if not already started.
 	if !t.started.Load() {
 		return nil, errors.New("transport not started")
