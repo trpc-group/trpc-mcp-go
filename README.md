@@ -17,13 +17,38 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 
 ### Transport Options
 
-- **Server-Sent Events (SSE)**: Efficient one-way streaming from server to client
-- **JSON-RPC**: Standard request-response communication
+trpc-mcp-go supports three transport mechanisms for different deployment scenarios:
+
+#### **STDIO Transport**
+- **Use Case**: Local integrations, command-line tools, cross-language compatibility
+- **Communication**: Standard input/output streams with JSON-RPC
+- **Process Model**: Client launches server as subprocess
+- **Benefits**: Simple, cross-platform, supports TypeScript/Python servers
+
+#### **Streamable HTTP Transport** (Recommended)
+- **Use Case**: Web integrations, multi-client servers, production deployments
+- **Communication**: HTTP POST requests with optional SSE streaming
+- **Features**: Session management, resumable connections, scalability
+- **Response Modes**: 
+  - JSON responses for simple request-response
+  - SSE streaming for real-time operations
+- **Server Notifications**: Optional GET SSE endpoint for server-initiated messages
+
+#### **SSE Transport (Legacy)**
+- **Use Case**: Backward compatibility with MCP protocol version 2024-11-05
+- **Communication**: HTTP POST requests + dedicated SSE endpoint for server messages
+- **Features**: Always stateful with session management and persistent SSE connections
+- **Status**: Deprecated in favor of Streamable HTTP, maintained for compatibility
 
 ### Connection Modes
 
+**Streamable HTTP Transport** supports multiple connection modes:
 - **Stateless**: Simple request-response pattern without persistent sessions
-- **Stateful**: Persistent connections with session management
+- **Stateful**: Session management with user context and persistent connections
+
+**SSE Transport** is always stateful by design with persistent connections.
+
+**STDIO Transport** uses process-based communication (no HTTP sessions).
 
 
 ## Installation
@@ -34,7 +59,17 @@ go get trpc.group/trpc-go/trpc-mcp-go
 
 ## Quick Start
 
-### Server Example
+### Choose Your Transport
+
+Pick the transport that best fits your use case:
+
+| Transport | When to Use | Example |
+|-----------|-------------|---------|
+| **STDIO** | Local tools, CLI integration, cross-language compatibility | [`examples/transport-modes/stdio/`](examples/transport-modes/stdio/) |
+| **Streamable HTTP** | Web services, multi-client servers, production apps | [`examples/quickstart/`](examples/quickstart/) |
+| **SSE (Legacy)** | Compatibility with older MCP clients | [`examples/transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) |
+
+### Streamable HTTP Server Example (Recommended)
 
 ```go
 package main
@@ -117,7 +152,7 @@ func main() {
 }
 ```
 
-### Client Example
+### Streamable HTTP Client Example
 
 ```go
 package main
@@ -249,6 +284,72 @@ func main() {
 	}
 
 	log.Printf("Example finished.")
+}
+```
+
+### STDIO Transport Example
+
+For local integrations and cross-language compatibility:
+
+**Server (server/main.go):**
+```go
+func main() {
+    // Create STDIO server
+    mcpServer := mcp.NewStdioServer("My-STDIO-Server", "1.0.0")
+    
+    // Register tools
+    greetTool := mcp.NewTool("greet", 
+        mcp.WithDescription("Greet someone"),
+        mcp.WithString("name", mcp.Description("Name to greet")))
+    
+    mcpServer.RegisterTool(greetTool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+        name := req.Params.Arguments["name"].(string)
+        return mcp.NewTextResult(fmt.Sprintf("Hello, %s!", name)), nil
+    })
+    
+    // Start STDIO server (reads from stdin, writes to stdout)
+    if err := mcpServer.Start(); err != nil {
+        log.Fatalf("Server failed: %v", err)
+    }
+}
+```
+
+**Client:**
+```go
+func main() {
+    // Create STDIO client that launches server as subprocess
+    client, err := mcp.NewStdioClient(
+        mcp.StdioTransportConfig{
+            ServerParams: mcp.StdioServerParameters{
+                Command: "go",
+                Args:    []string{"run", "./server/main.go"},
+            },
+        },
+        mcp.Implementation{Name: "My-Client", Version: "1.0.0"},
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+    
+    // Initialize and use the client
+    ctx := context.Background()
+    if _, err := client.Initialize(ctx, &mcp.InitializeRequest{}); err != nil {
+        log.Fatal(err)
+    }
+    
+    // Call tools
+    result, err := client.CallTool(ctx, &mcp.CallToolRequest{
+        Params: mcp.CallToolParams{
+            Name: "greet",
+            Arguments: map[string]interface{}{"name": "World"},
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Result: %v\n", result.Content[0])
 }
 ```
 
@@ -666,24 +767,41 @@ weatherHandler := mcp.NewTypedToolHandler(func(ctx context.Context, req *mcp.Cal
 - 🔄 **Structured Output**: Type-safe responses with backward compatibility
 - 🎯 **DRY Principle**: Single source of truth for data structures
 
-See [`examples/struct/`](examples/struct/) for a complete example.
+See [`examples/schema-generation/`](examples/schema-generation/) for a complete example.
 
 
 ## Example Patterns
 
-The project includes several example patterns:
+The project includes several example patterns organized by category:
 
+### Getting Started
 | Pattern | Description |
 |---------|-------------|
-| `struct` | **Struct-first API** - Auto-generate schemas from Go structs |
-| `basic` | Simple tool registration and usage |
-| `resource_prompt_example` | Resource and prompt template examples |
-| `stateful_json` | Stateful connections with JSON-RPC |
-| `stateful_sse` | Stateful connections with SSE |
-| `stateful_json_getsse` | Stateful JSON with GET SSE support |
-| `stateful_sse_getsse` | Stateful SSE with GET SSE support |
-| `stateless_json` | Stateless connections with JSON-RPC |
-| `stateless_sse` | Stateless connections with SSE |
+| [`quickstart/`](examples/quickstart/) | **Quick Start** - Simple tool registration and basic MCP usage |
+
+### Transport Modes
+| Pattern | Description |
+|---------|-------------|
+| [`transport-modes/stdio/`](examples/transport-modes/stdio/) | **STDIO Transport** - Cross-language compatibility with stdio |
+| [`transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) | **SSE Transport** - Server-Sent Events (legacy, for compatibility) |
+| [`transport-modes/streamable-http/`](examples/transport-modes/streamable-http/) | **Streamable HTTP** - Various configuration options |
+
+### ⚙Streamable HTTP Configurations
+| Pattern | Response Mode | GET SSE | Session | Description |
+|---------|---------------|---------|---------|-------------|
+| [`stateless-json/`](examples/transport-modes/streamable-http/stateless-json/) | JSON Response | ❌ | ❌ | Simple request-response |
+| [`stateful-json/`](examples/transport-modes/streamable-http/stateful-json/) | JSON Response | ❌ | ✅ | JSON with session management |
+| [`stateless-sse/`](examples/transport-modes/streamable-http/stateless-sse/) | SSE Streaming | ❌ | ❌ | Real-time streaming responses |
+| [`stateful-sse/`](examples/transport-modes/streamable-http/stateful-sse/) | SSE Streaming | ❌ | ✅ | Streaming with session management |
+| [`stateful-json-getsse/`](examples/transport-modes/streamable-http/stateful-json-getsse/) | JSON Response | ✅ | ✅ | JSON + server notifications |
+| [`stateful-sse-getsse/`](examples/transport-modes/streamable-http/stateful-sse-getsse/) | SSE Streaming | ✅ | ✅ | Full-featured streaming |
+
+### Advanced Features
+| Pattern | Description |
+|---------|-------------|
+| [`schema-generation/`](examples/schema-generation/) | **Struct-first API** - Auto-generate schemas from Go structs |
+| [`resources-and-prompts/`](examples/resources-and-prompts/) | **Resources & Prompts** - Resource management and prompt templates |
+| [`roots-management/`](examples/roots-management/) | **Roots Management** - Client filesystem integration across transports |
 
 ## FAQ
 
@@ -824,7 +942,7 @@ func main() {
 
 #### Complete Example
 
-See `examples/headers/` for a complete working example demonstrating both server-side header extraction and client-side header sending.
+See the examples in [`examples/quickstart/`](examples/quickstart/) for basic usage, or check the advanced examples in [`examples/transport-modes/`](examples/transport-modes/) for transport-specific header handling.
 
 ### 2. How to get server name and version in a tool handler?
 
