@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -17,8 +17,10 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // streamableHTTPClientTransport implements an HTTP-based MCP transport
@@ -49,6 +51,9 @@ type streamableHTTPClientTransport struct {
 	// Whether GET SSE is enabled
 	enableGetSSE bool
 
+	// Retry configuration
+	retryConfig *retry.Config
+
 	// GET SSE connection
 	getSSEConn struct {
 		active bool
@@ -67,6 +72,19 @@ type streamableHTTPClientTransport struct {
 
 	// Logger for this client transport.
 	logger Logger
+
+	// Service name for custom HTTP request handlers.
+	// This field is typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function.
+	serviceName string
+
+	// HTTP request handler options.
+	// These options are typically not used by the default handler, but may be used by custom
+	// implementations that replace the default NewHTTPReqHandler function for extensibility.
+	httpReqHandlerOptions []HTTPReqHandlerOption
+
+	// Client reference for accessing rootsProvider.
+	client *Client
 }
 
 // NotificationHandler is a handler for notifications.
@@ -81,26 +99,31 @@ type streamOptions struct {
 	notificationHandlers map[string]NotificationHandler
 }
 
-// newStreamableHTTPClientTransport creates a new client transport
-//
-// This transport implementation automatically detects if the server is in stateless mode.
-// When no session ID is provided in the initialize response, the client automatically
-// sets itself to stateless mode and disables GET SSE connections.
 // newStreamableHTTPClientTransport creates a new client transport.
-// If logger is not set via options, uses the default logger.
-func newStreamableHTTPClientTransport(serverURL *url.URL, options ...transportOption) *streamableHTTPClientTransport {
+
+func newStreamableHTTPClientTransport(config *transportConfig, options ...transportOption) *streamableHTTPClientTransport {
+	// use config to create transport.
 	transport := &streamableHTTPClientTransport{
-		serverURL:            serverURL,
-		httpClient:           &http.Client{},
-		httpReqHandler:       NewDefaultHTTPReqHandler(),
-		httpHeaders:          make(http.Header),
-		notificationHandlers: make(map[string]NotificationHandler),
-		enableGetSSE:         true,               // Default: GET SSE enabled
-		logger:               GetDefaultLogger(), // Use default logger if not set.
+		serverURL:             config.serverURL,
+		httpClient:            config.httpClient,
+		httpHeaders:           config.httpHeaders,
+		notificationHandlers:  make(map[string]NotificationHandler),
+		enableGetSSE:          config.enableGetSSE,
+		logger:                config.logger,
+		serviceName:           config.serviceName,
+		httpReqHandlerOptions: config.httpReqHandlerOptions,
+		path:                  config.path,
 	}
 
+	// apply extra options.
 	for _, option := range options {
 		option(transport)
+	}
+
+	// create HTTP request handler only if not already set.
+	if transport.httpReqHandler == nil {
+		transport.httpReqHandler = NewHTTPReqHandler(
+			transport.serviceName, transport.httpReqHandlerOptions...)
 	}
 
 	return transport
@@ -123,7 +146,7 @@ func withClientTransportLogger(logger Logger) transportOption {
 	}
 }
 
-// withClientTransportLogger sets the logger for the client transport.
+// withClientTransportPath sets the path for the client transport.
 func withClientTransportPath(path string) transportOption {
 	return func(t *streamableHTTPClientTransport) {
 		t.path = path
@@ -151,17 +174,59 @@ func withTransportHTTPHeaders(headers http.Header) transportOption {
 	}
 }
 
+// withTransportServiceName sets the service name for custom HTTP request handlers.
+// This is typically only needed when using custom implementations of HTTPReqHandler.
+func withTransportServiceName(serviceName string) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.serviceName = serviceName
+	}
+}
+
+// withTransportHTTPReqHandlerOption adds an option for HTTP request handler.
+// This is typically only needed when using custom implementations of HTTPReqHandler
+// that support additional configuration options.
+func withTransportHTTPReqHandlerOption(option HTTPReqHandlerOption) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.httpReqHandlerOptions = append(t.httpReqHandlerOptions, option)
+	}
+}
+
 // start is a no-op for streamableHTTPClientTransport.
 func (t *streamableHTTPClientTransport) start(ctx context.Context) error {
 	return nil
 }
 
-// SendRequest sends a request and waits for a response
+// setRetryConfig sets the retry configuration for this transport
+func (t *streamableHTTPClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// SendRequest sends a request and waits for a response with retry support
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
-	return t.send(ctx, req, nil)
+	// If no retry config, use original implementation
+	if t.retryConfig == nil {
+		return t.send(ctx, req, nil)
+	}
+
+	// Define the operation to be retried
+	var result *json.RawMessage
+	operation := func() error {
+		var err error
+		result, err = t.send(ctx, req, nil)
+		return err
+	}
+
+	// Execute with retry
+	operationName := fmt.Sprintf("sendRequest(%s)", req.Request.Method)
+	err := retry.Execute(ctx, operation, t.retryConfig, operationName)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // send sends a request and handles the response
@@ -326,14 +391,14 @@ func (t *streamableHTTPClientTransport) handleNotificationMessage(
 	handlers map[string]NotificationHandler,
 ) (*json.RawMessage, error) {
 	var notification JSONRPCNotification
-	if err := json.Unmarshal(rawMessage, &notification); err == nil && notification.Method != "" {
-		// Process notification
-		if handler, ok := handlers[notification.Method]; ok {
-			if err := handler(&notification); err != nil {
-				t.logger.Infof("Notification handler error: %v", err)
-			}
-		} else {
-			t.logger.Infof("Received unhandled notification: %s", notification.Method)
+	if err := json.Unmarshal(rawMessage, &notification); err != nil {
+		return nil, err
+	}
+
+	if handler, ok := handlers[notification.Method]; ok {
+		if err := handler(&notification); err != nil {
+			t.logger.Debugf("Failed to handle notification: %s, error: %v",
+				formatJSONRPCMessage(notification), err)
 		}
 	}
 	return nil, nil
@@ -461,10 +526,16 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 		}
 	}
 
-	// Send request
-	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
+	// Send HTTP request.
+	var httpResp *http.Response
+	if t.httpReqHandler != nil {
+		httpResp, err = t.httpReqHandler.Handle(ctx, t.httpClient, httpReq) // Always use httpReqHandler as there's always a default value.
+	} else {
+		httpResp, err = t.httpClient.Do(httpReq)
+	}
+
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		return fmt.Errorf("failed to send notification: %w", err)
 	}
 	defer httpResp.Body.Close()
 
@@ -475,7 +546,14 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 
 	// Check status code
 	if httpResp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("HTTP request failed with status code: %d", httpResp.StatusCode)
+		bodyBytes, bodyErr := io.ReadAll(httpResp.Body)
+		if bodyErr != nil {
+			t.logger.Warnf("Unexpected response status when sending response: %d, failed to read body: %v",
+				httpResp.StatusCode, bodyErr)
+		} else {
+			t.logger.Warnf("Unexpected response status when sending response: %d, body: %s",
+				httpResp.StatusCode, string(bodyBytes))
+		}
 	}
 
 	return nil
@@ -648,44 +726,169 @@ func (t *streamableHTTPClientTransport) handleGetSSEEvents(ctx context.Context, 
 	return nil
 }
 
-// Process SSE event
+// Process SSE event.
 func (t *streamableHTTPClientTransport) processSSEEvent(eventID, eventData string) {
-	// Ignore empty events
+	// Store the last event ID for connection recovery.
+	t.lastEventID = eventID
+
+	// Skip empty events.
 	if eventData == "" {
 		return
 	}
 
-	// Use the new unified parsing function to parse the message
-	message, msgType, err := parseJSONRPCMessage([]byte(eventData))
-	if err != nil {
-		t.logger.Infof("Failed to parse SSE event: %v", err)
+	// Parse the event data as JSON.
+	var rawMsg json.RawMessage
+	if err := json.Unmarshal([]byte(eventData), &rawMsg); err != nil {
+		t.logger.Errorf("Failed to parse SSE event data as JSON: %v", err)
 		return
 	}
 
-	// Only handle notification type messages
-	if msgType == JSONRPCMessageTypeNotification {
-		notification := message.(*JSONRPCNotification)
+	// Determine the message type.
+	msgType, err := parseJSONRPCMessageType(rawMsg)
+	if err != nil {
+		t.logger.Errorf("Failed to determine JSON-RPC message type: %v", err)
+		return
+	}
 
-		// Call the appropriate handler
+	// Process the message based on its type.
+	switch msgType {
+	case JSONRPCMessageTypeNotification:
+		// Parse notification.
+		var notification JSONRPCNotification
+		if err := json.Unmarshal(rawMsg, &notification); err != nil {
+			t.logger.Errorf("Failed to parse notification: %v", err)
+			return
+		}
+
+		// Get notification handlers.
 		t.handlersMutex.RLock()
-		handler, ok := t.notificationHandlers[notification.Method]
+		handlers := make(map[string]NotificationHandler, len(t.notificationHandlers))
+		for method, handler := range t.notificationHandlers {
+			handlers[method] = handler
+		}
 		t.handlersMutex.RUnlock()
 
-		if ok && handler != nil {
-			if err := handler(notification); err != nil {
-				t.logger.Debugf("Failed to handle notification: %s, error: %v",
-					formatJSONRPCMessage(notification), err)
-			} else {
-				t.logger.Debugf("Successfully handled notification: %s",
-					formatJSONRPCMessage(notification))
+		// Handle notification.
+		if handler, ok := handlers[notification.Method]; ok {
+			if err := handler(&notification); err != nil {
+				t.logger.Errorf("Failed to handle notification: %v", err)
 			}
 		} else {
-			t.logger.Debugf("Received notification with no registered handler: %s",
-				formatJSONRPCMessage(notification))
+			t.logger.Debugf("Received unhandled notification: %s", notification.Method)
 		}
-	} else {
-		// In GET SSE connection, we expect to receive only notifications
-		t.logger.Debugf("GET SSE connection received non-notification message, type: %s, ignored", msgType)
+	case JSONRPCMessageTypeRequest:
+		// Parse request
+		var request JSONRPCRequest
+		if err := json.Unmarshal(rawMsg, &request); err != nil {
+			t.logger.Errorf("Failed to parse request: %v", err)
+			return
+		}
+
+		// Handle server-to-client request.
+		t.handleIncomingRequest(&request)
+	default:
+		t.logger.Debugf("Received unexpected message type via SSE: %s", msgType)
+	}
+}
+
+// handleIncomingRequest handles JSON-RPC requests from the server.
+func (t *streamableHTTPClientTransport) handleIncomingRequest(request *JSONRPCRequest) {
+	// Handle different types of requests.
+	switch request.Method {
+	case MethodRootsList:
+		t.handleRootsListRequest(request)
+	default:
+		// Send method not found error.
+		t.sendErrorResponse(request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
+	}
+}
+
+// handleRootsListRequest handles roots/list requests from the server.
+func (t *streamableHTTPClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
+	// Get roots from the client if it has a reference.
+	var roots []Root
+	if t.client != nil {
+		t.client.rootsMu.RLock()
+		provider := t.client.rootsProvider
+		t.client.rootsMu.RUnlock()
+
+		if provider != nil {
+			roots = provider.GetRoots()
+		}
+	}
+
+	if roots == nil {
+		roots = []Root{}
+	}
+
+	result := &ListRootsResult{
+		Roots: roots,
+	}
+
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  result,
+	}
+
+	// Send response through HTTP POST.
+	t.sendResponseToServer(response)
+}
+
+// sendErrorResponse sends an error response to the server.
+func (t *streamableHTTPClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
+	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+	t.sendResponseToServer(errorResp)
+}
+
+// sendResponseToServer sends a response back to the server via HTTP POST.
+func (t *streamableHTTPClientTransport) sendResponseToServer(response interface{}) {
+	respBytes, err := json.Marshal(response)
+	if err != nil {
+		t.logger.Errorf("Error marshaling response: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(respBytes))
+	if err != nil {
+		t.logger.Errorf("Error creating HTTP request for response: %v", err)
+		return
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+
+	// Add session ID if available
+	if t.sessionID != "" {
+		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID) // Use correct MCP protocol header: Mcp-Session-Id.
+	}
+
+	var resp *http.Response
+	resp, err = t.httpReqHandler.Handle(ctx, t.httpClient, httpReq) // Always use httpReqHandler as there's always a default value.
+
+	if err != nil {
+		t.logger.Errorf("Error sending response to server: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted { // According to MCP protocol, response should be 202 Accepted not 200 OK.
+		// Read response body for error details.
+		bodyBytes, bodyErr := io.ReadAll(resp.Body)
+		if bodyErr != nil {
+			t.logger.Errorf("Unexpected response status when sending response: %d, failed to read body: %v", resp.StatusCode, bodyErr)
+		} else {
+			t.logger.Errorf("Unexpected response status when sending response: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		}
 	}
 }
 

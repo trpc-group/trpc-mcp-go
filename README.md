@@ -9,6 +9,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 - **Full MCP Specification Support**: Implements MCP, supporting protocol versions up to 2025-03-26 (defaulting to 2024-11-05 for client compatibility in examples).
 - **Streaming Support**: Real-time data streaming with Server-Sent Events (SSE)
 - **Tool Framework**: Register and execute tools with structured parameter handling
+- **Struct-First API**: Generate schemas automatically from Go structs with type safety
 - **Resource Management**: Serve text and binary resources with RESTful interfaces
 - **Prompt Templates**: Create and manage prompt templates for LLM interactions
 - **Progress Notifications**: Built-in support for progress updates on long-running operations
@@ -16,13 +17,39 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 
 ### Transport Options
 
-- **Server-Sent Events (SSE)**: Efficient one-way streaming from server to client
-- **JSON-RPC**: Standard request-response communication
+trpc-mcp-go supports three transport mechanisms for different deployment scenarios:
+
+#### **STDIO Transport**
+- **Use Case**: Local integrations, command-line tools, cross-language compatibility
+- **Communication**: Standard input/output streams with JSON-RPC
+- **Process Model**: Client launches server as subprocess
+- **Benefits**: Simple, cross-platform, supports TypeScript/Python servers
+
+#### **Streamable HTTP Transport** (Recommended)
+- **Use Case**: Web integrations, multi-client servers, production deployments
+- **Communication**: HTTP POST requests with optional SSE streaming
+- **Features**: Session management, resumable connections, scalability
+- **Response Modes**: 
+  - JSON responses for simple request-response
+  - SSE streaming for real-time operations
+- **Server Notifications**: Optional GET SSE endpoint for server-initiated messages
+
+#### **SSE Transport (Legacy)**
+- **Use Case**: Backward compatibility with MCP protocol version 2024-11-05
+- **Communication**: HTTP POST requests + dedicated SSE endpoint for server messages
+- **Features**: Always stateful with session management and persistent SSE connections
+- **Status**: Deprecated in favor of Streamable HTTP, maintained for compatibility
 
 ### Connection Modes
 
+**Streamable HTTP Transport** supports multiple connection modes:
 - **Stateless**: Simple request-response pattern without persistent sessions
-- **Stateful**: Persistent connections with session management
+- **Stateful**: Session management with user context and persistent connections
+
+**SSE Transport** is always stateful by design with persistent connections.
+
+**STDIO Transport** uses process-based communication (no HTTP sessions).
+
 
 ## Installation
 
@@ -32,7 +59,17 @@ go get trpc.group/trpc-go/trpc-mcp-go
 
 ## Quick Start
 
-### Server Example
+### Choose Your Transport
+
+Pick the transport that best fits your use case:
+
+| Transport | When to Use | Example |
+|-----------|-------------|---------|
+| **STDIO** | Local tools, CLI integration, cross-language compatibility | [`examples/transport-modes/stdio/`](examples/transport-modes/stdio/) |
+| **Streamable HTTP** | Web services, multi-client servers, production apps | [`examples/quickstart/`](examples/quickstart/) |
+| **SSE (Legacy)** | Compatibility with older MCP clients | [`examples/transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) |
+
+### Streamable HTTP Server Example (Recommended)
 
 ```go
 package main
@@ -115,7 +152,7 @@ func main() {
 }
 ```
 
-### Client Example
+### Streamable HTTP Client Example
 
 ```go
 package main
@@ -250,6 +287,72 @@ func main() {
 }
 ```
 
+### STDIO Transport Example
+
+For local integrations and cross-language compatibility:
+
+**Server (server/main.go):**
+```go
+func main() {
+    // Create STDIO server
+    mcpServer := mcp.NewStdioServer("My-STDIO-Server", "1.0.0")
+    
+    // Register tools
+    greetTool := mcp.NewTool("greet", 
+        mcp.WithDescription("Greet someone"),
+        mcp.WithString("name", mcp.Description("Name to greet")))
+    
+    mcpServer.RegisterTool(greetTool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+        name := req.Params.Arguments["name"].(string)
+        return mcp.NewTextResult(fmt.Sprintf("Hello, %s!", name)), nil
+    })
+    
+    // Start STDIO server (reads from stdin, writes to stdout)
+    if err := mcpServer.Start(); err != nil {
+        log.Fatalf("Server failed: %v", err)
+    }
+}
+```
+
+**Client:**
+```go
+func main() {
+    // Create STDIO client that launches server as subprocess
+    client, err := mcp.NewStdioClient(
+        mcp.StdioTransportConfig{
+            ServerParams: mcp.StdioServerParameters{
+                Command: "go",
+                Args:    []string{"run", "./server/main.go"},
+            },
+        },
+        mcp.Implementation{Name: "My-Client", Version: "1.0.0"},
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+    
+    // Initialize and use the client
+    ctx := context.Background()
+    if _, err := client.Initialize(ctx, &mcp.InitializeRequest{}); err != nil {
+        log.Fatal(err)
+    }
+    
+    // Call tools
+    result, err := client.CallTool(ctx, &mcp.CallToolRequest{
+        Params: mcp.CallToolParams{
+            Name: "greet",
+            Arguments: map[string]interface{}{"name": "World"},
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Result: %v\n", result.Content[0])
+}
+```
+
 ## Configuration
 
 ### Server Configuration
@@ -304,7 +407,7 @@ client, err := mcp.NewClient(
 | Option | Description | Default |
 |--------|-------------|---------|
 | `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2025_03_26` |
-| `WithClientGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
+| `WithClientGetSSEEnabled` | Use GET for SSE instead of POST | `true` |
 | `WithClientLogger` | Custom logger for client | Default logger |
 | `WithClientPath` | Set custom client path | Server path |
 | `WithHTTPReqHandler` | Use custom HTTP request handler | Default handler |
@@ -520,7 +623,9 @@ func main() {
 
 ### Resource Management
 
-Register and serve resources:
+#### Single Content Resources
+
+Register and serve resources with single content:
 
 ```go
 // Register text resource
@@ -542,29 +647,47 @@ textHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.Reso
 
 // Register the text resource
 server.RegisterResource(textResource, textHandler)
+```
 
-// Register image resource
-imageResource := &mcp.Resource{
-    URI:         "resource://example/image",
-    Name:        "example-image",
-    Description: "Example image resource",
-    MimeType:    "image/png",
+#### Multiple Contents Resources (Recommended)
+
+Register resources that can provide multiple content representations:
+
+```go
+// Register a resource with multiple content formats
+multiResource := &mcp.Resource{
+    URI:         "resource://example/document",
+    Name:        "example-document",
+    Description: "Document available in multiple formats",
+    MimeType:    "text/plain",
 }
 
-// Define image resource handler
-imageHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) (mcp.ResourceContents, error) {
-    // In a real application, you would read the actual image data
-    // For this example, we'll return a placeholder base64-encoded image
-    return mcp.BlobResourceContents{
-        URI:      imageResource.URI,
-        MIMEType: imageResource.MimeType,
-        Blob:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", // 1x1 transparent PNG
+// Define multiple contents handler
+multiHandler := func(ctx context.Context, req *mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+    return []mcp.ResourceContents{
+        // Text representation
+        mcp.TextResourceContents{
+            URI:      req.Params.URI,
+            MIMEType: "text/plain",
+            Text:     "Document content in plain text format.",
+        },
+        // JSON representation
+        mcp.BlobResourceContents{
+            URI:      req.Params.URI,
+            MIMEType: "application/json",
+            Blob:     "eyJjb250ZW50IjogIkRvY3VtZW50IGNvbnRlbnQgaW4gSlNPTiBmb3JtYXQuIn0=", // base64 encoded JSON
+        },
     }, nil
 }
 
-// Register the image resource
-server.RegisterResource(imageResource, imageHandler)
+// Register the resource with multiple contents (recommended)
+server.RegisterResources(multiResource, multiHandler)
 ```
+
+The `RegisterResources` method is recommended as it:
+- Aligns with the MCP protocol specification
+- Allows a single resource to provide multiple content representations
+- Supports use cases like serving the same data in different formats (text, JSON, XML, etc.)
 
 ### Prompt
 
@@ -605,20 +728,80 @@ basicPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp
 server.RegisterPrompt(basicPrompt, basicPromptHandler)
 ```
 
+## Struct-First API (Recommended)
+
+Define MCP tools using Go structs for automatic schema generation and type safety:
+
+```go
+// Define input/output structures
+type WeatherInput struct {
+    Location string `json:"location" jsonschema:"required,description=City name"`
+    Units    string `json:"units,omitempty" jsonschema:"description=Temperature units,enum=celsius,enum=fahrenheit,default=celsius"`
+}
+
+type WeatherOutput struct {
+    Temperature float64 `json:"temperature" jsonschema:"description=Current temperature"`
+    Description string  `json:"description" jsonschema:"description=Weather description"`
+}
+
+// Create tool with automatic schema generation
+weatherTool := mcp.NewTool(
+    "get_weather",
+    mcp.WithDescription("Get weather information"),
+    mcp.WithInputStruct[WeatherInput](),   // 🚀 Auto-generate input schema
+    mcp.WithOutputStruct[WeatherOutput](), // 🚀 Auto-generate output schema
+)
+
+// Type-safe handler with automatic validation
+weatherHandler := mcp.NewTypedToolHandler(func(ctx context.Context, req *mcp.CallToolRequest, input WeatherInput) (WeatherOutput, error) {
+    return WeatherOutput{
+        Temperature: 22.5,
+        Description: "Partly cloudy",
+    }, nil
+})
+```
+
+**Benefits:**
+- 🛡️ **Type Safety**: Compile-time type checking and automatic validation
+- 📋 **Rich Schemas**: Auto-generated OpenAPI schemas with descriptions, enums, defaults
+- 🔄 **Structured Output**: Type-safe responses with backward compatibility
+- 🎯 **DRY Principle**: Single source of truth for data structures
+
+See [`examples/schema-generation/`](examples/schema-generation/) for a complete example.
+
+
 ## Example Patterns
 
-The project includes several example patterns:
+The project includes several example patterns organized by category:
 
+### Getting Started
 | Pattern | Description |
 |---------|-------------|
-| `basic` | Simple tool registration and usage |
-| `resource_prompt_example` | Resource and prompt template examples |
-| `stateful_json` | Stateful connections with JSON-RPC |
-| `stateful_sse` | Stateful connections with SSE |
-| `stateful_json_getsse` | Stateful JSON with GET SSE support |
-| `stateful_sse_getsse` | Stateful SSE with GET SSE support |
-| `stateless_json` | Stateless connections with JSON-RPC |
-| `stateless_sse` | Stateless connections with SSE |
+| [`quickstart/`](examples/quickstart/) | **Quick Start** - Simple tool registration and basic MCP usage |
+
+### Transport Modes
+| Pattern | Description |
+|---------|-------------|
+| [`transport-modes/stdio/`](examples/transport-modes/stdio/) | **STDIO Transport** - Cross-language compatibility with stdio |
+| [`transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) | **SSE Transport** - Server-Sent Events (legacy, for compatibility) |
+| [`transport-modes/streamable-http/`](examples/transport-modes/streamable-http/) | **Streamable HTTP** - Various configuration options |
+
+### ⚙Streamable HTTP Configurations
+| Pattern | Response Mode | GET SSE | Session | Description |
+|---------|---------------|---------|---------|-------------|
+| [`stateless-json/`](examples/transport-modes/streamable-http/stateless-json/) | JSON Response | ❌ | ❌ | Simple request-response |
+| [`stateful-json/`](examples/transport-modes/streamable-http/stateful-json/) | JSON Response | ❌ | ✅ | JSON with session management |
+| [`stateless-sse/`](examples/transport-modes/streamable-http/stateless-sse/) | SSE Streaming | ❌ | ❌ | Real-time streaming responses |
+| [`stateful-sse/`](examples/transport-modes/streamable-http/stateful-sse/) | SSE Streaming | ❌ | ✅ | Streaming with session management |
+| [`stateful-json-getsse/`](examples/transport-modes/streamable-http/stateful-json-getsse/) | JSON Response | ✅ | ✅ | JSON + server notifications |
+| [`stateful-sse-getsse/`](examples/transport-modes/streamable-http/stateful-sse-getsse/) | SSE Streaming | ✅ | ✅ | Full-featured streaming |
+
+### Advanced Features
+| Pattern | Description |
+|---------|-------------|
+| [`schema-generation/`](examples/schema-generation/) | **Struct-first API** - Auto-generate schemas from Go structs |
+| [`resources-and-prompts/`](examples/resources-and-prompts/) | **Resources & Prompts** - Resource management and prompt templates |
+| [`roots-management/`](examples/roots-management/) | **Roots Management** - Client filesystem integration across transports |
 
 ## FAQ
 
@@ -759,7 +942,7 @@ func main() {
 
 #### Complete Example
 
-See `examples/headers/` for a complete working example demonstrating both server-side header extraction and client-side header sending.
+See the examples in [`examples/quickstart/`](examples/quickstart/) for basic usage, or check the advanced examples in [`examples/transport-modes/`](examples/transport-modes/) for transport-specific header handling.
 
 ### 2. How to get server name and version in a tool handler?
 
@@ -919,3 +1102,50 @@ curl -X POST http://localhost:3000/mcp \
 - **Transport Independence**: Works with both stateful and stateless modes
 - **Performance**: Filters run only when tools are listed, not on every request
 - **Security**: Tools are completely hidden from unauthorized users
+
+### 4. How to configure retry mechanism for network errors?
+
+The library provides automatic retry functionality at the transport layer to handle temporary network failures.
+
+#### Simple Retry Configuration
+
+```go
+// Enable retry with 3 attempts (recommended for most use cases)
+client, err := mcp.NewClient(serverURL, clientInfo,
+    mcp.WithSimpleRetry(3),
+)
+```
+
+#### Advanced Retry Configuration
+
+```go
+// Custom retry configuration for specific scenarios
+client, err := mcp.NewClient(serverURL, clientInfo,
+    mcp.WithRetry(mcp.RetryConfig{
+        MaxRetries:     5,                      // Maximum retry attempts
+        InitialBackoff: 1 * time.Second,       // Initial delay before first retry
+        BackoffFactor:  1.5,                   // Exponential backoff multiplier
+        MaxBackoff:     15 * time.Second,      // Maximum delay cap
+    }),
+)
+```
+
+#### What Errors Are Retried?
+
+The retry mechanism automatically handles:
+- **Connection errors**: `connection refused`, `connection reset`, `connection timeout`
+- **I/O timeouts**: `i/o timeout`, `read timeout`, `dial timeout`
+- **Network errors**: `EOF`, `broken pipe`
+- **HTTP server errors**: Status codes 408, 409, 429, and all 5xx errors
+
+#### Key Features
+
+- **Transport Layer**: Retry works across all MCP operations (tools, resources, prompts)
+- **Exponential Backoff**: Intelligent delay strategy to avoid overwhelming servers
+- **Error Classification**: Only retries temporary failures, not permanent errors (auth, bad requests)
+- **Silent Operation**: No logging noise by default, retry happens transparently
+- **Network Transports**: Works with Streamable HTTP and SSE transports (STDIO doesn't use retry due to its process-based nature)
+
+## Copyright
+
+The copyright notice pertaining to the Tencent code in this repo was previously in the name of “THL A29 Limited.”  That entity has now been de-registered.  You should treat all previously distributed copies of the code as if the copyright notice was in the name of “Tencent.”

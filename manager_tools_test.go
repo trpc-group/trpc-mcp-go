@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -9,7 +9,9 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
@@ -111,6 +113,258 @@ func TestToolManager_GetTool(t *testing.T) {
 	result, exists = manager.getTool("non-existent-tool")
 	assert.False(t, exists)
 	assert.Nil(t, result)
+}
+
+func TestToolManager_UnregisterTools(t *testing.T) {
+	// Create tool manager
+	manager := newToolManager()
+
+	// Create and register multiple tools
+	tool1 := NewMockTool("test-tool-1", "Test Tool 1", map[string]interface{}{})
+	tool2 := NewMockTool("test-tool-2", "Test Tool 2", map[string]interface{}{})
+	tool3 := NewMockTool("test-tool-3", "Test Tool 3", map[string]interface{}{})
+
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+	manager.registerTool(tool2, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+	manager.registerTool(tool3, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+
+	// Verify all tools are registered
+	assert.Len(t, manager.tools, 3)
+	assert.Len(t, manager.toolsOrder, 3)
+
+	// Test unregistering multiple existing tools
+	unregisteredCount := manager.unregisterTools("test-tool-1", "test-tool-3")
+	assert.Equal(t, 2, unregisteredCount)
+	assert.Len(t, manager.tools, 1)
+	assert.NotContains(t, manager.tools, "test-tool-1")
+	assert.Contains(t, manager.tools, "test-tool-2")
+	assert.NotContains(t, manager.tools, "test-tool-3")
+	assert.Len(t, manager.toolsOrder, 1)
+	assert.Equal(t, "test-tool-2", manager.toolsOrder[0])
+
+	// Test unregistering non-existent tools
+	unregisteredCount = manager.unregisterTools("non-existent-1", "non-existent-2")
+	assert.Equal(t, 0, unregisteredCount)
+	assert.Len(t, manager.tools, 1)
+
+	// Test unregistering mix of existing and non-existent tools
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+	unregisteredCount = manager.unregisterTools("test-tool-1", "non-existent", "test-tool-2")
+	assert.Equal(t, 2, unregisteredCount)
+	assert.Len(t, manager.tools, 0)
+	assert.Len(t, manager.toolsOrder, 0)
+
+	// Test unregistering with empty names
+	manager.registerTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Mock tool execution result"), nil
+	})
+	unregisteredCount = manager.unregisterTools("", "test-tool-1", "")
+	assert.Equal(t, 1, unregisteredCount)
+	assert.Len(t, manager.tools, 0)
+
+	// Test unregistering with no names provided
+	unregisteredCount = manager.unregisterTools()
+	assert.Equal(t, 0, unregisteredCount)
+}
+
+// TestToolManager_ConcurrentRegisterUnregister tests concurrent registration and unregistration
+func TestToolManager_ConcurrentRegisterUnregister(t *testing.T) {
+	manager := newToolManager()
+
+	const numWorkers = 10
+	const numOperations = 100
+
+	var wg sync.WaitGroup
+
+	// Worker function that registers and unregisters tools concurrently
+	worker := func(workerID int) {
+		defer wg.Done()
+
+		for i := 0; i < numOperations; i++ {
+			toolName := fmt.Sprintf("worker-%d-tool-%d", workerID, i)
+
+			// Register tool
+			tool := NewMockTool(toolName, "Test Tool", map[string]interface{}{})
+			handler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+				return NewTextResult("Mock result"), nil
+			}
+
+			manager.registerTool(tool, handler)
+
+			// Small delay to increase chance of race conditions
+			time.Sleep(time.Microsecond)
+
+			// Unregister tool
+			manager.unregisterTools(toolName)
+		}
+	}
+
+	// Start workers
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go worker(i)
+	}
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	// Verify final state
+	tools := manager.getTools("")
+	assert.Len(t, tools, 0, "All tools should be unregistered")
+}
+
+// TestToolManager_ConcurrentCallAndUnregister tests calling tools while unregistering them
+func TestToolManager_ConcurrentCallAndUnregister(t *testing.T) {
+	manager := newToolManager()
+
+	// Register initial tools
+	for i := 0; i < 10; i++ {
+		toolName := fmt.Sprintf("test-tool-%d", i)
+		tool := NewMockTool(toolName, "Test Tool", map[string]interface{}{})
+		handler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+			// Simulate some work
+			time.Sleep(time.Millisecond)
+			return NewTextResult("Mock result"), nil
+		}
+		manager.registerTool(tool, handler)
+	}
+
+	var wg sync.WaitGroup
+	ctx := context.Background()
+
+	// Worker that calls tools
+	callWorker := func() {
+		defer wg.Done()
+
+		for i := 0; i < 50; i++ {
+			toolName := fmt.Sprintf("test-tool-%d", i%10)
+
+			// Create a mock request
+			req := &JSONRPCRequest{
+				JSONRPC: JSONRPCVersion,
+				ID:      i,
+				Request: Request{
+					Method: MethodToolsCall,
+				},
+				Params: map[string]interface{}{
+					"name":      toolName,
+					"arguments": map[string]interface{}{},
+				},
+			}
+
+			// Call tool (this should not panic even if tool is unregistered concurrently)
+			_, err := manager.handleCallTool(ctx, req, nil)
+
+			// Error is acceptable (tool might have been unregistered), but no panic
+			_ = err
+		}
+	}
+
+	// Worker that unregisters tools
+	unregisterWorker := func() {
+		defer wg.Done()
+
+		for i := 0; i < 50; i++ {
+			toolName := fmt.Sprintf("test-tool-%d", i%10)
+			manager.unregisterTools(toolName)
+
+			// Re-register for continued testing
+			tool := NewMockTool(toolName, "Test Tool", map[string]interface{}{})
+			handler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+				return NewTextResult("Mock result"), nil
+			}
+			manager.registerTool(tool, handler)
+		}
+	}
+
+	// Start workers
+	wg.Add(4) // 2 call workers + 2 unregister workers
+	go callWorker()
+	go callWorker()
+	go unregisterWorker()
+	go unregisterWorker()
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	// Test passes if no panic occurred
+	t.Log("Concurrent call and unregister test completed successfully")
+}
+
+// TestToolManager_ConcurrentGetTools tests concurrent getTools calls
+func TestToolManager_ConcurrentGetTools(t *testing.T) {
+	manager := newToolManager()
+
+	// Register some initial tools
+	for i := 0; i < 5; i++ {
+		toolName := fmt.Sprintf("initial-tool-%d", i)
+		tool := NewMockTool(toolName, "Test Tool", map[string]interface{}{})
+		handler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+			return NewTextResult("Mock result"), nil
+		}
+		manager.registerTool(tool, handler)
+	}
+
+	var wg sync.WaitGroup
+	results := make([][]string, 20)
+
+	// Worker that gets tools list
+	getWorker := func(workerID int) {
+		defer wg.Done()
+
+		tools := manager.getTools("")
+		toolNames := make([]string, len(tools))
+		for i, tool := range tools {
+			toolNames[i] = tool.Name
+		}
+		results[workerID] = toolNames
+	}
+
+	// Worker that modifies tools
+	modifyWorker := func(workerID int) {
+		defer wg.Done()
+
+		for i := 0; i < 10; i++ {
+			toolName := fmt.Sprintf("dynamic-tool-%d-%d", workerID, i)
+
+			// Register tool
+			tool := NewMockTool(toolName, "Dynamic Tool", map[string]interface{}{})
+			handler := func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+				return NewTextResult("Mock result"), nil
+			}
+			manager.registerTool(tool, handler)
+
+			// Unregister tool
+			manager.unregisterTools(toolName)
+		}
+	}
+
+	// Start workers
+	wg.Add(20) // 15 get workers + 5 modify workers
+	for i := 0; i < 15; i++ {
+		go getWorker(i)
+	}
+	for i := 15; i < 20; i++ {
+		go modifyWorker(i)
+	}
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	// Verify that all get operations completed without panic
+	for i := 0; i < 15; i++ {
+		assert.NotNil(t, results[i], "Worker %d should have returned a result", i)
+	}
+
+	t.Log("Concurrent getTools test completed successfully")
 }
 
 func TestToolManager_GetTools(t *testing.T) {

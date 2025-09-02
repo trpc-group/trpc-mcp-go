@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -64,26 +64,37 @@ func ParseResourceContent(contentMap map[string]interface{}) (string, string, st
 }
 
 // ParseToolItem parses a tool item from a map structure
-func ParseToolItem(toolMap map[string]interface{}) (string, string, json.RawMessage, error) {
+func ParseToolItem(toolMap map[string]interface{}) (string, string, json.RawMessage, json.RawMessage, error) {
 	// Parse tool name (required)
 	name := ExtractString(toolMap, "name")
 	if name == "" {
-		return "", "", nil, fmt.Errorf("tool missing name")
+		return "", "", nil, nil, fmt.Errorf("tool missing name")
 	}
 
 	// Parse optional description
 	description := ExtractString(toolMap, "description")
 
 	// Parse input schema if present
-	var rawSchema json.RawMessage
+	var rawInputSchema json.RawMessage
 	if schema, ok := toolMap["inputSchema"].(map[string]interface{}); ok {
 		// Convert to JSON then parse to Schema
 		schemaBytes, err := json.Marshal(schema)
 		if err != nil {
-			return name, description, nil, err
+			return name, description, nil, nil, err
 		}
-		rawSchema = schemaBytes
+		rawInputSchema = schemaBytes
 	}
 
-	return name, description, rawSchema, nil
+	// Parse output schema if present
+	var rawOutputSchema json.RawMessage
+	if schema, ok := toolMap["outputSchema"].(map[string]interface{}); ok {
+		// Convert to JSON then parse to Schema
+		schemaBytes, err := json.Marshal(schema)
+		if err != nil {
+			return name, description, rawInputSchema, nil, err
+		}
+		rawOutputSchema = schemaBytes
+	}
+
+	return name, description, rawInputSchema, rawOutputSchema, nil
 }

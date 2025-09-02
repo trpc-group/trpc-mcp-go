@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
@@ -65,6 +67,12 @@ type httpServerHandler struct {
 
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
+
+	// Server path.
+	serverPath string
+
+	// Response manager for server-to-client requests.
+	responseManager *responseManager
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -83,7 +91,7 @@ type getSSEConnection struct {
 }
 
 // newHTTPServerHandler creates an HTTP server handler
-func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHandler)) *httpServerHandler {
+func newHTTPServerHandler(handler requestHandler, serverPath string, options ...func(*httpServerHandler)) *httpServerHandler {
 	h := &httpServerHandler{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		requestHandler:         handler,
@@ -93,6 +101,8 @@ func newHTTPServerHandler(handler requestHandler, options ...func(*httpServerHan
 		enablePostSSE:          true, // Default: POST SSE enabled
 		enableGetSSE:           true, // Default: GET SSE enabled
 		getSSEConnections:      make(map[string]*getSSEConnection),
+		serverPath:             serverPath,
+		responseManager:        newResponseManager(),
 	}
 
 	// Apply options
@@ -185,7 +195,13 @@ func withTransportHTTPContextFuncs(funcs []HTTPContextFunc) func(*httpServerHand
 
 // ServeHTTP implements the http.Handler interface
 func (h *httpServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// First check the HTTP method
+	if !h.isValidPath(r.URL.Path) {
+		if h.serverPath == "" {
+			http.Error(w, fmt.Sprintf("Path not found: %s (expected: %s)", r.URL.Path, h.serverPath), http.StatusNotFound)
+		}
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPost:
 		h.handlePost(r.Context(), w, r)
@@ -276,6 +292,11 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	}
 	if base.ID == nil && base.Method != "" {
 		h.handlePostNotification(enrichedCtx, w, r, rawMessage, base, session)
+		return
+	}
+	// Handle JSON-RPC responses (has ID but no method).
+	if base.ID != nil && base.Method == "" {
+		h.handlePostResponse(enrichedCtx, w, r, rawMessage, base, session)
 		return
 	}
 
@@ -379,13 +400,78 @@ func (h *httpServerHandler) handlePostNotification(ctx context.Context, w http.R
 	}
 	notificationCtx := ctx
 	if session != nil {
+		// Add session to context.
 		notificationCtx = setSessionToContext(ctx, session)
+		// Add client session to context so ServerNotificationHandler can use ClientSessionFromContext to get session.
+		notificationCtx = withClientSession(notificationCtx, session)
 	}
 	if err := h.requestHandler.handleNotification(notificationCtx, &notification, session); err != nil {
 		h.logger.Infof("Notification processing failed: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	h.sendNotificationResponse(w, session)
+}
+
+// handlePostResponse handles JSON-RPC responses.
+func (h *httpServerHandler) handlePostResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, rawMessage json.RawMessage, base baseMessage, session Session) {
+	var response struct {
+		JSONRPC string      `json:"jsonrpc"`
+		ID      interface{} `json:"id"`
+		Result  interface{} `json:"result,omitempty"`
+		Error   interface{} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(rawMessage, &response); err != nil {
+		http.Error(w, "Invalid JSON-RPC response format: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if session == nil {
+		http.Error(w, "Session not found", http.StatusNotFound)
+		return
+	}
+
+	sessionID := session.GetID()
+	h.logger.Debugf("Received JSON-RPC response for session %s, ID: %v", sessionID, response.ID)
+
+	// Prepare response data
+	requestIDStr := fmt.Sprintf("%v", response.ID)
+	var responseMessage *json.RawMessage
+
+	// Handle error response.
+	if response.Error != nil {
+		// Create error result.
+		errorBytes, _ := json.Marshal(map[string]interface{}{
+			"error": response.Error,
+		})
+		errorMsg := json.RawMessage(errorBytes)
+		responseMessage = &errorMsg
+	} else if response.Result != nil {
+		// Handle success response.
+		resultBytes, err := json.Marshal(response.Result)
+		if err != nil {
+			h.logger.Errorf("Failed to marshal response result: %v", err)
+			h.sendNotificationResponse(w, session)
+			return
+		}
+		resultMsg := json.RawMessage(resultBytes)
+		responseMessage = &resultMsg
+	} else {
+		// Invalid response - neither error nor result.
+		h.logger.Errorf("Invalid JSON-RPC response: missing both result and error for ID: %v", response.ID)
+		h.sendNotificationResponse(w, session)
+		return
+	}
+
+	// Deliver response using responseManager.
+	if h.responseManager.DeliverResponse(requestIDStr, responseMessage) {
+		h.logger.Debugf("Successfully delivered response for request ID: %v", response.ID)
+	} else {
+		h.logger.Debugf("Received response for unknown request ID: %v", response.ID)
+	}
+
+	// Send 202 Accepted response.
 	h.sendNotificationResponse(w, session)
 }
 
@@ -623,6 +709,48 @@ func (h *httpServerHandler) sendNotification(sessionID string, notification *JSO
 	return h.sendNotificationToGetSSE(sessionID, notification)
 }
 
+// SendRequest sends a JSON-RPC request to a client and waits for response.
+func (h *httpServerHandler) SendRequest(ctx context.Context, sessionID string, request *JSONRPCRequest) (*json.RawMessage, error) {
+	// Check if there's a GET SSE connection for this session.
+	h.getSSEConnectionsLock.RLock()
+	conn, ok := h.getSSEConnections[sessionID]
+	h.getSSEConnectionsLock.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("no GET SSE connection found for session: %s", sessionID)
+	}
+
+	// Generate unique request ID if not provided.
+	if request.ID == nil {
+		request.ID = h.responseManager.GenerateRequestID()
+	}
+
+	// Register request and get response channel.
+	requestIDStr := fmt.Sprintf("%v", request.ID)
+	responseChan := h.responseManager.RegisterRequest(requestIDStr)
+	defer h.responseManager.UnregisterRequest(requestIDStr)
+
+	// Send the request through GET SSE using the proper sendRequest method.
+	conn.writeLock.Lock()
+	eventID, err := conn.sseResponder.sendRequest(conn.writer, request)
+	if err != nil {
+		conn.writeLock.Unlock()
+		return nil, fmt.Errorf("failed to send request via SSE: %w", err)
+	}
+	conn.lastEventID = eventID
+	conn.writeLock.Unlock()
+
+	// Wait for response or timeout.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case response := <-responseChan:
+		return response, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("request timeout")
+	}
+}
+
 // getActiveSessions gets all active session IDs
 func (h *httpServerHandler) getActiveSessions() []string {
 	if h.sessionManager == nil {
@@ -640,4 +768,65 @@ func (h *httpServerHandler) cleanupSession(sessionID string) {
 		delete(h.getSSEConnections, sessionID)
 	}
 	h.getSSEConnectionsLock.Unlock()
+}
+
+// isValidPath validates if the request path matches the configured server path.
+func (h *httpServerHandler) isValidPath(requestPath string) bool {
+	if h.serverPath == "" {
+		return true
+	}
+	return requestPath == h.serverPath
+}
+
+// responseManager manages pending requests and their response channels.
+type responseManager struct {
+	pendingRequests map[string]chan *json.RawMessage
+	mutex           sync.RWMutex
+	requestIDGen    atomic.Int64
+}
+
+// newResponseManager creates a new response manager.
+func newResponseManager() *responseManager {
+	return &responseManager{
+		pendingRequests: make(map[string]chan *json.RawMessage),
+	}
+}
+
+// GenerateRequestID generates a unique request ID.
+func (rm *responseManager) GenerateRequestID() string {
+	return fmt.Sprintf("server_req_%d", rm.requestIDGen.Add(1))
+}
+
+// RegisterRequest registers a request and returns a response channel.
+func (rm *responseManager) RegisterRequest(requestID string) chan *json.RawMessage {
+	responseChan := make(chan *json.RawMessage, 1)
+	rm.mutex.Lock()
+	rm.pendingRequests[requestID] = responseChan
+	rm.mutex.Unlock()
+	return responseChan
+}
+
+// UnregisterRequest removes a request from tracking.
+func (rm *responseManager) UnregisterRequest(requestID string) {
+	rm.mutex.Lock()
+	delete(rm.pendingRequests, requestID)
+	rm.mutex.Unlock()
+}
+
+// DeliverResponse delivers a response to the waiting request.
+func (rm *responseManager) DeliverResponse(requestID string, response *json.RawMessage) bool {
+	rm.mutex.RLock()
+	responseChan, exists := rm.pendingRequests[requestID]
+	rm.mutex.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	select {
+	case responseChan <- response:
+		return true
+	default:
+		return false
+	}
 }

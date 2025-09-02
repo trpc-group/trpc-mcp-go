@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // StdioServerParameters defines parameters for launching a stdio MCP server.
@@ -53,6 +55,7 @@ type stdioClientTransport struct {
 	requestMutex    sync.Mutex
 	pendingRequests map[int64]chan *json.RawMessage
 	pendingMutex    sync.RWMutex
+	retryConfig     *retry.Config // Retry configuration for requests
 
 	notificationHandlers map[string]NotificationHandler
 	handlersMutex        sync.RWMutex
@@ -64,6 +67,9 @@ type stdioClientTransport struct {
 
 	sessionID string
 	logger    Logger
+
+	// Client reference for accessing rootsProvider.
+	client *StdioClient
 }
 
 // stdioTransportOption defines options for stdio transport.
@@ -180,7 +186,12 @@ func (t *stdioClientTransport) startProcess() error {
 	return nil
 }
 
-// sendRequest sends a request and waits for a response.
+// setRetryConfig sets the retry configuration for this transport
+func (t *stdioClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// sendRequest sends a request and waits for a response with retry support.
 func (t *stdioClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	if t.closed.Load() {
 		return nil, fmt.Errorf("transport is closed")
@@ -269,7 +280,28 @@ func (t *stdioClientTransport) sendResponse(ctx context.Context, resp *JSONRPCRe
 
 	t.requestMutex.Lock()
 	err := t.encoder.Encode(resp)
+
+	// Force flush the stdin pipe to ensure immediate delivery.
+	if t.stdin != nil {
+		if flusher, ok := t.stdin.(interface{ Flush() error }); ok {
+			if flushErr := flusher.Flush(); flushErr != nil {
+				t.logger.Warnf("Client sendResponse: Flush error: %v\n", flushErr)
+			}
+		}
+
+		// Try to sync if it's a file.
+		if file, ok := t.stdin.(*os.File); ok {
+			if syncErr := file.Sync(); syncErr != nil {
+				t.logger.Warnf("Client sendResponse: Sync error: %v\n", syncErr)
+			}
+		}
+	}
+
 	t.requestMutex.Unlock()
+
+	if err != nil {
+		t.logger.Errorf("Client sendResponse: Error encoding response: %v", err)
+	}
 
 	return err
 }
@@ -306,6 +338,8 @@ func (t *stdioClientTransport) readLoop() {
 			t.handleErrorResponse(rawMessage)
 		case JSONRPCMessageTypeNotification:
 			t.handleNotification(rawMessage)
+		case JSONRPCMessageTypeRequest:
+			t.handleIncomingRequest(rawMessage)
 		default:
 			t.logger.Warnf("Unexpected message type: %s", msgType)
 		}
@@ -413,7 +447,7 @@ func (t *stdioClientTransport) handleErrorResponse(rawMessage json.RawMessage) {
 func (t *stdioClientTransport) handleNotification(rawMessage json.RawMessage) {
 	var notification JSONRPCNotification
 	if err := json.Unmarshal(rawMessage, &notification); err != nil {
-		t.logger.Infof("Error unmarshaling notification: %v", err)
+		t.logger.Debugf("Error unmarshaling notification: %v", err)
 		return
 	}
 
@@ -422,16 +456,89 @@ func (t *stdioClientTransport) handleNotification(rawMessage json.RawMessage) {
 	t.handlersMutex.RUnlock()
 
 	if !exists {
-		t.logger.Infof("No handler for notification method: %s", notification.Method)
+		t.logger.Debugf("No handler for notification method: %s", notification.Method)
 		return
 	}
 
 	// Call handler in goroutine to avoid blocking.
 	go func() {
 		if err := handler(&notification); err != nil {
-			t.logger.Infof("Error handling notification %s: %v", notification.Method, err)
+			t.logger.Debugf("Error handling notification %s: %v", notification.Method, err)
 		}
 	}()
+}
+
+// handleIncomingRequest handles JSON-RPC requests from the server.
+func (t *stdioClientTransport) handleIncomingRequest(rawMessage json.RawMessage) {
+	var request JSONRPCRequest
+	if err := json.Unmarshal(rawMessage, &request); err != nil {
+		t.logger.Errorf("Client handleIncomingRequest: Error unmarshaling incoming request: %v", err)
+		return
+	}
+
+	// Handle different types of requests.
+	switch request.Method {
+	case MethodRootsList:
+		t.handleRootsListRequest(&request)
+	default:
+		t.logger.Warnf("Client handleIncomingRequest: Unknown method: %s", request.Method)
+		// Send method not found error
+		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
+	}
+}
+
+// handleRootsListRequest handles roots/list requests from the server.
+func (t *stdioClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
+	// Get roots from the client if it has a reference.
+	var roots []Root
+	if t.client != nil {
+		t.client.rootsMu.RLock()
+		provider := t.client.rootsProvider
+		t.client.rootsMu.RUnlock()
+
+		if provider != nil {
+			roots = provider.GetRoots()
+		} else {
+			t.logger.Debugf("Client handleRootsListRequest: No roots provider available")
+		}
+	} else {
+		t.logger.Debugf("Client handleRootsListRequest: No client reference available")
+	}
+
+	if roots == nil {
+		roots = []Root{}
+	}
+
+	result := &ListRootsResult{
+		Roots: roots,
+	}
+
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  result,
+	}
+
+	// Send response.
+	if err := t.sendResponse(context.Background(), response); err != nil {
+		t.logger.Errorf("Client handleRootsListRequest: Failed to send roots/list response: %v", err)
+	}
+}
+
+// sendErrorResponse sends an error response to the server.
+func (t *stdioClientTransport) sendErrorResponse(request *JSONRPCRequest, code int, message string) {
+	errorResp := newJSONRPCErrorResponse(request.ID, code, message, nil)
+
+	// Convert JSONRPCError to bytes and send.
+	errorBytes, err := json.Marshal(errorResp)
+	if err != nil {
+		t.logger.Errorf("Failed to marshal error response: %v", err)
+		return
+	}
+
+	if err := t.encoder.Encode(json.RawMessage(errorBytes)); err != nil {
+		t.logger.Errorf("Failed to send error response: %v", err)
+	}
 }
 
 // stderrLoop reads and logs stderr output.
@@ -444,7 +551,7 @@ func (t *stdioClientTransport) stderrLoop() {
 	for scanner.Scan() && !t.closed.Load() {
 		line := scanner.Text()
 		if line != "" {
-			t.logger.Infof("Server stderr: %s", line)
+			t.logger.Debugf("Server stderr: %s", line)
 		}
 	}
 }
@@ -458,9 +565,9 @@ func (t *stdioClientTransport) processWatcher() {
 	err := t.process.Wait()
 	if !t.closed.Load() {
 		if err != nil {
-			t.logger.Infof("Process exited with error: %v", err)
+			t.logger.Debugf("Process exited with error: %v", err)
 		} else {
-			t.logger.Infof("Process exited normally")
+			t.logger.Debugf("Process exited normally")
 		}
 		// Cancel context to signal shutdown.
 		t.cancel()
@@ -515,7 +622,7 @@ func (t *stdioClientTransport) close() error {
 	if t.process != nil && t.process.Process != nil {
 		// First try SIGTERM
 		if err := t.process.Process.Signal(os.Interrupt); err != nil {
-			t.logger.Infof("Failed to send SIGTERM: %v", err)
+			t.logger.Debugf("Failed to send SIGTERM: %v", err)
 		}
 
 		// Wait a bit for graceful shutdown.
@@ -527,13 +634,13 @@ func (t *stdioClientTransport) close() error {
 
 		select {
 		case <-done:
-			t.logger.Infof("Process terminated gracefully")
+			t.logger.Debugf("Process terminated gracefully")
 		case <-time.After(5 * time.Second):
 			// Force kill.
 			if err := t.process.Process.Kill(); err != nil {
 				errs = append(errs, fmt.Errorf("failed to kill process: %w", err))
 			} else {
-				t.logger.Infof("Process force-killed")
+				t.logger.Debugf("Process force-killed")
 			}
 		}
 	}

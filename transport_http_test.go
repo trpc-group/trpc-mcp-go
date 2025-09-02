@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -118,7 +118,9 @@ func TestMockHTTPTransport(t *testing.T) {
 func TestNewClientTransport(t *testing.T) {
 	// Test creating transport object
 	serverURL, _ := url.Parse("http://localhost:3000/mcp")
-	transport := newStreamableHTTPClientTransport(serverURL)
+	config := newDefaultTransportConfig()
+	config.serverURL = serverURL
+	transport := newStreamableHTTPClientTransport(config)
 
 	// Verify object was created successfully
 	assert.NotNil(t, transport)
@@ -138,7 +140,10 @@ func TestTransportHTTPHeaders(t *testing.T) {
 
 	// Create transport with headers
 	serverURL, _ := url.Parse("http://localhost:3000/mcp")
-	transport := newStreamableHTTPClientTransport(serverURL, withTransportHTTPHeaders(headers))
+	config := newDefaultTransportConfig()
+	config.serverURL = serverURL
+
+	transport := newStreamableHTTPClientTransport(config, withTransportHTTPHeaders(headers))
 
 	// Verify headers are set correctly
 	assert.NotNil(t, transport.httpHeaders)
@@ -160,8 +165,11 @@ func TestTransportHTTPHeadersWithOtherOptions(t *testing.T) {
 
 	// Create transport with headers and other options
 	serverURL, _ := url.Parse("http://localhost:3000/mcp")
+	config := newDefaultTransportConfig()
+	config.serverURL = serverURL
+
 	transport := newStreamableHTTPClientTransport(
-		serverURL,
+		config,
 		withTransportHTTPHeaders(headers),
 		withClientTransportGetSSEEnabled(true),
 		withClientTransportPath("/custom"),

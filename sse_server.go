@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -98,22 +98,38 @@ func (s *sseSession) NotificationChannel() chan<- *JSONRPCNotification {
 	return s.notificationChannel
 }
 
+// jsonRPCEnvelope is a common structure for parsing JSON-RPC messages.
+// It's used to avoid duplicate anonymous struct definitions across functions
+// and can handle both success and error responses.
+type jsonRPCEnvelope struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
+	Method  string          `json:"method,omitempty"`
+}
+
 // SSEServer implements a Server-Sent Events (SSE) based MCP server.
 type SSEServer struct {
-	mcpHandler        *mcpHandler                                                // MCP handler.
-	toolManager       *toolManager                                               // Tool manager.
-	resourceManager   *resourceManager                                           // Resource manager.
-	promptManager     *promptManager                                             // Prompt manager.
-	serverInfo        Implementation                                             // Server information.
-	basePath          string                                                     // Base path for the server (e.g., "/mcp").
-	messageEndpoint   string                                                     // Path for the message endpoint (e.g., "/message").
-	sseEndpoint       string                                                     // Path for the SSE endpoint (e.g., "/sse").
-	sessions          sync.Map                                                   // Active sessions.
-	httpServer        *http.Server                                               // HTTP server.
-	contextFunc       func(ctx context.Context, r *http.Request) context.Context // HTTP context function.
-	keepAlive         bool                                                       // Whether to keep the connection alive.
-	keepAliveInterval time.Duration                                              // Keep-alive interval.
-	logger            Logger                                                     // Logger for this server.
+	mcpHandler           *mcpHandler                                                // MCP handler.
+	toolManager          *toolManager                                               // Tool manager.
+	resourceManager      *resourceManager                                           // Resource manager.
+	promptManager        *promptManager                                             // Prompt manager.
+	serverInfo           Implementation                                             // Server information.
+	basePath             string                                                     // Base path for the server (e.g., "/mcp").
+	messageEndpoint      string                                                     // Path for the message endpoint (e.g., "/message").
+	sseEndpoint          string                                                     // Path for the SSE endpoint (e.g., "/sse").
+	sessions             sync.Map                                                   // Active sessions.
+	httpServer           *http.Server                                               // HTTP server.
+	contextFunc          func(ctx context.Context, r *http.Request) context.Context // HTTP context function.
+	keepAlive            bool                                                       // Whether to keep the connection alive.
+	keepAliveInterval    time.Duration                                              // Keep-alive interval.
+	logger               Logger                                                     // Logger for this server.
+	requestID            atomic.Int64                                               // Request ID counter for generating unique request IDs.
+	responses            map[uint64]interface{}                                     // Map for storing response channels.
+	responsesMu          sync.RWMutex                                               // Mutex for responses map.
+	notificationHandlers map[string]ServerNotificationHandler                       // Map of notification handlers by method name.
+	notificationMu       sync.RWMutex                                               // Mutex for notification handlers map.
 }
 
 // SSEOption defines a function type for configuring the SSE server.
@@ -147,16 +163,18 @@ func NewSSEServer(name, version string, opts ...SSEOption) *SSEServer {
 	)
 
 	s := &SSEServer{
-		mcpHandler:        mcpHandler,
-		toolManager:       toolManager,
-		resourceManager:   resourceManager,
-		promptManager:     promptManager,
-		serverInfo:        serverInfo,
-		sseEndpoint:       "/sse",
-		messageEndpoint:   "/message",
-		keepAlive:         true,
-		keepAliveInterval: 30 * time.Second,
-		logger:            GetDefaultLogger(),
+		mcpHandler:           mcpHandler,
+		toolManager:          toolManager,
+		resourceManager:      resourceManager,
+		promptManager:        promptManager,
+		serverInfo:           serverInfo,
+		sseEndpoint:          "/sse",
+		messageEndpoint:      "/message",
+		keepAlive:            true,
+		keepAliveInterval:    30 * time.Second,
+		logger:               GetDefaultLogger(),
+		responses:            make(map[uint64]interface{}),
+		notificationHandlers: make(map[string]ServerNotificationHandler),
 	}
 
 	// Apply all options.
@@ -460,22 +478,169 @@ func (s *SSEServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the request
-	request, err := s.parseJSONRPCRequest(r)
-	if err != nil {
-		s.logger.Errorf("Error parsing request: %v", err)
-		s.writeJSONRPCError(w, nil, -32700, "Invalid JSON")
+	// Read and parse the raw message.
+	var rawMessage json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
+		s.logger.Errorf("Error reading request body: %v", err)
+		s.writeJSONRPCError(w, nil, ErrCodeParse, "Parse error")
 		return
 	}
 
+	// Parse base message to determine type.
+	var base baseMessage
+	if err := json.Unmarshal(rawMessage, &base); err != nil {
+		s.logger.Errorf("Error parsing base message: %v", err)
+		s.writeJSONRPCError(w, nil, ErrCodeParse, "Invalid JSON-RPC message")
+		return
+	}
+
+	// Apply context function first.
+	ctx := r.Context()
+	if s.contextFunc != nil {
+		ctx = s.contextFunc(ctx, r)
+	}
+
 	// Create context with session.
-	ctx := s.createSessionContext(r.Context(), session)
+	ctx = s.createSessionContext(ctx, session)
 
 	// Immediately return HTTP 202 Accepted status code, indicating request has been received.
 	w.WriteHeader(http.StatusAccepted)
 
+	// Handle different message types based on presence of ID and Method.
+	if base.ID != nil && base.Method != "" {
+		// JSON-RPC Request (has both ID and Method).
+		s.handleRequestMessage(ctx, rawMessage, session)
+	} else if base.ID == nil && base.Method != "" {
+		// JSON-RPC Notification (has Method but no ID).
+		s.handleNotificationMessage(ctx, rawMessage, session)
+	} else if base.ID != nil && base.Method == "" {
+		// JSON-RPC Response (has ID but no Method) - like roots/list response.
+		s.handleResponseMessage(ctx, rawMessage, session)
+	} else {
+		// Invalid message format.
+		s.logger.Errorf("Invalid JSON-RPC message: missing required fields")
+		s.writeJSONRPCError(w, nil, ErrCodeInvalidRequest, "Invalid JSON-RPC message format")
+		return
+	}
+}
+
+// handleRequestMessage processes JSON-RPC requests.
+func (s *SSEServer) handleRequestMessage(ctx context.Context, rawMessage json.RawMessage, session *sseSession) {
+	var request JSONRPCRequest
+	if err := json.Unmarshal(rawMessage, &request); err != nil {
+		s.logger.Errorf("Error parsing request: %v", err)
+		return
+	}
+
 	// Process request in background.
-	go s.processRequestAsync(ctx, request, session)
+	go s.processRequestAsync(ctx, &request, session)
+}
+
+// handleNotificationMessage processes JSON-RPC notifications.
+func (s *SSEServer) handleNotificationMessage(ctx context.Context, rawMessage json.RawMessage, session *sseSession) {
+	var notification JSONRPCNotification
+	if err := json.Unmarshal(rawMessage, &notification); err != nil {
+		s.logger.Errorf("Error parsing notification: %v", err)
+		return
+	}
+
+	// Handle notification asynchronously.
+	go func() {
+		// Create a context that will not be canceled due to HTTP connection closure.
+		detachedCtx := context.WithoutCancel(ctx)
+
+		// Process notification (currently just log it, but can be extended).
+		if err := s.handleNotification(detachedCtx, &notification, session); err != nil {
+			s.logger.Errorf("Error handling notification %s: %v", notification.Method, err)
+		}
+	}()
+}
+
+// handleNotification processes notifications (can be extended for different notification types).
+func (s *SSEServer) handleNotification(ctx context.Context, notification *JSONRPCNotification, session *sseSession) error {
+	// Check if there's a registered handler for this notification method.
+	s.notificationMu.RLock()
+	handler, exists := s.notificationHandlers[notification.Method]
+	s.notificationMu.RUnlock()
+
+	if exists {
+		go func() {
+			// Call the handler with the notification pointer and context.
+			if err := handler(ctx, notification); err != nil && s.logger != nil {
+				s.logger.Errorf("Error handling notification %s: %v", notification.Method, err)
+			}
+		}()
+	} else if s.logger != nil {
+		s.logger.Warnf("Received notification with no handler registered: %s", notification.Method)
+	}
+
+	return nil
+}
+
+// handleResponseMessage processes JSON-RPC responses (like roots/list responses).
+func (s *SSEServer) handleResponseMessage(ctx context.Context, rawMessage json.RawMessage, session *sseSession) {
+	var response jsonRPCEnvelope
+
+	if err := json.Unmarshal(rawMessage, &response); err != nil {
+		s.logger.Errorf("Error parsing response: %v", err)
+		return
+	}
+	// Convert ID to uint64.
+	requestIDUint, ok := s.parseRequestID(response.ID)
+	if !ok {
+		s.logger.Errorf("Invalid request ID in response: %v", response.ID)
+		return
+	}
+
+	// Get the response channel.
+	s.responsesMu.RLock()
+	responseChanInterface, exists := s.responses[requestIDUint]
+	s.responsesMu.RUnlock()
+
+	if !exists {
+		s.logger.Debugf("Received response for unknown request ID: %d", requestIDUint)
+		return
+	}
+
+	// Type assert to the correct channel type.
+	responseChan, ok := responseChanInterface.(chan *json.RawMessage)
+	if !ok {
+		s.logger.Errorf("Invalid response channel type for request ID: %d", requestIDUint)
+		return
+	}
+
+	// Prepare response data.
+	var responseMessage *json.RawMessage
+
+	// Handle error response.
+	if response.Error != nil {
+		// Create error result.
+		errorBytes, _ := json.Marshal(map[string]interface{}{
+			"error": response.Error,
+		})
+		errorMsg := json.RawMessage(errorBytes)
+		responseMessage = &errorMsg
+	} else if response.Result != nil {
+		// Handle success response.
+		resultBytes, err := json.Marshal(response.Result)
+		if err != nil {
+			s.logger.Errorf("Failed to marshal response result: %v", err)
+			return
+		}
+		resultMsg := json.RawMessage(resultBytes)
+		responseMessage = &resultMsg
+	} else {
+		// Invalid response - neither error nor result.
+		s.logger.Errorf("Invalid JSON-RPC response: missing both result and error for ID: %d", requestIDUint)
+		return
+	}
+
+	// Deliver the response.
+	select {
+	case responseChan <- responseMessage:
+	default:
+		s.logger.Errorf("Failed to deliver response: channel full or closed for request ID: %d", requestIDUint)
+	}
 }
 
 // getSessionFromRequest extracts and validates the session from the request.
@@ -543,18 +708,28 @@ func (s *SSEServer) parseJSONRPCRequest(r *http.Request) (*JSONRPCRequest, error
 
 // createSessionContext creates a context with session information.
 func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSession) context.Context {
-	// Use sessionKey structure as context key.
-	type sessionKey struct{}
-	ctx = context.WithValue(ctx, sessionKey{}, session)
+	// Use the global setSessionToContext function to ensure consistent context key.
+	ctx = setSessionToContext(ctx, session)
 
 	// Set server instance to context.
-	return setServerToContext(ctx, s)
+	ctx = setServerToContext(ctx, s)
+
+	// Add client session to context so ServerNotificationHandler can use ClientSessionFromContext.
+	ctx = withClientSession(ctx, session)
+
+	return ctx
 }
 
 // processRequestAsync processes the request asynchronously.
 func (s *SSEServer) processRequestAsync(ctx context.Context, request *JSONRPCRequest, session *sseSession) {
 	// Create a context that will not be canceled due to HTTP connection closure.
 	detachedCtx := context.WithoutCancel(ctx)
+
+	// Check if this is a response to our roots/list request.
+	if s.isRootsListResponse(request) {
+		s.handleRootsListResponse(request)
+		return
+	}
 
 	// Process request.
 	result, err := s.mcpHandler.handleRequest(detachedCtx, request, session)
@@ -565,6 +740,134 @@ func (s *SSEServer) processRequestAsync(ctx context.Context, request *JSONRPCReq
 	}
 
 	s.sendSuccessResponse(request.ID, result, session)
+}
+
+// isRootsListResponse checks if the request is actually a response to a roots/list request.
+func (s *SSEServer) isRootsListResponse(request *JSONRPCRequest) bool {
+	// Check if this looks like a response (has ID but no method).
+	if request.ID != nil && request.Method == "" {
+		// Check if it has either Result or Error field by examining the raw JSON.
+
+		requestMap, ok := request.Params.(map[string]interface{})
+		if ok {
+			_, hasResult := requestMap["result"]
+			_, hasError := requestMap["error"]
+			return hasResult || hasError
+		}
+
+		// If we can't check directly, fall back to checking the raw request.
+		// This is a more reliable but less efficient approach.
+		if data, err := json.Marshal(request); err == nil {
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err == nil {
+				_, hasResult := m["result"]
+				_, hasError := m["error"]
+				return hasResult || hasError
+			}
+		}
+	}
+	return false
+}
+
+// handleRootsListResponse processes responses from clients to our roots/list requests.
+func (s *SSEServer) handleRootsListResponse(request *JSONRPCRequest) {
+	var responseID interface{} = request.ID
+	var responseResult json.RawMessage
+	var responseError json.RawMessage
+
+	// Try to extract result/error from the request.
+	if m, ok := request.Params.(map[string]interface{}); ok {
+		// Try to get result and error from params.
+		if result, hasResult := m["result"]; hasResult && result != nil {
+			resultBytes, _ := json.Marshal(result)
+			responseResult = resultBytes
+		}
+
+		if errVal, hasError := m["error"]; hasError && errVal != nil {
+			errBytes, _ := json.Marshal(errVal)
+			responseError = errBytes
+		}
+	} else {
+		// Fall back to marshal-unmarshal if direct extraction fails.
+		data, err := json.Marshal(request)
+		if err != nil {
+			s.logger.Errorf("Error marshaling request: %v", err)
+			return
+		}
+
+		var envelope jsonRPCEnvelope
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			s.logger.Errorf("Error unmarshaling response: %v", err)
+			return
+		}
+
+		responseResult = envelope.Result
+		responseError = envelope.Error
+	}
+
+	// Convert ID to uint64.
+	requestIDUint, ok := s.parseRequestID(responseID)
+	if !ok {
+		s.logger.Errorf("Invalid request ID in response: %v", responseID)
+		return
+	}
+
+	// Get the response channel.
+	s.responsesMu.RLock()
+	responseChanInterface, exists := s.responses[requestIDUint]
+	s.responsesMu.RUnlock()
+
+	if !exists {
+		s.logger.Debugf("Received response for unknown request ID: %d", requestIDUint)
+		return
+	}
+
+	// Type assert to the correct channel type.
+	responseChan, ok := responseChanInterface.(chan *json.RawMessage)
+	if !ok {
+		s.logger.Errorf("Invalid response channel type for request ID: %d", requestIDUint)
+		return
+	}
+
+	// Handle error response.
+	if len(responseError) > 0 {
+		errorBytes, _ := json.Marshal(map[string]interface{}{
+			"error": json.RawMessage(responseError),
+		})
+		errorMessage := json.RawMessage(errorBytes)
+
+		select {
+		case responseChan <- &errorMessage:
+		default:
+			s.logger.Errorf("Failed to deliver error response: channel full or closed")
+		}
+	} else if len(responseResult) > 0 {
+		// Handle success response.
+		select {
+		case responseChan <- &responseResult:
+		default:
+			s.logger.Errorf("Failed to deliver response: channel full or closed")
+		}
+	} else {
+		// Invalid response - neither error nor result.
+		s.logger.Errorf("Invalid JSON-RPC response: missing both result and error for ID: %d", requestIDUint)
+	}
+}
+
+// parseRequestID safely converts interface{} to uint64.
+func (s *SSEServer) parseRequestID(id interface{}) (uint64, bool) {
+	switch v := id.(type) {
+	case int:
+		return uint64(v), true
+	case int64:
+		return uint64(v), true
+	case uint64:
+		return v, true
+	case float64:
+		return uint64(v), true
+	default:
+		return 0, false
+	}
 }
 
 // handleRequestError creates and sends an error response for a failed request.
@@ -728,7 +1031,8 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Return 404 Not Found.
 	w.WriteHeader(http.StatusNotFound)
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "Not Found: %s", r.URL.Path)
+	expectedEndpoints := fmt.Sprintf("%s%s, %s%s", s.basePath, sseEndpoint, s.basePath, messageEndpoint)
+	fmt.Fprintf(w, "Path not found: %s (expected endpoints: %s)", r.URL.Path, expectedEndpoints)
 }
 
 // generateSessionID generates a unique session ID.
@@ -745,6 +1049,20 @@ func (s *SSEServer) RegisterTool(tool *Tool, handler toolHandler) {
 	s.toolManager.registerTool(tool, handler)
 }
 
+// UnregisterTools removes multiple tools by names and returns an error if no tools were unregistered.
+func (s *SSEServer) UnregisterTools(names ...string) error {
+	if len(names) == 0 {
+		return fmt.Errorf("no tool names provided")
+	}
+
+	unregisteredCount := s.toolManager.unregisterTools(names...)
+	if unregisteredCount == 0 {
+		return fmt.Errorf("none of the specified tools were found")
+	}
+
+	return nil
+}
+
 // RegisterResource registers a resource with its handler.
 func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler) {
 	if resource == nil || handler == nil {
@@ -752,6 +1070,15 @@ func (s *SSEServer) RegisterResource(resource *Resource, handler resourceHandler
 		return
 	}
 	s.resourceManager.registerResource(resource, handler)
+}
+
+// RegisterResources registers a resource with its handler for multiple contents.
+func (s *SSEServer) RegisterResources(resource *Resource, handler resourcesHandler) {
+	if resource == nil || handler == nil {
+		s.logger.Errorf("RegisterResources: resource and handler cannot be nil")
+		return
+	}
+	s.resourceManager.registerResources(resource, handler)
 }
 
 // RegisterResourceTemplate registers a resource template with its handler.
@@ -775,6 +1102,116 @@ func (s *SSEServer) RegisterPrompt(prompt *Prompt, handler promptHandler) {
 // GetServerInfo returns the server information.
 func (s *SSEServer) GetServerInfo() Implementation {
 	return s.serverInfo
+}
+
+// ListRoots sends a request to the client asking for its list of roots.
+func (s *SSEServer) ListRoots(ctx context.Context) (*ListRootsResult, error) {
+	// Get the session from context.
+	session := ClientSessionFromContext(ctx)
+	if session == nil {
+		return nil, ErrNoClientSession
+	}
+
+	sessionID := session.GetID()
+	if sessionID == "" {
+		return nil, fmt.Errorf("session has no ID")
+	}
+
+	// Check if session exists in our sessions map.
+	_, exists := s.sessions.Load(sessionID)
+	if !exists {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Create standard JSON-RPC request.
+	requestID := s.requestID.Add(1)
+	request := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodRootsList,
+		},
+	}
+
+	// Send request and wait for response using transport layer.
+	response, err := s.SendRequest(ctx, sessionID, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send roots/list request: %w", err)
+	}
+
+	// Parse response as ListRootsResult.
+	var listRootsResult ListRootsResult
+	if err := json.Unmarshal(*response, &listRootsResult); err != nil {
+		return nil, fmt.Errorf("failed to parse ListRootsResult: %w", err)
+	}
+
+	return &listRootsResult, nil
+}
+
+// SendRequest sends a JSON-RPC request to a client and waits for response.
+func (s *SSEServer) SendRequest(ctx context.Context, sessionID string, request *JSONRPCRequest) (*json.RawMessage, error) {
+	// Get session
+	sessionValue, ok := s.sessions.Load(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session, ok := sessionValue.(*sseSession)
+	if !ok {
+		return nil, fmt.Errorf("invalid session type")
+	}
+
+	// Generate unique request ID if not provided.
+	if request.ID == nil {
+		request.ID = s.requestID.Add(1)
+	}
+
+	// Create response channel.
+	requestIDUint := uint64(request.ID.(int64))
+	resultChan := make(chan *json.RawMessage, 1)
+
+	// Store the channel in the responses map.
+	s.responsesMu.Lock()
+	if s.responses == nil {
+		s.responses = make(map[uint64]interface{})
+	}
+	s.responses[requestIDUint] = resultChan
+	s.responsesMu.Unlock()
+
+	// Clean up the response channel when done
+	defer func() {
+		s.responsesMu.Lock()
+		delete(s.responses, requestIDUint)
+		s.responsesMu.Unlock()
+	}()
+
+	// Send the request to the client via SSE session's event queue.
+	requestBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Send the request as an SSE event with proper event type.
+	event := formatSSEEvent("message", requestBytes)
+	select {
+	case session.eventQueue <- event:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context done while sending request: %w", ctx.Err())
+	default:
+		return nil, fmt.Errorf("failed to send request: event queue full")
+	}
+
+	s.logger.Debugf("Sent request with ID: %v", request.ID)
+
+	// Wait for the response or timeout.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case response := <-resultChan:
+		return response, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("request timeout")
+	}
 }
 
 // formatSSEEvent formats SSE event.
@@ -804,4 +1241,27 @@ func formatSSEEvent(eventType string, data []byte) string {
 	builder.WriteString("\n")
 
 	return builder.String()
+}
+
+// RegisterNotificationHandler registers a handler for the specified notification method.
+// This allows the server to respond to client notifications.
+func (s *SSEServer) RegisterNotificationHandler(method string, handler ServerNotificationHandler) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	s.notificationHandlers[method] = handler
+	if s.logger != nil {
+		s.logger.Debugf("Registered notification handler for method: %s", method)
+	}
+}
+
+// UnregisterNotificationHandler removes a handler for the specified notification method.
+func (s *SSEServer) UnregisterNotificationHandler(method string) {
+	s.notificationMu.Lock()
+	defer s.notificationMu.Unlock()
+
+	delete(s.notificationHandlers, method)
+	if s.logger != nil {
+		s.logger.Debugf("Unregistered notification handler for method: %s", method)
+	}
 }

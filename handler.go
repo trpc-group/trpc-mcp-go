@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -22,8 +22,8 @@ type handler interface {
 	// HandleRequest processes requests
 	handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error)
 
-	// HandleNotification processes notifications
-	handleNotification(ctx context.Context, notification *JSONRPCNotification, session *Session) error
+	// HandleNotification processes notifications.
+	handleNotification(ctx context.Context, notification *JSONRPCNotification, session Session) error
 }
 
 // mcpHandler implements the default MCP protocol handler
@@ -39,6 +39,22 @@ type mcpHandler struct {
 
 	// Prompt manager
 	promptManager *promptManager
+
+	// Server reference for notification handling.
+	server serverNotificationDispatcher
+}
+
+// serverNotificationDispatcher defines the interface for dispatching notifications to handlers.
+type serverNotificationDispatcher interface {
+	// handleServerNotification dispatches a notification to registered handlers.
+	handleServerNotification(ctx context.Context, notification *JSONRPCNotification) error
+}
+
+// withServer sets the server reference.
+func withServer(server serverNotificationDispatcher) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.server = server
+	}
 }
 
 // newMCPHandler creates an MCP protocol handler
@@ -191,9 +207,20 @@ func (h *mcpHandler) handleNotification(ctx context.Context, notification *JSONR
 	// Dispatch notification based on method
 	switch notification.Method {
 	case MethodNotificationsInitialized:
-		return h.lifecycleManager.handleInitialized(ctx, notification, session)
+		if err := h.lifecycleManager.handleInitialized(ctx, notification, session); err != nil {
+			return err
+		}
+
+		// Then also dispatch to any custom handler if registered.
+		if h.server != nil {
+			return h.server.handleServerNotification(ctx, notification)
+		}
+		return nil
 	default:
-		// Ignore unknown notifications
+		// For other notifications, dispatch to server if available.
+		if h.server != nil {
+			return h.server.handleServerNotification(ctx, notification)
+		}
 		return nil
 	}
 }

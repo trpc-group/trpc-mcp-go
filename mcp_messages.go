@@ -1,6 +1,6 @@
 // Tencent is pleased to support the open source community by making trpc-mcp-go available.
 //
-// Copyright (C) 2025 THL A29 Limited, a Tencent company.  All rights reserved.
+// Copyright (C) 2025 Tencent.  All rights reserved.
 //
 // trpc-mcp-go is licensed under the Apache License Version 2.0.
 
@@ -190,6 +190,10 @@ const (
 	MethodResourcesTemplatesList = "resources/templates/list"
 	MethodResourcesSubscribe     = "resources/subscribe"
 	MethodResourcesUnsubscribe   = "resources/unsubscribe"
+
+	// Roots related
+	MethodRootsList                     = "roots/list"
+	MethodNotificationsRootsListChanged = "notifications/roots/list_changed"
 
 	// Utilities
 	MethodLoggingSetLevel = "logging/setLevel"
