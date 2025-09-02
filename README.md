@@ -1146,6 +1146,32 @@ The retry mechanism automatically handles:
 - **Silent Operation**: No logging noise by default, retry happens transparently
 - **Network Transports**: Works with Streamable HTTP and SSE transports (STDIO doesn't use retry due to its process-based nature)
 
+### 5. How to use tool annotations for better UX?
+
+Tool annotations provide behavioral hints to MCP clients about tool characteristics, enabling smarter usage and better user experience:
+
+```go
+tool := mcp.NewTool("weather_api",
+    mcp.WithDescription("Get weather information"),
+    mcp.WithString("location", mcp.Description("City name"), mcp.Required()),
+    mcp.WithToolAnnotations(&mcp.ToolAnnotations{
+        Title:           "Weather Information",    // Human-readable title
+        ReadOnlyHint:    mcp.BoolPtr(true),      // Safe, no side effects
+        DestructiveHint: mcp.BoolPtr(false),     // Non-destructive operation
+        IdempotentHint:  mcp.BoolPtr(true),      // Same input → same output
+        OpenWorldHint:   mcp.BoolPtr(true),      // Interacts with external APIs
+    }),
+)
+```
+
+**Key annotation types:**
+- **ReadOnlyHint**: Tool doesn't modify environment (safe for repeated calls)
+- **DestructiveHint**: Tool may cause permanent changes (only meaningful when ReadOnlyHint is false)
+- **IdempotentHint**: Multiple calls with same arguments have same effect
+- **OpenWorldHint**: Tool interacts with external systems vs internal data
+
+> **Note**: Annotations are hints for UX optimization, not security guarantees. See `examples/annotations/` for comprehensive usage patterns.
+
 ## Copyright
 
 The copyright notice pertaining to the Tencent code in this repo was previously in the name of “THL A29 Limited.”  That entity has now been de-registered.  You should treat all previously distributed copies of the code as if the copyright notice was in the name of “Tencent.”
