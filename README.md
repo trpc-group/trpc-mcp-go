@@ -407,7 +407,7 @@ client, err := mcp.NewClient(
 | Option | Description | Default |
 |--------|-------------|---------|
 | `WithProtocolVersion` | Specify MCP protocol version | `mcp.ProtocolVersion_2025_03_26` |
-| `WithClientGetSSEEnabled` | Use GET for SSE instead of POST | `false` |
+| `WithClientGetSSEEnabled` | Use GET for SSE instead of POST | `true` |
 | `WithClientLogger` | Custom logger for client | Default logger |
 | `WithClientPath` | Set custom client path | Server path |
 | `WithHTTPReqHandler` | Use custom HTTP request handler | Default handler |
