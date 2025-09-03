@@ -71,32 +71,29 @@ func main() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				// Broadcast system status notification to all sessions
-				failedCount, err := mcpServer.BroadcastNotification(
-					"notifications/message",
-					map[string]interface{}{
-						"level": "info",
-						"data": map[string]interface{}{
-							"type":      "system_status",
-							"memory":    fmt.Sprintf("%.1f%%", float64(50+time.Now().Second()%30)),
-							"cpu":       fmt.Sprintf("%.1f%%", float64(30+time.Now().Second()%40)),
-							"timestamp": time.Now().Format(time.RFC3339),
-							"message":   "System is running normally",
-						},
+		for range ticker.C {
+			// Broadcast system status notification to all sessions
+			failedCount, err := mcpServer.BroadcastNotification(
+				"notifications/message",
+				map[string]interface{}{
+					"level": "info",
+					"data": map[string]interface{}{
+						"type":      "system_status",
+						"memory":    fmt.Sprintf("%.1f%%", float64(50+time.Now().Second()%30)),
+						"cpu":       fmt.Sprintf("%.1f%%", float64(30+time.Now().Second()%40)),
+						"timestamp": time.Now().Format(time.RFC3339),
+						"message":   "System is running normally",
 					},
-				)
+				},
+			)
 
-				if err != nil {
-					log.Printf(
-						"Failed to broadcast system status notification: %v (failed sessions: %d)",
-						err, failedCount,
-					)
-				} else {
-					log.Printf("System status notification broadcast to all sessions")
-				}
+			if err != nil {
+				log.Printf(
+					"Failed to broadcast system status notification: %v (failed sessions: %d)",
+					err, failedCount,
+				)
+			} else {
+				log.Printf("System status notification broadcast to all sessions")
 			}
 		}
 	}()
@@ -192,7 +189,7 @@ func handleCounter(ctx context.Context, request *mcp.CallToolRequest) (*mcp.Call
 			Content: []mcp.Content{
 				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
-		}, fmt.Errorf("Failed to get session from context")
+		}, fmt.Errorf("failed to get session from context")
 	}
 
 	// Get counter from session data.
@@ -232,7 +229,7 @@ func handleNotification(ctx context.Context, request *mcp.CallToolRequest) (*mcp
 			Content: []mcp.Content{
 				mcp.NewTextContent("Error: Could not get session info. This tool requires a stateful session."),
 			},
-		}, fmt.Errorf("Failed to get session from context")
+		}, fmt.Errorf("failed to get session from context")
 	}
 
 	// Get message and delay from parameters.
