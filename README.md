@@ -1172,6 +1172,33 @@ tool := mcp.NewTool("weather_api",
 
 > **Note**: Annotations are hints for UX optimization, not security guarantees. See `examples/annotations/` for comprehensive usage patterns.
 
+### 6. How to get registered tools from server?
+
+**Q: How can I check what tools are currently registered on the server before performing operations?**
+
+**A:** Use the `GetTool` and `GetTools` methods available on all server types:
+
+```go
+// Check if a specific tool exists
+if tool, exists := server.GetTool("weather_api"); exists {
+    fmt.Printf("Tool found: %s - %s\n", tool.Name, tool.Description)
+    // Safe to proceed with tool-related operations
+}
+
+// Get all registered tools
+tools := server.GetTools()
+fmt.Printf("Server has %d tools registered:\n", len(tools))
+for _, tool := range tools {
+    fmt.Printf("- %s: %s\n", tool.Name, tool.Description)
+}
+```
+
+**Key features:**
+- **Safe Access**: Returns tool copies to prevent accidental modification
+- **Universal Support**: Available on `Server`, `SSEServer`, and `StdioServer`
+- **Dynamic Management**: Perfect for conditional tool registration/removal
+- **Go Idioms**: Uses `(value, bool)` pattern for existence checking
+
 ## Copyright
 
 The copyright notice pertaining to the Tencent code in this repo was previously in the name of “THL A29 Limited.”  That entity has now been de-registered.  You should treat all previously distributed copies of the code as if the copyright notice was in the name of “Tencent.”

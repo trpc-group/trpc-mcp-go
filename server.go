@@ -327,6 +327,34 @@ func (s *Server) RegisterTool(tool *Tool, handler toolHandler) {
 	s.toolManager.registerTool(tool, handler)
 }
 
+// GetTool retrieves a registered tool by name.
+// Returns the tool and true if found, otherwise returns zero value and false.
+// The returned tool is a copy to prevent accidental modification.
+func (s *Server) GetTool(name string) (Tool, bool) {
+	if name == "" {
+		return Tool{}, false
+	}
+
+	tool, exists := s.toolManager.getTool(name)
+	if !exists {
+		return Tool{}, false
+	}
+	// Return a copy to prevent modification of the original
+	return *tool, true
+}
+
+// GetTools returns a copy of all registered tools.
+// The returned slice contains copies of the tools to prevent accidental modification.
+func (s *Server) GetTools() []Tool {
+	toolPtrs := s.toolManager.getTools()
+
+	tools := make([]Tool, 0, len(toolPtrs))
+	for _, toolPtr := range toolPtrs {
+		tools = append(tools, *toolPtr) // getTools() guarantees non-nil
+	}
+	return tools
+}
+
 // UnregisterTools removes multiple tools by names and returns an error if no tools were unregistered
 func (s *Server) UnregisterTools(names ...string) error {
 	if len(names) == 0 {

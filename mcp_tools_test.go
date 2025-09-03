@@ -515,3 +515,193 @@ func TestToolAnnotations(t *testing.T) {
 		assert.False(t, hasOpenWorld, "nil openWorldHint should be omitted")
 	})
 }
+
+func TestServer_GetTool(t *testing.T) {
+	server := NewServer("test-server", "1.0.0")
+
+	// Create test tools
+	tool1 := NewTool("greet", WithDescription("Greet someone"))
+	tool2 := NewTool("calculate", WithDescription("Perform calculations"))
+
+	// Register tools
+	server.RegisterTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("Hello!"), nil
+	})
+	server.RegisterTool(tool2, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("42"), nil
+	})
+
+	t.Run("Get existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("greet")
+		assert.True(t, exists)
+		assert.Equal(t, "greet", tool.Name)
+		assert.Equal(t, "Greet someone", tool.Description)
+	})
+
+	t.Run("Get non-existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("nonexistent")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool) // Should return zero value
+	})
+
+	t.Run("Get tool with empty name", func(t *testing.T) {
+		tool, exists := server.GetTool("")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool) // Should return zero value
+	})
+
+	t.Run("Returned tool is a copy", func(t *testing.T) {
+		tool, exists := server.GetTool("greet")
+		assert.True(t, exists)
+
+		originalDesc := tool.Description
+		tool.Description = "Modified description"
+
+		// Get the tool again to verify the original wasn't modified
+		toolAgain, exists := server.GetTool("greet")
+		assert.True(t, exists)
+		assert.Equal(t, originalDesc, toolAgain.Description)
+		assert.NotEqual(t, "Modified description", toolAgain.Description)
+	})
+}
+
+func TestServer_GetTools(t *testing.T) {
+	server := NewServer("test-server", "1.0.0")
+
+	t.Run("Empty server", func(t *testing.T) {
+		tools := server.GetTools()
+		assert.Empty(t, tools)
+	})
+
+	t.Run("Server with tools", func(t *testing.T) {
+		// Create and register test tools
+		tool1 := NewTool("greet", WithDescription("Greet someone"))
+		tool2 := NewTool("calculate", WithDescription("Perform calculations"))
+
+		server.RegisterTool(tool1, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+			return NewTextResult("Hello!"), nil
+		})
+		server.RegisterTool(tool2, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+			return NewTextResult("42"), nil
+		})
+
+		tools := server.GetTools()
+		assert.Len(t, tools, 2)
+
+		// Check that all tools are present (order may vary)
+		toolNames := make(map[string]bool)
+		for _, tool := range tools {
+			toolNames[tool.Name] = true
+		}
+		assert.True(t, toolNames["greet"])
+		assert.True(t, toolNames["calculate"])
+	})
+
+	t.Run("Returned tools are copies", func(t *testing.T) {
+		tool := NewTool("test", WithDescription("Test tool"))
+		server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+			return NewTextResult("test"), nil
+		})
+
+		tools := server.GetTools()
+		assert.Len(t, tools, 3) // greet, calculate, test
+
+		// Modify one of the returned tools
+		for i := range tools {
+			if tools[i].Name == "test" {
+				tools[i].Description = "Modified description"
+				break
+			}
+		}
+
+		// Get tools again and verify original wasn't modified
+		toolsAgain := server.GetTools()
+		for _, tool := range toolsAgain {
+			if tool.Name == "test" {
+				assert.Equal(t, "Test tool", tool.Description)
+			}
+		}
+	})
+}
+
+func TestSSEServer_GetTool(t *testing.T) {
+	server := NewSSEServer("sse-test", "1.0.0")
+
+	tool := NewTool("sse-tool", WithDescription("SSE test tool"))
+	server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("SSE!"), nil
+	})
+
+	t.Run("Get existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("sse-tool")
+		assert.True(t, exists)
+		assert.Equal(t, "sse-tool", tool.Name)
+		assert.Equal(t, "SSE test tool", tool.Description)
+	})
+
+	t.Run("Get non-existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("nonexistent")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool)
+	})
+
+	t.Run("Get tool with empty name", func(t *testing.T) {
+		tool, exists := server.GetTool("")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool)
+	})
+}
+
+func TestSSEServer_GetTools(t *testing.T) {
+	server := NewSSEServer("sse-test", "1.0.0")
+
+	tool := NewTool("sse-tool", WithDescription("SSE test tool"))
+	server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("SSE!"), nil
+	})
+
+	tools := server.GetTools()
+	assert.Len(t, tools, 1)
+	assert.Equal(t, "sse-tool", tools[0].Name)
+}
+
+func TestStdioServer_GetTool(t *testing.T) {
+	server := NewStdioServer("stdio-test", "1.0.0")
+
+	tool := NewTool("stdio-tool", WithDescription("STDIO test tool"))
+	server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("STDIO!"), nil
+	})
+
+	t.Run("Get existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("stdio-tool")
+		assert.True(t, exists)
+		assert.Equal(t, "stdio-tool", tool.Name)
+		assert.Equal(t, "STDIO test tool", tool.Description)
+	})
+
+	t.Run("Get non-existing tool", func(t *testing.T) {
+		tool, exists := server.GetTool("nonexistent")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool)
+	})
+
+	t.Run("Get tool with empty name", func(t *testing.T) {
+		tool, exists := server.GetTool("")
+		assert.False(t, exists)
+		assert.Equal(t, Tool{}, tool)
+	})
+}
+
+func TestStdioServer_GetTools(t *testing.T) {
+	server := NewStdioServer("stdio-test", "1.0.0")
+
+	tool := NewTool("stdio-tool", WithDescription("STDIO test tool"))
+	server.RegisterTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return NewTextResult("STDIO!"), nil
+	})
+
+	tools := server.GetTools()
+	assert.Len(t, tools, 1)
+	assert.Equal(t, "stdio-tool", tools[0].Name)
+}
