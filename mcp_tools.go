@@ -72,6 +72,31 @@ type ToolListChangedNotification struct {
 	Notification
 }
 
+// ToolAnnotations represents annotations for tools that provide hints to clients about tool behavior.
+// All properties are hints and should not be used for security decisions.
+type ToolAnnotations struct {
+	// Title provides a human-readable title for the tool.
+	Title string `json:"title,omitempty"`
+
+	// ReadOnlyHint indicates the tool does not modify its environment.
+	// Default: false
+	ReadOnlyHint *bool `json:"readOnlyHint,omitempty"`
+
+	// DestructiveHint indicates the tool may perform destructive updates.
+	// Only meaningful when ReadOnlyHint is false.
+	// Default: true
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+
+	// IdempotentHint indicates repeated calls with same arguments have no additional effect.
+	// Only meaningful when ReadOnlyHint is false.
+	// Default: false
+	IdempotentHint *bool `json:"idempotentHint,omitempty"`
+
+	// OpenWorldHint indicates the tool interacts with external entities.
+	// Default: true
+	OpenWorldHint *bool `json:"openWorldHint,omitempty"`
+}
+
 // Tool represents an MCP tool.
 type Tool struct {
 	// Tool name
@@ -85,6 +110,9 @@ type Tool struct {
 
 	// Output schema for structured responses
 	OutputSchema *openapi3.Schema `json:"outputSchema,omitempty"`
+
+	// Tool annotations providing hints about tool behavior
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 
 	// Raw input schema
 	RawInputSchema json.RawMessage `json:"-"`
@@ -154,6 +182,13 @@ func WithInputStruct[T any]() ToolOption {
 func WithOutputStruct[T any]() ToolOption {
 	return func(t *Tool) {
 		t.OutputSchema = schema.ConvertStructToOpenAPISchema[T]()
+	}
+}
+
+// WithToolAnnotations sets tool annotations that provide hints about tool behavior
+func WithToolAnnotations(annotations *ToolAnnotations) ToolOption {
+	return func(t *Tool) {
+		t.Annotations = annotations
 	}
 }
 
@@ -500,4 +535,10 @@ func parseResourceContents(contentMap map[string]any) (ResourceContents, error) 
 	}
 
 	return nil, fmt.Errorf("unsupported resource type")
+}
+
+// BoolPtr returns a pointer to the given boolean value.
+// This is a utility function for setting ToolAnnotations hint fields.
+func BoolPtr(b bool) *bool {
+	return &b
 }

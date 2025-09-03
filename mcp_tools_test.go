@@ -395,3 +395,123 @@ func TestParseCallToolResult_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestToolAnnotations(t *testing.T) {
+	t.Run("WithToolAnnotations", func(t *testing.T) {
+		annotations := &ToolAnnotations{
+			Title:           "Test Tool",
+			ReadOnlyHint:    BoolPtr(true),
+			DestructiveHint: BoolPtr(false),
+			IdempotentHint:  BoolPtr(true),
+			OpenWorldHint:   BoolPtr(false),
+		}
+
+		tool := NewTool("test_tool",
+			WithDescription("A test tool"),
+			WithToolAnnotations(annotations),
+		)
+
+		assert.NotNil(t, tool.Annotations)
+		assert.Equal(t, "Test Tool", tool.Annotations.Title)
+		assert.Equal(t, true, *tool.Annotations.ReadOnlyHint)
+		assert.Equal(t, false, *tool.Annotations.DestructiveHint)
+		assert.Equal(t, true, *tool.Annotations.IdempotentHint)
+		assert.Equal(t, false, *tool.Annotations.OpenWorldHint)
+	})
+
+	t.Run("BoolPtr utility", func(t *testing.T) {
+		truePtr := BoolPtr(true)
+		falsePtr := BoolPtr(false)
+
+		assert.NotNil(t, truePtr)
+		assert.NotNil(t, falsePtr)
+		assert.Equal(t, true, *truePtr)
+		assert.Equal(t, false, *falsePtr)
+	})
+
+	t.Run("JSON serialization", func(t *testing.T) {
+		tool := NewTool("json_test",
+			WithDescription("JSON test tool"),
+			WithToolAnnotations(&ToolAnnotations{
+				Title:           "JSON Test Tool",
+				ReadOnlyHint:    BoolPtr(true),
+				DestructiveHint: BoolPtr(false),
+				IdempotentHint:  BoolPtr(true),
+				OpenWorldHint:   BoolPtr(true),
+			}),
+		)
+
+		// Marshal to JSON
+		jsonData, err := json.Marshal(tool)
+		assert.NoError(t, err)
+
+		// Unmarshal back
+		var unmarshaled Tool
+		err = json.Unmarshal(jsonData, &unmarshaled)
+		assert.NoError(t, err)
+
+		// Verify annotations are preserved
+		assert.NotNil(t, unmarshaled.Annotations)
+		assert.Equal(t, "JSON Test Tool", unmarshaled.Annotations.Title)
+		assert.Equal(t, true, *unmarshaled.Annotations.ReadOnlyHint)
+		assert.Equal(t, false, *unmarshaled.Annotations.DestructiveHint)
+		assert.Equal(t, true, *unmarshaled.Annotations.IdempotentHint)
+		assert.Equal(t, true, *unmarshaled.Annotations.OpenWorldHint)
+	})
+
+	t.Run("Tool without annotations", func(t *testing.T) {
+		tool := NewTool("basic_tool",
+			WithDescription("Basic tool without annotations"),
+		)
+
+		assert.Nil(t, tool.Annotations)
+
+		// JSON should omit annotations field
+		jsonData, err := json.Marshal(tool)
+		assert.NoError(t, err)
+
+		var jsonMap map[string]interface{}
+		err = json.Unmarshal(jsonData, &jsonMap)
+		assert.NoError(t, err)
+
+		_, hasAnnotations := jsonMap["annotations"]
+		assert.False(t, hasAnnotations, "annotations field should be omitted when nil")
+	})
+
+	t.Run("Partial annotations", func(t *testing.T) {
+		// Test with only some fields set
+		tool := NewTool("partial_tool",
+			WithToolAnnotations(&ToolAnnotations{
+				Title:        "Partial Tool",
+				ReadOnlyHint: BoolPtr(true),
+				// Other hints not set (should be nil)
+			}),
+		)
+
+		assert.NotNil(t, tool.Annotations)
+		assert.Equal(t, "Partial Tool", tool.Annotations.Title)
+		assert.Equal(t, true, *tool.Annotations.ReadOnlyHint)
+		assert.Nil(t, tool.Annotations.DestructiveHint)
+		assert.Nil(t, tool.Annotations.IdempotentHint)
+		assert.Nil(t, tool.Annotations.OpenWorldHint)
+
+		// JSON should omit nil hint fields
+		jsonData, err := json.Marshal(tool)
+		assert.NoError(t, err)
+
+		var jsonMap map[string]interface{}
+		err = json.Unmarshal(jsonData, &jsonMap)
+		assert.NoError(t, err)
+
+		annotations, _ := jsonMap["annotations"].(map[string]interface{})
+		assert.NotNil(t, annotations)
+
+		_, hasDestructive := annotations["destructiveHint"]
+		_, hasIdempotent := annotations["idempotentHint"]
+		_, hasOpenWorld := annotations["openWorldHint"]
+
+		assert.False(t, hasDestructive, "nil destructiveHint should be omitted")
+		assert.False(t, hasIdempotent, "nil idempotentHint should be omitted")
+		assert.False(t, hasOpenWorld, "nil openWorldHint should be omitted")
+	})
+}

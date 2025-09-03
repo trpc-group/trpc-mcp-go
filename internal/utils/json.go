@@ -63,12 +63,21 @@ func ParseResourceContent(contentMap map[string]interface{}) (string, string, st
 	return uri, mimeType, "", true // Default to treating as text
 }
 
+// parsedToolItem represents a parsed tool item with all its components
+type parsedToolItem struct {
+	Name            string
+	Description     string
+	RawInputSchema  json.RawMessage
+	RawOutputSchema json.RawMessage
+	RawAnnotations  json.RawMessage
+}
+
 // ParseToolItem parses a tool item from a map structure
-func ParseToolItem(toolMap map[string]interface{}) (string, string, json.RawMessage, json.RawMessage, error) {
+func ParseToolItem(toolMap map[string]interface{}) (*parsedToolItem, error) {
 	// Parse tool name (required)
 	name := ExtractString(toolMap, "name")
 	if name == "" {
-		return "", "", nil, nil, fmt.Errorf("tool missing name")
+		return nil, fmt.Errorf("tool missing name")
 	}
 
 	// Parse optional description
@@ -80,7 +89,7 @@ func ParseToolItem(toolMap map[string]interface{}) (string, string, json.RawMess
 		// Convert to JSON then parse to Schema
 		schemaBytes, err := json.Marshal(schema)
 		if err != nil {
-			return name, description, nil, nil, err
+			return nil, err
 		}
 		rawInputSchema = schemaBytes
 	}
@@ -91,10 +100,28 @@ func ParseToolItem(toolMap map[string]interface{}) (string, string, json.RawMess
 		// Convert to JSON then parse to Schema
 		schemaBytes, err := json.Marshal(schema)
 		if err != nil {
-			return name, description, rawInputSchema, nil, err
+			return nil, err
 		}
 		rawOutputSchema = schemaBytes
 	}
 
-	return name, description, rawInputSchema, rawOutputSchema, nil
+	// Parse annotations if present
+	// Annotations provide hints about tool behavior (title, readOnlyHint, destructiveHint, etc.)
+	var rawAnnotations json.RawMessage
+	if annotations, ok := toolMap["annotations"].(map[string]interface{}); ok {
+		// Convert annotations map to JSON bytes for later deserialization
+		annotationsBytes, err := json.Marshal(annotations)
+		if err != nil {
+			return nil, err
+		}
+		rawAnnotations = annotationsBytes
+	}
+
+	return &parsedToolItem{
+		Name:            name,
+		Description:     description,
+		RawInputSchema:  rawInputSchema,
+		RawOutputSchema: rawOutputSchema,
+		RawAnnotations:  rawAnnotations,
+	}, nil
 }
