@@ -133,8 +133,9 @@ func handleNotifications(notification *mcp.JSONRPCNotification) error {
 	switch notification.Method {
 	case "notifications/message":
 		level, _ := notification.Params.AdditionalFields["level"].(string)
-		data, _ := notification.Params.AdditionalFields["data"].(string)
-		log.Printf("Received log message: [%s] %s", level, data)
+		data, _ := notification.Params.AdditionalFields["data"].(map[string]interface{})
+		message, _ := data["message"].(string)
+		log.Printf("Received log message: [%s] %s", level, message)
 	case "notifications/progress":
 		progress, _ := notification.Params.AdditionalFields["progress"].(float64)
 		message, _ := notification.Params.AdditionalFields["message"].(string)
