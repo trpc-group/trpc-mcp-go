@@ -116,7 +116,7 @@ func TestConvertStructToOpenAPISchema_BasicTypes(t *testing.T) {
 	schema := ConvertStructToOpenAPISchema[BasicTypesStruct]()
 
 	// Verify it's an object
-	if schema.Type == nil || (*schema.Type)[0] != "object" {
+	if schema.Type != "object" {
 		t.Errorf("Expected object type, got %v", schema.Type)
 	}
 
@@ -160,25 +160,25 @@ func TestConvertStructToOpenAPISchema_ArraySlice(t *testing.T) {
 
 	// Test string array
 	arrayField := schema.Properties["stringArray"].Value
-	if arrayField.Type == nil || (*arrayField.Type)[0] != "array" {
+	if arrayField.Type != "array" {
 		t.Errorf("Expected array type for stringArray")
 	}
-	if arrayField.Items.Value.Type == nil || (*arrayField.Items.Value.Type)[0] != "string" {
+	if arrayField.Items.Value.Type != "string" {
 		t.Errorf("Expected string items for stringArray")
 	}
 
 	// Test nested slice
 	nestedField := schema.Properties["nestedSlice"].Value
-	if nestedField.Type == nil || (*nestedField.Type)[0] != "array" {
+	if nestedField.Type != "array" {
 		t.Errorf("Expected array type for nestedSlice")
 	}
-	if nestedField.Items.Value.Type == nil || (*nestedField.Items.Value.Type)[0] != "array" {
+	if nestedField.Items.Value.Type != "array" {
 		t.Errorf("Expected array items for nestedSlice")
 	}
 
 	// Test struct slice
 	structSliceField := schema.Properties["structSlice"].Value
-	if structSliceField.Items.Value.Type == nil || (*structSliceField.Items.Value.Type)[0] != "object" {
+	if structSliceField.Items.Value.Type != "object" {
 		t.Errorf("Expected object items for structSlice")
 	}
 }
@@ -188,21 +188,19 @@ func TestConvertStructToOpenAPISchema_Maps(t *testing.T) {
 
 	// Test string map
 	stringMapField := schema.Properties["stringMap"].Value
-	if stringMapField.Type == nil || (*stringMapField.Type)[0] != "object" {
+	if stringMapField.Type != "object" {
 		t.Errorf("Expected object type for stringMap")
 	}
 	if stringMapField.AdditionalProperties.Schema == nil {
 		t.Errorf("Expected additionalProperties for stringMap")
 	}
-	if stringMapField.AdditionalProperties.Schema.Value.Type == nil ||
-		(*stringMapField.AdditionalProperties.Schema.Value.Type)[0] != "string" {
+	if stringMapField.AdditionalProperties.Schema.Value.Type != "string" {
 		t.Errorf("Expected string additionalProperties for stringMap")
 	}
 
 	// Test nested map
 	nestedMapField := schema.Properties["nestedMap"].Value
-	if nestedMapField.AdditionalProperties.Schema.Value.Type == nil ||
-		(*nestedMapField.AdditionalProperties.Schema.Value.Type)[0] != "object" {
+	if nestedMapField.AdditionalProperties.Schema.Value.Type != "object" {
 		t.Errorf("Expected object additionalProperties for nestedMap")
 	}
 }
@@ -289,7 +287,7 @@ func TestConvertStructToOpenAPISchema_NestedStruct(t *testing.T) {
 
 	// Test nested struct
 	userField := schema.Properties["user"].Value
-	if userField.Type == nil || (*userField.Type)[0] != "object" {
+	if userField.Type != "object" {
 		t.Errorf("Expected object type for user field")
 	}
 
@@ -311,7 +309,7 @@ func TestConvertStructToOpenAPISchema_NestedStruct(t *testing.T) {
 
 	// Test nested optional pointer struct
 	settingsField := schema.Properties["settings"].Value
-	if settingsField.Type == nil || (*settingsField.Type)[0] != "object" {
+	if settingsField.Type != "object" {
 		t.Errorf("Expected object type for settings field")
 	}
 
@@ -326,12 +324,12 @@ func TestConvertStructToOpenAPISchema_ComplexNested(t *testing.T) {
 
 	// Test deeply nested structure
 	itemsField := schema.Properties["items"].Value
-	if itemsField.Type == nil || (*itemsField.Type)[0] != "array" {
+	if itemsField.Type != "array" {
 		t.Errorf("Expected array type for items field")
 	}
 
 	itemSchema := itemsField.Items.Value
-	if itemSchema.Type == nil || (*itemSchema.Type)[0] != "object" {
+	if itemSchema.Type != "object" {
 		t.Errorf("Expected object type for item elements")
 	}
 
@@ -341,7 +339,7 @@ func TestConvertStructToOpenAPISchema_ComplexNested(t *testing.T) {
 	}
 
 	childrenField := itemSchema.Properties["children"].Value
-	if childrenField.Type == nil || (*childrenField.Type)[0] != "array" {
+	if childrenField.Type != "array" {
 		t.Errorf("Expected array type for children field")
 	}
 }
@@ -370,7 +368,7 @@ func TestConvertStructToOpenAPISchema_EmptyStruct(t *testing.T) {
 
 	schema := ConvertStructToOpenAPISchema[EmptyStruct]()
 
-	if schema.Type == nil || (*schema.Type)[0] != "object" {
+	if schema.Type != "object" {
 		t.Errorf("Expected object type for empty struct")
 	}
 
@@ -440,7 +438,7 @@ func assertFieldType(t *testing.T, schema *openapi3.Schema, fieldName, expectedT
 		return
 	}
 
-	if field.Value.Type == nil || (*field.Value.Type)[0] != expectedType {
+	if field.Value.Type != expectedType {
 		t.Errorf("Expected type %s for field %s, got %v", expectedType, fieldName, field.Value.Type)
 	}
 }

@@ -151,7 +151,7 @@ func NewTool(
 	tool := &Tool{
 		Name: name,
 		InputSchema: &openapi3.Schema{
-			Type:       &openapi3.Types{openapi3.TypeObject},
+			Type:       "object",
 			Properties: make(openapi3.Schemas),
 			Required:   []string{},
 		},
@@ -196,7 +196,7 @@ func WithToolAnnotations(annotations *ToolAnnotations) ToolOption {
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeString},
+			Type: "string",
 		}
 		for _, opt := range opts {
 			opt(schema)
@@ -213,7 +213,7 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeNumber},
+			Type: "number",
 		}
 		for _, opt := range opts {
 			opt(schema)
@@ -230,7 +230,7 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 func WithInteger(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeInteger},
+			Type: "integer",
 		}
 		for _, opt := range opts {
 			opt(schema)
@@ -247,7 +247,7 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeBoolean},
+			Type: "boolean",
 		}
 		for _, opt := range opts {
 			opt(schema)
@@ -264,7 +264,7 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 func WithObject(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type:       &openapi3.Types{openapi3.TypeObject},
+			Type:       "object",
 			Properties: make(openapi3.Schemas),
 		}
 		for _, opt := range opts {
@@ -328,7 +328,7 @@ func Properties(props openapi3.Schemas) PropertyOption {
 func WithArray(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
 		schema := &openapi3.Schema{
-			Type: &openapi3.Types{openapi3.TypeArray},
+			Type: "array",
 		}
 		for _, opt := range opts {
 			opt(schema)

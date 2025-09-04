@@ -70,7 +70,7 @@ func convertReflectTypeToSchemaWithVisited(t reflect.Type, visited map[reflect.T
 		schema = openapi3.NewIntegerSchema()
 	case reflect.Float32, reflect.Float64:
 		schema = openapi3.NewSchema()
-		schema.Type = &openapi3.Types{"number"}
+		schema.Type = "number"
 	case reflect.Bool:
 		schema = openapi3.NewBoolSchema()
 	default:
