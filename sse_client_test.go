@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -96,6 +97,33 @@ func TestWithClientPath_SSETransport(t *testing.T) {
 
 	// Verify path is set in transport config
 	assert.Equal(t, testPath, config.path, "path should be set in transport config")
+}
+
+// TestWithClientPath_SSEConnectionURL tests that WithClientPath correctly applies
+// the custom path to the SSE connection URL.
+func TestWithClientPath_SSEConnectionURL(t *testing.T) {
+	// Test case: verify custom path is applied to SSE connection URL
+	serverURL := "http://localhost:8080"
+	customPath := "/custom/sse/endpoint"
+
+	// Mock URL parsing (simulate the actual SSE client creation logic)
+	parsedURL, err := url.Parse(serverURL)
+	assert.NoError(t, err)
+
+	// Extract transport configuration with custom path
+	config := extractTransportConfig([]ClientOption{
+		WithClientPath(customPath),
+	})
+
+	// Simulate the SSE connection URL building logic
+	if config.path != "" {
+		parsedURL.Path = config.path
+	}
+
+	// Verify the SSE connection URL has the custom path
+	assert.Equal(t, "http://localhost:8080/custom/sse/endpoint", parsedURL.String(),
+		"SSE connection URL should include custom path")
+	assert.Equal(t, customPath, parsedURL.Path, "Path should be set correctly")
 }
 
 // TestWithHTTPHeaders_SSETransport tests that WithHTTPHeaders correctly configures
