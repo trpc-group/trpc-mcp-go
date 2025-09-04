@@ -30,14 +30,14 @@ func TestStdioServer_UnregisterTools(t *testing.T) {
 	server.RegisterTool(tool3, handler)
 
 	// Verify all tools are registered
-	tools := server.toolManager.getTools("")
+	tools := server.toolManager.getTools()
 	assert.Len(t, tools, 3)
 
 	// Test unregistering multiple existing tools
 	err := server.UnregisterTools("test-tool-1", "test-tool-3")
 	assert.NoError(t, err)
 
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 1)
 
 	// Check that only tool2 remains
@@ -63,7 +63,7 @@ func TestStdioServer_UnregisterTools(t *testing.T) {
 	err = server.UnregisterTools("test-tool-1", "non-existent", "test-tool-2")
 	assert.NoError(t, err) // Should succeed if at least one tool is unregistered
 
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 0)
 }
 
@@ -77,28 +77,28 @@ func TestStdioServer_RegisterAndUnregisterTool(t *testing.T) {
 	}
 
 	// Initially no tools
-	tools := server.toolManager.getTools("")
+	tools := server.toolManager.getTools()
 	assert.Len(t, tools, 0)
 
 	// Register tool
 	server.RegisterTool(tool, handler)
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 1)
 
 	// Unregister tool
 	err := server.UnregisterTools("dynamic-tool")
 	assert.NoError(t, err)
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 0)
 
 	// Re-register same tool
 	server.RegisterTool(tool, handler)
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 1)
 
 	// Unregister again
 	err = server.UnregisterTools("dynamic-tool")
 	assert.NoError(t, err)
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 0)
 }

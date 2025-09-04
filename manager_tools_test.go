@@ -217,7 +217,7 @@ func TestToolManager_ConcurrentRegisterUnregister(t *testing.T) {
 	wg.Wait()
 
 	// Verify final state
-	tools := manager.getTools("")
+	tools := manager.getTools()
 	assert.Len(t, tools, 0, "All tools should be unregistered")
 }
 
@@ -320,7 +320,7 @@ func TestToolManager_ConcurrentGetTools(t *testing.T) {
 	getWorker := func(workerID int) {
 		defer wg.Done()
 
-		tools := manager.getTools("")
+		tools := manager.getTools()
 		toolNames := make([]string, len(tools))
 		for i, tool := range tools {
 			toolNames[i] = tool.Name
@@ -372,7 +372,7 @@ func TestToolManager_GetTools(t *testing.T) {
 	manager := newToolManager()
 
 	// Test empty list
-	tools := manager.getTools("")
+	tools := manager.getTools()
 	assert.Empty(t, tools)
 
 	// Register multiple tools
@@ -390,7 +390,7 @@ func TestToolManager_GetTools(t *testing.T) {
 	})
 
 	// Test getting tool list
-	tools = manager.getTools("")
+	tools = manager.getTools()
 	assert.Len(t, tools, 2)
 
 	// Verify tool information
