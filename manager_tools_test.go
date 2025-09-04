@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -405,12 +406,12 @@ func TestToolManager_GetTools(t *testing.T) {
 	assert.Equal(t, "tool1", tool1Info.Name)
 	assert.Equal(t, "Tool 1", tool1Info.Description)
 	assert.NotNil(t, tool1Info.InputSchema)
-	assert.Equal(t, "object", tool1Info.InputSchema.Type)
+	assert.Equal(t, openapi3.Types{openapi3.TypeObject}, *tool1Info.InputSchema.Type)
 
 	assert.Equal(t, "tool2", tool2Info.Name)
 	assert.Equal(t, "Tool 2", tool2Info.Description)
 	assert.NotNil(t, tool2Info.InputSchema)
-	assert.Equal(t, "object", tool2Info.InputSchema.Type)
+	assert.Equal(t, openapi3.Types{openapi3.TypeObject}, *tool2Info.InputSchema.Type)
 	assert.Empty(t, tool2Info.InputSchema.Properties)
 }
 
