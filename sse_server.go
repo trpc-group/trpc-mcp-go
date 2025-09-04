@@ -547,7 +547,7 @@ func (s *SSEServer) handleNotificationMessage(ctx context.Context, rawMessage js
 	// Handle notification asynchronously.
 	go func() {
 		// Create a context that will not be canceled due to HTTP connection closure.
-		detachedCtx := context.WithoutCancel(ctx)
+		detachedCtx := contextWithoutCancel(ctx)
 
 		// Process notification (currently just log it, but can be extended).
 		if err := s.handleNotification(detachedCtx, &notification, session); err != nil {
@@ -723,7 +723,7 @@ func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSessio
 // processRequestAsync processes the request asynchronously.
 func (s *SSEServer) processRequestAsync(ctx context.Context, request *JSONRPCRequest, session *sseSession) {
 	// Create a context that will not be canceled due to HTTP connection closure.
-	detachedCtx := context.WithoutCancel(ctx)
+	detachedCtx := contextWithoutCancel(ctx)
 
 	// Check if this is a response to our roots/list request.
 	if s.isRootsListResponse(request) {

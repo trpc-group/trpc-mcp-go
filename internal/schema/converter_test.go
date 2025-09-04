@@ -386,7 +386,7 @@ func TestConvertStructToOpenAPISchema_EmptyStruct(t *testing.T) {
 func TestConvertStructToOpenAPISchema_UnexportedFields(t *testing.T) {
 	type StructWithUnexported struct {
 		Public  string `json:"public"`
-		private string `json:"private"` // Should be ignored
+		private string // Should be ignored
 	}
 
 	schema := ConvertStructToOpenAPISchema[StructWithUnexported]()
