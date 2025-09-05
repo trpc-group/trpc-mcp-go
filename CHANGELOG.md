@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.5 (2025-09-05)
+
+### Features
+- feat: downgrade Go version from 1.22.5 to 1.20 for broader compatibility (#70)
+- feat: add get tools methods for server-side (#67)
+- feat: implement MCP ToolAnnotations support (#66)
+- refactor: reorganize examples with transport-based structure (#65)
+- feat: add output schema and structured content support (#62)
+
+### Fixes
+- fix: ensure client options properly configure SSE transport (#71)
+- fix: static check warning (#49)
+- fix: example (#50)
+- fix: default value for WithClientGetSSEEnabled (#51)
+
 ## 0.0.4 (2025-08-29)
 
 - sse: remove SSE response size limit (#63)
