@@ -70,6 +70,11 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 	config := extractTransportConfig(options)
 	config.serverURL = parsedURL
 
+	// Apply custom path to server URL if specified.
+	if config.path != "" {
+		parsedURL.Path = config.path
+	}
+
 	// Create client options with standard options.
 	clientOptions := []ClientOption{
 		WithCustomTransport(func(c *Client) {
