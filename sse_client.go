@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // sseClientTransport implements SSE-based MCP transport following the 2024-11-05 spec.
@@ -45,6 +47,7 @@ type sseClientTransport struct {
 
 	started      atomic.Bool   // Flag indicating if transport is started.
 	closed       atomic.Bool   // Flag indicating if transport is closed.
+	retryConfig  *retry.Config // Retry configuration for requests.
 	endpointChan chan struct{} // Channel to signal when endpoint is received.
 	logger       Logger        // Logger for this client transport.
 
@@ -66,6 +69,11 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 	// extract transport configuration.
 	config := extractTransportConfig(options)
 	config.serverURL = parsedURL
+
+	// Apply custom path to server URL if specified.
+	if config.path != "" {
+		parsedURL.Path = config.path
+	}
 
 	// Create client options with standard options.
 	clientOptions := []ClientOption{
@@ -204,14 +212,29 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
+	br := bufio.NewReader(body)
 	var eventType, eventData string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				// Process any pending event before exit.
+				if eventType != "" && eventData != "" {
+					t.handleEvent(eventType, eventData)
+				}
+				break
+			}
+			if t.logger != nil {
+				t.logger.Errorf("Error reading SSE stream: %v", err)
+			}
+			break
+		}
 
-		// Empty line signals the end of an event.
+		// Remove only newline markers.
+		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
+			// Empty line means end of event.
 			if eventType != "" && eventData != "" {
 				t.handleEvent(eventType, eventData)
 				eventType, eventData = "", ""
@@ -224,12 +247,6 @@ func (t *sseClientTransport) readSSE(body io.ReadCloser) {
 			eventType = strings.TrimSpace(line[6:])
 		} else if strings.HasPrefix(line, "data:") {
 			eventData = strings.TrimSpace(line[5:])
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		if t.logger != nil {
-			t.logger.Errorf("Error reading SSE stream: %v", err)
 		}
 	}
 
@@ -482,8 +499,38 @@ func (t *sseClientTransport) sendResponseMessage(response interface{}) {
 	}
 }
 
-// sendRequest sends a request and waits for a response.
+// setRetryConfig sets the retry configuration for this transport
+func (t *sseClientTransport) setRetryConfig(config *retry.Config) {
+	t.retryConfig = config
+}
+
+// sendRequest sends a request and waits for a response with retry support.
 func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+	// If no retry config, use original implementation
+	if t.retryConfig == nil {
+		return t.sendRequestInternal(ctx, req)
+	}
+
+	// Define the operation to be retried
+	var result *json.RawMessage
+	operation := func() error {
+		var err error
+		result, err = t.sendRequestInternal(ctx, req)
+		return err
+	}
+
+	// Execute with retry
+	operationName := fmt.Sprintf("sendRequest(%s)", req.Request.Method)
+	err := retry.Execute(ctx, operation, t.retryConfig, operationName)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// sendRequestInternal is the original implementation without retry logic
+func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	// Auto-start the transport if not already started.
 	if !t.started.Load() {
 		return nil, errors.New("transport not started")

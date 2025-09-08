@@ -547,7 +547,7 @@ func (s *SSEServer) handleNotificationMessage(ctx context.Context, rawMessage js
 	// Handle notification asynchronously.
 	go func() {
 		// Create a context that will not be canceled due to HTTP connection closure.
-		detachedCtx := context.WithoutCancel(ctx)
+		detachedCtx := contextWithoutCancel(ctx)
 
 		// Process notification (currently just log it, but can be extended).
 		if err := s.handleNotification(detachedCtx, &notification, session); err != nil {
@@ -723,7 +723,7 @@ func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSessio
 // processRequestAsync processes the request asynchronously.
 func (s *SSEServer) processRequestAsync(ctx context.Context, request *JSONRPCRequest, session *sseSession) {
 	// Create a context that will not be canceled due to HTTP connection closure.
-	detachedCtx := context.WithoutCancel(ctx)
+	detachedCtx := contextWithoutCancel(ctx)
 
 	// Check if this is a response to our roots/list request.
 	if s.isRootsListResponse(request) {
@@ -1047,6 +1047,34 @@ func (s *SSEServer) RegisterTool(tool *Tool, handler toolHandler) {
 		return
 	}
 	s.toolManager.registerTool(tool, handler)
+}
+
+// GetTool retrieves a registered tool by name.
+// Returns the tool and true if found, otherwise returns zero value and false.
+// The returned tool is a copy to prevent accidental modification.
+func (s *SSEServer) GetTool(name string) (Tool, bool) {
+	if name == "" {
+		return Tool{}, false
+	}
+
+	tool, exists := s.toolManager.getTool(name)
+	if !exists {
+		return Tool{}, false
+	}
+	// Return a copy to prevent modification of the original
+	return *tool, true
+}
+
+// GetTools returns a copy of all registered tools.
+// The returned slice contains copies of the tools to prevent accidental modification.
+func (s *SSEServer) GetTools() []Tool {
+	toolPtrs := s.toolManager.getTools()
+
+	tools := make([]Tool, 0, len(toolPtrs))
+	for _, toolPtr := range toolPtrs {
+		tools = append(tools, *toolPtr) // getTools() guarantees non-nil
+	}
+	return tools
 }
 
 // UnregisterTools removes multiple tools by names and returns an error if no tools were unregistered.

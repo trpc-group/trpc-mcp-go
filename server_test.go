@@ -320,14 +320,14 @@ func TestServer_UnregisterTools(t *testing.T) {
 	server.RegisterTool(tool3, handler)
 
 	// Verify all tools are registered
-	tools := server.toolManager.getTools("")
+	tools := server.toolManager.getTools()
 	assert.Len(t, tools, 3)
 
 	// Test unregistering multiple existing tools
 	err := server.UnregisterTools("test-tool-1", "test-tool-3")
 	assert.NoError(t, err)
 
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 1)
 
 	// Check that only tool2 remains
@@ -353,6 +353,6 @@ func TestServer_UnregisterTools(t *testing.T) {
 	err = server.UnregisterTools("test-tool-1", "non-existent", "test-tool-2")
 	assert.NoError(t, err) // Should succeed if at least one tool is unregistered
 
-	tools = server.toolManager.getTools("")
+	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 0)
 }

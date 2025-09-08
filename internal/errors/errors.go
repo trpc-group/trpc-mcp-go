@@ -7,7 +7,9 @@
 // Package mcperrors defines common error types and constants
 package errors
 
-import "errors"
+import (
+	"errors"
+)
 
 // Common errors
 var (

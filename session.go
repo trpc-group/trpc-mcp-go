@@ -112,3 +112,34 @@ func setServerToContext(ctx context.Context, server interface{}) context.Context
 func GetServerFromContext(ctx context.Context) interface{} {
 	return ctx.Value(serverContextKey{})
 }
+
+// contextWithoutCancel creates a context that inherits values from the parent context
+// but will not be canceled when the parent context is canceled.
+// This is a Go 1.20 compatible implementation of context.WithoutCancel.
+func contextWithoutCancel(parent context.Context) context.Context {
+	ctx := context.Background()
+
+	// Copy key context values that are needed for MCP operations
+
+	// 1. Session information (most critical)
+	if session, ok := GetSessionFromContext(parent); ok {
+		ctx = setSessionToContext(ctx, session)
+	}
+
+	// 2. Server instance
+	if server := GetServerFromContext(parent); server != nil {
+		ctx = setServerToContext(ctx, server)
+	}
+
+	// 3. Client session
+	if clientSession := ClientSessionFromContext(parent); clientSession != nil {
+		ctx = withClientSession(ctx, clientSession)
+	}
+
+	// 4. Notification sender
+	if sender, ok := GetNotificationSender(parent); ok {
+		ctx = context.WithValue(ctx, notificationSenderKey, sender)
+	}
+
+	return ctx
+}

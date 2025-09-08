@@ -140,7 +140,7 @@ func (m *toolManager) unregisterTools(names ...string) int {
 }
 
 // getTools gets all registered tools
-func (m *toolManager) getTools(protocolVersion string) []*Tool {
+func (m *toolManager) getTools() []*Tool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -161,7 +161,7 @@ func (m *toolManager) handleListTools(
 	session Session,
 ) (JSONRPCMessage, error) {
 	// Get all tools
-	toolPtrs := m.getTools("")
+	toolPtrs := m.getTools()
 
 	// Apply filter if available.
 	if m.toolListFilter != nil {

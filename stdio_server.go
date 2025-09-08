@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -137,6 +136,34 @@ func (s *StdioServer) RegisterTool(tool *Tool, handler toolHandler) {
 	}
 	s.toolManager.registerTool(tool, handler)
 	s.logger.Debugf("Registered tool: %s", tool.Name)
+}
+
+// GetTool retrieves a registered tool by name.
+// Returns the tool and true if found, otherwise returns zero value and false.
+// The returned tool is a copy to prevent accidental modification.
+func (s *StdioServer) GetTool(name string) (Tool, bool) {
+	if name == "" {
+		return Tool{}, false
+	}
+
+	tool, exists := s.toolManager.getTool(name)
+	if !exists {
+		return Tool{}, false
+	}
+	// Return a copy to prevent modification of the original
+	return *tool, true
+}
+
+// GetTools returns a copy of all registered tools.
+// The returned slice contains copies of the tools to prevent accidental modification.
+func (s *StdioServer) GetTools() []Tool {
+	toolPtrs := s.toolManager.getTools()
+
+	tools := make([]Tool, 0, len(toolPtrs))
+	for _, toolPtr := range toolPtrs {
+		tools = append(tools, *toolPtr) // getTools() guarantees non-nil
+	}
+	return tools
 }
 
 // UnregisterTools removes multiple tools by names and logs the operation.
@@ -509,11 +536,6 @@ func (s *stdioTransport) writeResponse(response interface{}, writer io.Writer) e
 			// Sync may fail for pipes, try to ignore.
 			s.logger.Debugf("writeResponse: Sync failed (expected for pipes): %v\n", err)
 		}
-
-		// Also try to flush the file descriptor directly.
-		if err := syscall.Fsync(int(file.Fd())); err != nil {
-			s.logger.Debugf("writeResponse: Fsync failed (expected for pipes): %v\n", err)
-		}
 	}
 
 	// For any writer, try to flush if it has a Flush method.
@@ -560,7 +582,7 @@ type stdioServerInternal struct {
 func (s *stdioServerInternal) HandleRequest(ctx context.Context, rawMessage json.RawMessage) (interface{}, error) {
 	var request JSONRPCRequest
 	if err := json.Unmarshal(rawMessage, &request); err != nil {
-		return newJSONRPCErrorResponse(nil, -32700, "Parse error", nil), nil
+		return newJSONRPCErrorResponse(nil, ErrCodeParse, "Parse error", nil), nil
 	}
 
 	s.parent.logger.Debugf("Handling request: %s (ID: %v)", request.Method, request.ID)
@@ -589,11 +611,11 @@ func (s *stdioServerInternal) HandleRequest(ctx context.Context, rawMessage json
 	case MethodPing:
 		return s.handlePing(ctx, request)
 	default:
-		return newJSONRPCErrorResponse(request.ID, -32601, "Method not found", nil), nil
+		return newJSONRPCErrorResponse(request.ID, ErrCodeMethodNotFound, "Method not found", nil), nil
 	}
 
 	if err != nil {
-		return newJSONRPCErrorResponse(request.ID, -32603, "Internal error", err.Error()), nil
+		return newJSONRPCErrorResponse(request.ID, ErrCodeInternal, "Internal error", err.Error()), nil
 	}
 
 	// Check if result is already a JSON-RPC response or error (has jsonrpc field).
