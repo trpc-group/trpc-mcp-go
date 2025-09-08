@@ -582,7 +582,7 @@ type stdioServerInternal struct {
 func (s *stdioServerInternal) HandleRequest(ctx context.Context, rawMessage json.RawMessage) (interface{}, error) {
 	var request JSONRPCRequest
 	if err := json.Unmarshal(rawMessage, &request); err != nil {
-		return newJSONRPCErrorResponse(nil, -32700, "Parse error", nil), nil
+		return newJSONRPCErrorResponse(nil, ErrCodeParse, "Parse error", nil), nil
 	}
 
 	s.parent.logger.Debugf("Handling request: %s (ID: %v)", request.Method, request.ID)
@@ -611,11 +611,11 @@ func (s *stdioServerInternal) HandleRequest(ctx context.Context, rawMessage json
 	case MethodPing:
 		return s.handlePing(ctx, request)
 	default:
-		return newJSONRPCErrorResponse(request.ID, -32601, "Method not found", nil), nil
+		return newJSONRPCErrorResponse(request.ID, ErrCodeMethodNotFound, "Method not found", nil), nil
 	}
 
 	if err != nil {
-		return newJSONRPCErrorResponse(request.ID, -32603, "Internal error", err.Error()), nil
+		return newJSONRPCErrorResponse(request.ID, ErrCodeInternal, "Internal error", err.Error()), nil
 	}
 
 	// Check if result is already a JSON-RPC response or error (has jsonrpc field).

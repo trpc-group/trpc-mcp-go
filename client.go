@@ -14,7 +14,8 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
-
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/client"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
@@ -117,6 +118,15 @@ type Client struct {
 	state            State                  // State.
 	transportOptions []transportOption
 
+	// OAuth provider
+	oauthProvider client.OAuthClientProvider
+	// OAuth token management
+	accessToken  string
+	refreshToken string
+
+	// OAuth flow configuration
+	authFlowConfig *AuthFlowConfig
+
 	// transport configuration.
 	transportConfig *transportConfig
 
@@ -159,6 +169,30 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 		option(client)
 	}
 
+	// Handle OAuth authentication if configured
+	if client.oauthProvider != nil {
+		if tokens, err := client.oauthProvider.Tokens(); err == nil && tokens != nil {
+			client.accessToken = tokens.AccessToken
+			if tokens.RefreshToken != nil {
+				client.refreshToken = *tokens.RefreshToken
+			}
+			if client.accessToken != "" {
+				// Ensure a headers map exists
+				if client.transportConfig.httpHeaders == nil {
+					client.transportConfig.httpHeaders = make(http.Header)
+				}
+				client.transportConfig.httpHeaders.Set("Authorization", "Bearer "+client.accessToken)
+				// Also push into transportOptions so the streamable transport sees it
+				client.transportOptions = append(client.transportOptions, withTransportHTTPHeaders(client.transportConfig.httpHeaders))
+			}
+		} else if err != nil {
+			// Optional: Surface a warning via logger if available
+			if client.logger != nil {
+				client.logger.Warnf("OAuth provider returned no tokens at client initialization: %v", err)
+			}
+		}
+	}
+
 	// Create transport layer if not previously set via options.
 	if client.transport == nil {
 		client.transport = newStreamableHTTPClientTransport(client.transportConfig, client.transportOptions...)
@@ -175,6 +209,38 @@ func NewClient(serverURL string, clientInfo Implementation, options ...ClientOpt
 	}
 
 	return client, nil
+}
+
+// AuthFlowConfig configures OAuth 2.0 authentication flow
+type AuthFlowConfig struct {
+	// ServerURL is the OAuth authorization server URL (required)
+	ServerURL string
+
+	// ClientMetadata contains OAuth client configuration
+	ClientMetadata auth.OAuthClientMetadata
+
+	// RedirectURL is the OAuth redirect URI (required)
+	RedirectURL string
+
+	// OnRedirect handles the authorization redirect (required)
+	// This function should redirect the user to the authorization URL
+	OnRedirect func(*url.URL) error
+
+	// Scope defines the requested access permissions (optional)
+	Scope *string
+
+	// CustomFetchFunc allows custom HTTP client behavior (optional)
+	CustomFetchFunc auth.FetchFunc
+
+	// ResourceMetadataURL for discovering protected resource metadata (optional)
+	ResourceMetadataURL *string
+
+	// AuthorizationCode can be provided if you already have one (optional)
+	// This is useful for handling the redirect callback
+	AuthorizationCode *string
+
+	// State for CSRF protection (optional)
+	State *string
 }
 
 // transportConfig includes transport layer configuration.
@@ -198,6 +264,8 @@ type transportConfig struct {
 	// These options are typically not used by the default handler, but may be used by custom
 	// implementations that replace the default NewHTTPReqHandler function for extensibility.
 	httpReqHandlerOptions []HTTPReqHandlerOption
+
+	oauthProvider client.OAuthClientProvider
 }
 
 // newDefaultTransportConfig creates a default transport configuration.
@@ -210,6 +278,7 @@ func newDefaultTransportConfig() *transportConfig {
 		httpReqHandlerOptions: []HTTPReqHandlerOption{},
 		enableGetSSE:          true,
 		path:                  "",
+		oauthProvider:         nil,
 	}
 }
 
@@ -322,6 +391,18 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 	// Check if already initialized.
 	if c.initialized {
 		return nil, errors.ErrAlreadyInitialized
+	}
+
+	// If auth flow is configured, execute it first
+	if c.authFlowConfig != nil {
+		if err := c.executeAuthFlow(ctx); err != nil {
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+
+		// Ensure transport uses the latest token
+		if err := c.updateClientTokens(); err != nil {
+			return nil, fmt.Errorf("failed to update tokens: %w", err)
+		}
 	}
 
 	// Create request.
@@ -666,4 +747,372 @@ func (c *Client) SendRootsListChangedNotification(ctx context.Context) error {
 
 func isZeroStruct(x interface{}) bool {
 	return reflect.ValueOf(x).IsZero()
+}
+
+func WithOAuthClientProvider(p client.OAuthClientProvider) ClientOption {
+	return func(c *Client) {
+		// 1) 存一份在 Client（后续取初始 token / 刷新等会用到）
+		c.oauthProvider = p
+		// 2) 也下发给 transport（与 a2a 同步，走 transportOptions 管线）
+		c.transportOptions = append(c.transportOptions, withTransportOAuthProvider(p))
+	}
+}
+
+// WithAuthFlow creates a client option that configures and executes the complete OAuth flow
+func WithAuthFlow(config AuthFlowConfig) ClientOption {
+	return func(c *Client) {
+		// Validate required configuration
+		if config.ServerURL == "" {
+			panic("AuthFlowConfig.ServerURL is required")
+		}
+		if config.RedirectURL == "" {
+			panic("AuthFlowConfig.RedirectURL is required")
+		}
+		if config.OnRedirect == nil {
+			panic("AuthFlowConfig.OnRedirect is required")
+		}
+
+		// Store config for later use
+		c.authFlowConfig = &config
+
+		// Create internal OAuth provider
+		provider := client.NewInMemoryOAuthClientProvider(
+			config.RedirectURL,
+			config.ClientMetadata,
+			config.OnRedirect,
+		)
+
+		c.oauthProvider = provider
+		c.transportConfig.oauthProvider = provider
+		c.transportOptions = append(c.transportOptions, withTransportOAuthProvider(provider))
+
+	}
+}
+
+// executeAuthFlow runs the complete OAuth authentication flow using internal methods
+func (c *Client) executeAuthFlow(ctx context.Context) error {
+	if c.authFlowConfig == nil {
+		return fmt.Errorf("auth flow not configured")
+	}
+
+	// Build auth options for internal flow
+	authOptions := auth.AuthOptions{
+		ServerUrl:           c.authFlowConfig.ServerURL,
+		Scope:               c.authFlowConfig.Scope,
+		FetchFn:             c.authFlowConfig.CustomFetchFunc,
+		ResourceMetadataUrl: c.authFlowConfig.ResourceMetadataURL,
+	}
+
+	// Execute the complete internal authentication flow
+	result, err := c.authInternal(authOptions)
+	if err != nil {
+		return fmt.Errorf("OAuth flow failed: %w", err)
+	}
+
+	// Handle authentication result
+	return c.handleAuthResult(result)
+}
+
+// authInternal orchestrates the complete OAuth flow using internal methods
+func (c *Client) authInternal(options auth.AuthOptions) (*client.AuthResult, error) {
+	// Discover protected resource metadata (if available)
+	var resourceMetadata *auth.OAuthProtectedResourceMetadata
+	var authorizationServerUrl string
+
+	metadata, err := c.discoverProtectedResource(options.ServerUrl, options)
+	if err == nil {
+		resourceMetadata = metadata
+		if len(resourceMetadata.AuthorizationServers) > 0 {
+			authorizationServerUrl = resourceMetadata.AuthorizationServers[0]
+		}
+	}
+
+	if authorizationServerUrl == "" {
+		authorizationServerUrl = options.ServerUrl
+	}
+
+	// Select resource URL
+	resource, err := c.selectResourceURL(options.ServerUrl, resourceMetadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select resource URL: %w", err)
+	}
+
+	// Discover authorization server metadata
+	serverMetadata, err := c.discoverAuthServer(authorizationServerUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover authorization server: %w", err)
+	}
+
+	// Handle client registration if needed
+	clientInfo, err := c.handleClientRegistration(authorizationServerUrl, serverMetadata, options)
+	if err != nil {
+		return nil, fmt.Errorf("client registration failed: %w", err)
+	}
+
+	// Try token refresh if refresh token exists
+	if result, err := c.tryTokenRefresh(authorizationServerUrl, serverMetadata, clientInfo, resource, options); err == nil {
+		return result, nil
+	}
+
+	// Exchange the authorization code for a token
+	if options.AuthorizationCode != nil && *options.AuthorizationCode != "" {
+		cv, err := c.oauthProvider.CodeVerifier()
+		if err != nil || cv == "" {
+			return nil, fmt.Errorf("missing code_verifier: %w", err)
+		}
+
+		var addClientAuth func(http.Header, url.Values, string) error
+		if ap, ok := c.oauthProvider.(client.OAuthClientAuthProvider); ok {
+			addClientAuth = ap.AddClientAuthentication
+		}
+
+		tokens, err := client.ExchangeAuthorization(authorizationServerUrl, client.ExchangeAuthorizationOptions{
+			Metadata:                serverMetadata,
+			ClientInformation:       clientInfo,
+			AuthorizationCode:       *options.AuthorizationCode,
+			CodeVerifier:            cv,
+			RedirectURI:             c.oauthProvider.RedirectURL(),
+			Resource:                resource,
+			AddClientAuthentication: addClientAuth,
+			FetchFn:                 options.FetchFn,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := c.oauthProvider.SaveTokens(*tokens); err != nil {
+			return nil, fmt.Errorf("failed to save tokens: %w", err)
+		}
+		res := client.AuthResultAuthorized
+		return &res, nil
+	}
+
+	// Start authorization flow
+	return c.startAuthorizationFlow(authorizationServerUrl, serverMetadata, clientInfo, resource, options)
+}
+
+// discoverProtectedResource discovers OAuth protected resource metadata
+func (c *Client) discoverProtectedResource(serverUrl string, options auth.AuthOptions) (*auth.OAuthProtectedResourceMetadata, error) {
+	discoveryOptions := &auth.DiscoveryOptions{
+		ResourceMetadataUrl: options.ResourceMetadataUrl,
+	}
+
+	return client.DiscoverOAuthProtectedResourceMetadata(serverUrl, discoveryOptions, options.FetchFn)
+}
+
+// discoverAuthServer discovers authorization server metadata
+func (c *Client) discoverAuthServer(authServerUrl string) (auth.AuthorizationServerMetadata, error) {
+	return client.DiscoverAuthorizationServerMetadata(context.Background(), authServerUrl, nil)
+}
+
+// handleClientRegistration handles dynamic client registration if needed
+func (c *Client) handleClientRegistration(authServerUrl string, serverMetadata auth.AuthorizationServerMetadata, options auth.AuthOptions) (*auth.OAuthClientInformation, error) {
+	clientInfo := c.oauthProvider.ClientInformation()
+
+	if clientInfo == nil {
+		// Need to register client
+		if _, ok := c.oauthProvider.(client.OAuthClientInfoProvider); !ok {
+			return nil, fmt.Errorf("OAuth client information must be saveable for dynamic registration")
+		}
+
+		fullInfo, err := client.RegisterClient(context.Background(), authServerUrl, client.RegisterClientOptions{
+			Metadata:       serverMetadata,
+			ClientMetadata: c.oauthProvider.ClientMetadata(),
+			FetchFn:        options.FetchFn,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to register client: %w", err)
+		}
+
+		if clientInfoProvider, ok := c.oauthProvider.(client.OAuthClientInfoProvider); ok {
+			if err := clientInfoProvider.SaveClientInformation(*fullInfo); err != nil {
+				return nil, fmt.Errorf("failed to save client information: %w", err)
+			}
+		}
+
+		clientInfo = &auth.OAuthClientInformation{
+			ClientID:     fullInfo.ClientID,
+			ClientSecret: fullInfo.ClientSecret,
+		}
+	}
+
+	return clientInfo, nil
+}
+
+// selectResourceURL selects the appropriate resource URL
+func (c *Client) selectResourceURL(serverUrl string, resourceMetadata *auth.OAuthProtectedResourceMetadata) (*url.URL, error) {
+	defaultResource, err := auth.ResourceURLFromServerURL(serverUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use custom validator if available
+	if validator, ok := c.oauthProvider.(client.OAuthResourceValidator); ok {
+		return validator.ValidateResourceURL(defaultResource, resourceMetadata)
+	}
+
+	// Include resource param only when metadata exists
+	if resourceMetadata == nil {
+		return nil, nil
+	}
+
+	// Check metadata resource compatibility
+	allowed, err := auth.CheckResourceAllowed(auth.CheckResourceAllowedParams{
+		RequestedResource:  defaultResource,
+		ConfiguredResource: resourceMetadata.Resource,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate resource: %w", err)
+	}
+	if !allowed {
+		return nil, fmt.Errorf("protected resource mismatch")
+	}
+
+	return url.Parse(resourceMetadata.Resource)
+}
+
+// tryTokenRefresh attempts to refresh existing tokens
+func (c *Client) tryTokenRefresh(authServerUrl string, serverMetadata auth.AuthorizationServerMetadata, clientInfo *auth.OAuthClientInformation, resource *url.URL, options auth.AuthOptions) (*client.AuthResult, error) {
+	tokens, err := c.oauthProvider.Tokens()
+	if err != nil || tokens == nil || tokens.RefreshToken == nil || *tokens.RefreshToken == "" {
+		return nil, fmt.Errorf("no refresh token available")
+	}
+
+	var addClientAuth func(http.Header, url.Values, string) error
+	if authProvider, ok := c.oauthProvider.(client.OAuthClientAuthProvider); ok {
+		addClientAuth = authProvider.AddClientAuthentication
+	}
+
+	newTokens, err := client.RefreshAuthorization(authServerUrl, client.RefreshAuthorizationOptions{
+		Metadata:                serverMetadata,
+		ClientInformation:       clientInfo,
+		RefreshToken:            *tokens.RefreshToken,
+		Resource:                resource,
+		AddClientAuthentication: addClientAuth,
+		FetchFn:                 options.FetchFn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.oauthProvider.SaveTokens(*newTokens); err != nil {
+		return nil, fmt.Errorf("failed to save refreshed tokens: %w", err)
+	}
+
+	result := client.AuthResultAuthorized
+	return &result, nil
+}
+
+// startAuthorizationFlow starts the authorization code flow
+func (c *Client) startAuthorizationFlow(authServerUrl string, serverMetadata auth.AuthorizationServerMetadata, clientInfo *auth.OAuthClientInformation, resource *url.URL, options auth.AuthOptions) (*client.AuthResult, error) {
+	var state *string
+	if c.authFlowConfig.State != nil {
+		state = c.authFlowConfig.State
+	} else if stateProvider, ok := c.oauthProvider.(client.OAuthStateProvider); ok {
+		stateValue, err := stateProvider.State()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get state: %w", err)
+		}
+		state = &stateValue
+	}
+
+	scope := options.Scope
+	if scope == nil {
+		clientMetadata := c.oauthProvider.ClientMetadata()
+		if clientMetadata.Scope != nil {
+			scope = clientMetadata.Scope
+		}
+	}
+
+	authResult, err := client.StartAuthorization(authServerUrl, client.StartAuthorizationOptions{
+		Metadata:          serverMetadata,
+		ClientInformation: *clientInfo,
+		State:             state,
+		RedirectURL:       c.oauthProvider.RedirectURL(),
+		Scope:             scope,
+		Resource:          resource,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start authorization: %w", err)
+	}
+
+	if err := c.oauthProvider.SaveCodeVerifier(authResult.CodeVerifier); err != nil {
+		return nil, fmt.Errorf("failed to save code verifier: %w", err)
+	}
+
+	if err := c.oauthProvider.RedirectToAuthorization(authResult.AuthorizationURL); err != nil {
+		return nil, fmt.Errorf("failed to redirect to authorization: %w", err)
+	}
+
+	result := client.AuthResultRedirect
+	return &result, nil
+}
+
+// handleAuthResult processes the authentication result
+func (c *Client) handleAuthResult(result *client.AuthResult) error {
+	switch *result {
+	case client.AuthResultAuthorized:
+		return c.updateClientTokens()
+	case client.AuthResultRedirect:
+		// User needs to complete authorization, this is normal
+		return nil
+	default:
+		return fmt.Errorf("unknown authentication result: %s", *result)
+	}
+}
+
+// updateClientTokens updates HTTP headers with new tokens
+func (c *Client) updateClientTokens() error {
+	tokens, err := c.oauthProvider.Tokens()
+	if err != nil {
+		return fmt.Errorf("failed to get tokens: %w", err)
+	}
+
+	if tokens != nil && tokens.AccessToken != "" {
+		c.accessToken = tokens.AccessToken
+		if tokens.RefreshToken != nil {
+			c.refreshToken = *tokens.RefreshToken
+		}
+
+		// Update HTTP headers
+		if c.transportConfig.httpHeaders == nil {
+			c.transportConfig.httpHeaders = make(http.Header)
+		}
+		c.transportConfig.httpHeaders.Set("Authorization", "Bearer "+c.accessToken)
+
+		// Update existing transport
+		if c.transport != nil {
+			if streamableTransport, ok := c.transport.(*streamableHTTPClientTransport); ok {
+				if streamableTransport.httpHeaders == nil {
+					streamableTransport.httpHeaders = make(http.Header)
+				}
+				streamableTransport.httpHeaders.Set("Authorization", "Bearer "+c.accessToken)
+			}
+		}
+	}
+
+	return nil
+}
+
+// CompleteAuthFlow completes the OAuth flow with authorization code
+func (c *Client) CompleteAuthFlow(ctx context.Context, authorizationCode string) error {
+	if c.authFlowConfig == nil {
+		return fmt.Errorf("auth flow not configured")
+	}
+
+	// Set the authorization code in options
+	authOptions := auth.AuthOptions{
+		ServerUrl:           c.authFlowConfig.ServerURL,
+		Scope:               c.authFlowConfig.Scope,
+		FetchFn:             c.authFlowConfig.CustomFetchFunc,
+		ResourceMetadataUrl: c.authFlowConfig.ResourceMetadataURL,
+		AuthorizationCode:   &authorizationCode,
+	}
+
+	// Execute the flow with the authorization code
+	result, err := c.authInternal(authOptions)
+	if err != nil {
+		return fmt.Errorf("failed to complete auth flow: %w", err)
+	}
+
+	return c.handleAuthResult(result)
 }

@@ -11,10 +11,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/server"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/sseutil"
 )
@@ -73,6 +75,18 @@ type httpServerHandler struct {
 
 	// Response manager for server-to-client requests.
 	responseManager *responseManager
+
+	// Enable bearer auth middleware if true
+	authEnabled bool
+
+	// Auth middleware wrapper applied if authEnabled
+	authWrap func(http.Handler) http.Handler
+
+	// Enable audit logging if true
+	auditEnabled bool
+
+	// Audit middleware wrapper applied if auditEnabled
+	auditWrap func(http.Handler) http.Handler
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -89,6 +103,8 @@ type getSSEConnection struct {
 	// Event ID generator, reuses existing sseResponder
 	sseResponder *sseResponder
 }
+
+// ServerAuthConfig and NewAuthHTTPContextFunc were removed (replaced by RequireBearerAuth middleware)
 
 // newHTTPServerHandler creates an HTTP server handler
 func newHTTPServerHandler(handler requestHandler, serverPath string, options ...func(*httpServerHandler)) *httpServerHandler {
@@ -195,29 +211,49 @@ func withTransportHTTPContextFuncs(funcs []HTTPContextFunc) func(*httpServerHand
 
 // ServeHTTP implements the http.Handler interface
 func (h *httpServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.isValidPath(r.URL.Path) {
-		if h.serverPath == "" {
-			http.Error(w, fmt.Sprintf("Path not found: %s (expected: %s)", r.URL.Path, h.serverPath), http.StatusNotFound)
+	if len(h.httpContextFuncs) > 0 {
+		enriched := r.Context()
+		for _, fn := range h.httpContextFuncs {
+			enriched = fn(enriched, r)
 		}
-		return
+		r = r.WithContext(enriched)
 	}
 
-	switch r.Method {
-	case http.MethodPost:
-		h.handlePost(r.Context(), w, r)
-	case http.MethodGet:
-		if !h.enableGetSSE {
-			w.Header().Set("Allow", "POST, DELETE")
-			http.Error(w, "GET method not enabled", http.StatusMethodNotAllowed)
+	var core http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.isValidPath(r.URL.Path) {
+			if h.serverPath == "" {
+				http.Error(w, fmt.Sprintf("Path not found: %s (expected: %s)", r.URL.Path, h.serverPath), http.StatusNotFound)
+			}
 			return
 		}
-		h.handleGet(r.Context(), w, r)
-	case http.MethodDelete:
-		h.handleDelete(r.Context(), w, r)
-	default:
-		w.Header().Set("Allow", "POST, GET, DELETE")
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
+		switch r.Method {
+		case http.MethodPost:
+			h.handlePost(r.Context(), w, r)
+		case http.MethodGet:
+			if !h.enableGetSSE {
+				w.Header().Set("Allow", "POST, DELETE")
+				http.Error(w, "GET method not enabled", http.StatusMethodNotAllowed)
+				return
+			}
+			h.handleGet(r.Context(), w, r)
+		case http.MethodDelete:
+			h.handleDelete(r.Context(), w, r)
+		default:
+			w.Header().Set("Allow", "POST, GET, DELETE")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	// Apply auth middleware first, then audit middleware
+	if h.auditEnabled && h.auditWrap != nil {
+		core = h.auditWrap(core)
 	}
+	if h.authEnabled && h.authWrap != nil {
+		core = h.authWrap(core)
+	}
+
+	core.ServeHTTP(w, r)
 }
 
 type baseMessage struct {
@@ -233,6 +269,8 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 	for _, fn := range h.httpContextFuncs {
 		enrichedCtx = fn(enrichedCtx, r)
 	}
+
+	// Authentication enforced by auth middleware when configured
 
 	var rawMessage json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
@@ -338,6 +376,9 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 		if session != nil {
 			reqCtx = setSessionToContext(reqCtx, session)
 		}
+		if authInfo, ok := server.GetAuthInfo(ctx); ok {
+			reqCtx = server.WithAuthInfo(reqCtx, authInfo)
+		}
 		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 		if err != nil {
 			h.logger.Infof("Request processing failed: %v", err)
@@ -364,6 +405,9 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 	reqCtx := withNotificationSender(ctx, noopSender)
 	if session != nil {
 		reqCtx = setSessionToContext(reqCtx, session)
+	}
+	if authInfo, ok := server.GetAuthInfo(ctx); ok {
+		reqCtx = server.WithAuthInfo(reqCtx, authInfo)
 	}
 	resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 	if err != nil {
@@ -556,6 +600,14 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 		return
 	}
 
+	// Perform authentication context checks,
+	enrichedCtx := ctx
+	for _, fn := range h.httpContextFuncs {
+		enrichedCtx = fn(enrichedCtx, r)
+	}
+
+	// Authentication enforced by auth middleware when configured
+
 	// Check if streaming is supported
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -570,7 +622,7 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	flusher.Flush()
 
 	// Create context, for canceling connection
-	connCtx, cancelConn := context.WithCancel(ctx)
+	connCtx, cancelConn := context.WithCancel(enrichedCtx)
 	localCancelFunc = cancelConn // Assign to the variable captured by defer
 
 	// Check if there's already a GET SSE connection
@@ -775,7 +827,10 @@ func (h *httpServerHandler) isValidPath(requestPath string) bool {
 	if h.serverPath == "" {
 		return true
 	}
-	return requestPath == h.serverPath
+	sp := strings.TrimSuffix(h.serverPath, "/")
+	rp := strings.TrimSuffix(requestPath, "/")
+
+	return rp == sp || strings.HasPrefix(requestPath, sp+"/")
 }
 
 // responseManager manages pending requests and their response channels.
@@ -830,3 +885,22 @@ func (rm *responseManager) DeliverResponse(requestID string, response *json.RawM
 		return false
 	}
 }
+
+// hasAll determines whether have contains all the elements of need
+func hasAll(have, need []string) bool {
+	if len(need) == 0 {
+		return true
+	}
+	set := make(map[string]struct{}, len(have))
+	for _, s := range have {
+		set[s] = struct{}{}
+	}
+	for _, n := range need {
+		if _, ok := set[n]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// extractBearerFromHeader removed with old auth path
