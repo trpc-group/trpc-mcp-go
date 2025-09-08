@@ -12,8 +12,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/time/rate"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/server"
+	sh "trpc.group/trpc-go/trpc-mcp-go/internal/auth/server/handler"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/server/middleware"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/server/router"
 )
 
 // Common errors
@@ -55,6 +63,110 @@ const (
 // Multiple HTTPContextFunc will be executed in the order they are registered.
 type HTTPContextFunc func(ctx context.Context, r *http.Request) context.Context
 
+// AuditConfig defines configuration for audit middleware
+type AuditConfig struct {
+	// Whether to enable audit logging
+	Enabled bool
+
+	// Audit level: none, basic, detailed, full
+	Level string
+
+	// Whether to hash sensitive data
+	HashSensitiveData bool
+
+	// Whether to include request/response body
+	IncludeRequestBody  bool
+	IncludeResponseBody bool
+
+	// Custom endpoint patterns to audit
+	EndpointPatterns []string
+
+	// Patterns to exclude from auditing
+	ExcludePatterns []string
+
+	// Custom metadata extractor function
+	MetadataExtractor func(*http.Request) map[string]interface{}
+
+	// Custom risk assessor function
+	RiskAssessor func(map[string]interface{}) (string, []string)
+}
+
+// BearerAuthConfig defines configuration for Bearer token authentication
+type BearerAuthConfig struct {
+	Enabled bool
+
+	// Required: Token validator
+	Verifier server.TokenVerifierInterface
+
+	// Optional: List of required scopes
+	RequiredScopes []string
+
+	// Optional: Write resource_metadata for WWW-Authenticate
+	ResourceMetadataURL *string
+
+	// Optional: Restrict accepted issuer (extra authorization check)
+	Issuer string
+
+	// Optional: Restrict accepted audiences/resources (extra authorization check)
+	Audience []string
+}
+
+// OAuthRoutesConfig defines configuration for OAuth 2.1 server routes.
+type OAuthRoutesConfig struct {
+	// OAuth server implementation
+	Provider server.OAuthServerProvider
+
+	// Canonical issuer identifier (iss claim)
+	IssuerURL *url.URL
+
+	// Root URL for OAuth endpoints
+	BaseURL *url.URL
+
+	// Optional link to service documentation
+	ServiceDocumentationURL *url.URL
+
+	// Supported OAuth scopes
+	ScopesSupported []string
+
+	// Optional human-readable resource name
+	ResourceName *string
+
+	// Rate limit for /authorize endpoint
+	AuthorizationRateLimit *rate.Limiter
+
+	// Rate limit for /token endpoint
+	TokenRateLimit *rate.Limiter
+
+	// Resolve client_id from refresh token
+	ResolveClientIDFromRT func(rt string) (string, bool)
+
+	// Rate limit for dynamic client registration
+	RegistrationRateLimit *sh.RegisterRateLimitConfig
+
+	// Rate limit for token revocation
+	RevocationRateLimit *sh.RevocationRateLimitConfig
+}
+
+// OAuthMetadataConfig defines configuration for exposing OAuth server metadata.
+type OAuthMetadataConfig struct {
+	// Core OAuth server metadata
+	OAuthMetadata OAuthMetadata
+
+	// Optional resource server URL
+	ResourceServerURL *url.URL
+
+	// Optional service documentation URL
+	ServiceDocumentationURL *url.URL
+
+	// Scopes advertised in metadata
+	ScopesSupported []string
+
+	// Optional human-readable resource name
+	ResourceName *string
+}
+
+type OAuthMetadata = auth.OAuthMetadata
+
 // serverConfig stores all server configuration options
 type serverConfig struct {
 	// Basic configuration
@@ -74,11 +186,20 @@ type serverConfig struct {
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
 
+	// Audit middleware configuration
+	auditConfig *AuditConfig
+
+	// Bearer authenticate configuration
+	bearerAuth *BearerAuthConfig
+
 	// Tool list filter function
 	toolListFilter ToolListFilter
 
 	// Method name modifier for external customization.
 	methodNameModifier MethodNameModifier
+
+	// Route installers for adding extra endpoints (e.g. OAuth, metadata).
+	routerInstallers []func(*http.ServeMux) error
 }
 
 // ServerNotificationHandler defines a function that handles notifications on the server side.
@@ -100,6 +221,7 @@ type Server struct {
 	requestID            atomic.Int64                         // Request ID counter for generating unique request IDs.
 	notificationHandlers map[string]ServerNotificationHandler // Map of notification handlers by method name.
 	notificationMu       sync.RWMutex                         // Mutex for notification handlers map.
+	rootHandler          http.Handler                         // Server's top-level HTTP handler including the core MCP endpoint and any extra routes.
 }
 
 // NewServer creates a new MCP server
@@ -113,6 +235,8 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 		postSSEEnabled:         true,
 		getSSEEnabled:          true,
 		notificationBufferSize: defaultNotificationBufferSize,
+		auditConfig:            nil,
+		bearerAuth:             nil,
 	}
 
 	// Create server with provided serverInfo
@@ -155,7 +279,6 @@ func (s *Server) initComponents() {
 	if s.config.methodNameModifier != nil {
 		toolManager.withMethodNameModifier(s.config.methodNameModifier)
 	}
-	// Only set tool list filter if not nil.
 	if s.config.toolListFilter != nil {
 		toolManager.withToolListFilter(s.config.toolListFilter)
 	}
@@ -165,7 +288,6 @@ func (s *Server) initComponents() {
 	resourceManager := newResourceManager()
 	s.resourceManager = resourceManager
 
-	// Create prompt manager.
 	promptManager := newPromptManager()
 	s.promptManager = promptManager
 
@@ -207,12 +329,39 @@ func (s *Server) initComponents() {
 
 	// Inject logger into httpServerHandler if provided.
 	if s.logger != nil {
-		// This is the httpServerHandler option version.
 		httpOptions = append(httpOptions, withServerTransportLogger(s.logger))
+	}
+
+	// Enable Bearer token auth middleware if configured
+	if s.config.bearerAuth != nil && s.config.bearerAuth.Enabled {
+		authWrap := convertToAuthMiddleware(s.config.bearerAuth)
+		httpOptions = append(httpOptions, withTransportAuthEnabled(authWrap))
+	}
+
+	// Enable audit logging if configured
+	if s.config.auditConfig != nil && s.config.auditConfig.Enabled {
+		auditOpts := convertToMiddlewareOptions(s.config.auditConfig)
+		httpOptions = append(httpOptions, withTransportAuditEnabled(
+			middleware.AuditMiddleware(auditOpts),
+		))
 	}
 
 	// Create HTTP handler.
 	s.httpHandler = newHTTPServerHandler(s.mcpHandler, s.config.path, httpOptions...)
+
+	mux := http.NewServeMux()
+	mux.Handle(s.config.path+"/", s.httpHandler)
+
+	// Install additional routes (OAuth, resource metadata, .well-known, etc.)
+	for _, install := range s.config.routerInstallers {
+		_ = install(mux)
+	}
+
+	// Exposing mux externally
+	s.customServer = &http.Server{Addr: s.config.addr, Handler: mux}
+
+	// Expose mux as the server's root handler
+	s.rootHandler = mux
 }
 
 // ServerOption server option function.
@@ -271,6 +420,34 @@ func WithHTTPContextFunc(fn HTTPContextFunc) ServerOption {
 	}
 }
 
+// WithAudit enables audit logging for the server with the specified configuration.
+// The audit middleware will log all HTTP requests and responses based on the configuration.
+//
+// Example:
+//
+//	server := mcp.NewServer("my-server", "1.0",
+//	    mcp.WithAudit(&mcp.AuditConfig{
+//	        Enabled: true,
+//	        Level: "detailed",
+//	        EndpointPatterns: []string{"/mcp/", "/oauth2/"},
+//	        HashSensitiveData: true,
+//	    }),
+//	)
+func WithAudit(config *AuditConfig) ServerOption {
+	return func(s *Server) {
+		s.config.auditConfig = config
+	}
+}
+
+// WithBearerAuth configures the server to use Bearer token authentication.
+// The provided BearerAuthConfig specifies how tokens are verified,
+// what scopes are required, and optionally, metadata for WWW-Authenticate responses.
+func WithBearerAuth(config *BearerAuthConfig) ServerOption {
+	return func(s *Server) {
+		s.config.bearerAuth = config
+	}
+}
+
 // WithStatelessMode sets whether the server uses stateless mode
 // In stateless mode, the server won't generate session IDs and won't validate session IDs in client requests
 // Each request will use a temporary session, which is only valid during request processing
@@ -313,10 +490,68 @@ func WithServerAddress(addr string) ServerOption {
 	}
 }
 
+// WithOAuthRoutes installs standard OAuth 2.1 endpoints into the server,
+// such as /authorize, /token, /revoke, and /register, depending on the
+// provided AuthRouterOptions and the provider's capabilities.
+func WithOAuthRoutes(cfg OAuthRoutesConfig) ServerOption {
+	return withHTTPRoutes(func(mux *http.ServeMux) error {
+		base := cfg.BaseURL
+		if base == nil {
+			base = cfg.IssuerURL
+		}
+
+		opts := router.AuthRouterOptions{
+			Provider:                cfg.Provider,
+			IssuerUrl:               cfg.IssuerURL,
+			BaseUrl:                 base,
+			ServiceDocumentationUrl: cfg.ServiceDocumentationURL,
+			ScopesSupported:         cfg.ScopesSupported,
+			ResourceName:            cfg.ResourceName,
+
+			AuthorizationOptions: &sh.AuthorizationHandlerOptions{
+				Provider:  cfg.Provider,
+				RateLimit: cfg.AuthorizationRateLimit,
+			},
+			TokenOptions: &sh.TokenHandlerOptions{
+				Provider:  cfg.Provider,
+				RateLimit: cfg.TokenRateLimit,
+			},
+			ClientRegistrationOptions: &sh.ClientRegistrationHandlerOptions{
+				ClientsStore: cfg.Provider.ClientsStore(),
+				RateLimit:    cfg.RegistrationRateLimit,
+			},
+			RevocationOptions: &sh.RevocationHandlerOptions{
+				Provider:  cfg.Provider,
+				RateLimit: cfg.RevocationRateLimit,
+			},
+		}
+		return router.McpAuthRouter(mux, opts)
+	})
+}
+
+// WithOAuthMetadata installs the .well-known OAuth metadata endpoints
+// (e.g. /.well-known/oauth-authorization-server and
+// /.well-known/oauth-protected-resource) into the server.
+// The returned metadata is constructed from the given AuthMetadataOptions.
+func WithOAuthMetadata(cfg OAuthMetadataConfig) ServerOption {
+	return withHTTPRoutes(func(mux *http.ServeMux) error {
+		opts := router.AuthMetadataOptions{
+			OAuthMetadata:           cfg.OAuthMetadata,
+			ResourceServerUrl:       cfg.ResourceServerURL,
+			ServiceDocumentationUrl: cfg.ServiceDocumentationURL,
+			ScopesSupported:         cfg.ScopesSupported,
+			ResourceName:            cfg.ResourceName,
+		}
+		return router.McpAuthMetadataRouter(mux, opts)
+	})
+}
+
 // Start starts the server
 func (s *Server) Start() error {
 	if s.customServer != nil {
-		s.customServer.Handler = s.Handler()
+		if s.customServer.Handler == nil {
+			s.customServer.Handler = s.Handler()
+		}
 		return s.customServer.ListenAndServe()
 	}
 	return http.ListenAndServe(s.config.addr, s.Handler())
@@ -325,34 +560,6 @@ func (s *Server) Start() error {
 // RegisterTool registers a tool with its handler function
 func (s *Server) RegisterTool(tool *Tool, handler toolHandler) {
 	s.toolManager.registerTool(tool, handler)
-}
-
-// GetTool retrieves a registered tool by name.
-// Returns the tool and true if found, otherwise returns zero value and false.
-// The returned tool is a copy to prevent accidental modification.
-func (s *Server) GetTool(name string) (Tool, bool) {
-	if name == "" {
-		return Tool{}, false
-	}
-
-	tool, exists := s.toolManager.getTool(name)
-	if !exists {
-		return Tool{}, false
-	}
-	// Return a copy to prevent modification of the original
-	return *tool, true
-}
-
-// GetTools returns a copy of all registered tools.
-// The returned slice contains copies of the tools to prevent accidental modification.
-func (s *Server) GetTools() []Tool {
-	toolPtrs := s.toolManager.getTools()
-
-	tools := make([]Tool, 0, len(toolPtrs))
-	for _, toolPtr := range toolPtrs {
-		tools = append(tools, *toolPtr) // getTools() guarantees non-nil
-	}
-	return tools
 }
 
 // UnregisterTools removes multiple tools by names and returns an error if no tools were unregistered
@@ -570,9 +777,18 @@ func (s *Server) GetActiveSessions() ([]string, error) {
 	return s.getActiveSessions()
 }
 
-// Handler  returns the http.Handler for the server.
-// This can be used to integrate the MCP server into existing HTTP servers.
+// Handler returns the top-level http.Handler exposed by the server.
+// This handler always includes the core MCP endpoint (e.g., /mcp).
+// Depending on the configured ServerOptions, it may also include
+// additional routes such as OAuth endpoints and .well-known metadata.
+//
+// You can pass this directly to an http.Server, or mount it into
+// an existing HTTP mux as the unified entry point for MCP and
+// any configured auxiliary endpoints.
 func (s *Server) Handler() http.Handler {
+	if s.rootHandler == nil {
+		return s.rootHandler
+	}
 	return s.httpHandler
 }
 
@@ -656,4 +872,84 @@ func (s *Server) handleServerNotification(ctx context.Context, notification *JSO
 		s.logger.Debugf("No handler registered for notification method: %s", notification.Method)
 	}
 	return nil
+}
+
+// convertToMiddlewareOptions converts AuditConfig to AuditMiddlewareOptions
+func convertToMiddlewareOptions(config *AuditConfig) *middleware.AuditMiddlewareOptions {
+	level := middleware.AuditLevelBasic
+	switch config.Level {
+	case "detailed":
+		level = middleware.AuditLevelDetailed
+	case "full":
+		level = middleware.AuditLevelFull
+	}
+
+	return &middleware.AuditMiddlewareOptions{
+		Level:               level,
+		HashSensitiveData:   config.HashSensitiveData,
+		IncludeRequestBody:  config.IncludeRequestBody,
+		IncludeResponseBody: config.IncludeResponseBody,
+		EndpointPatterns:    config.EndpointPatterns,
+		ExcludePatterns:     config.ExcludePatterns,
+		MetadataExtractor:   config.MetadataExtractor,
+	}
+}
+
+// convertToAuthMiddleware converts BearerAuthConfig to an HTTP middleware wrapper using RequireBearerAuth
+// It also adapts the auth info stored by middleware into the server-level context so downstream code can use server.GetAuthInfo
+func convertToAuthMiddleware(config *BearerAuthConfig) func(http.Handler) http.Handler {
+	if config == nil || !config.Enabled || config.Verifier == nil {
+		return nil
+	}
+
+	opts := middleware.BearerAuthMiddlewareOptions{
+		Verifier:            config.Verifier,
+		RequiredScopes:      config.RequiredScopes,
+		ResourceMetadataURL: config.ResourceMetadataURL,
+		Issuer:              config.Issuer,
+		Audience:            config.Audience,
+	}
+
+	bearer := middleware.RequireBearerAuth(opts)
+
+	// Compose an adapter that maps middleware.AuthInfoKey -> server.WithAuthInfo
+	return func(next http.Handler) http.Handler {
+		// Wrap the downstream handler to translate context
+		adapter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if v := r.Context().Value(middleware.AuthInfoKey); v != nil {
+				if ai, ok := v.(server.AuthInfo); ok {
+					// Avoid token transparent transmission
+					aiCopy := ai
+					aiCopy.Token = ""
+					r = r.WithContext(server.WithAuthInfo(r.Context(), &aiCopy))
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+		return bearer(adapter)
+	}
+}
+
+// withTransportAuditEnabled enables audit logging by wrapping the handler with given middleware
+func withTransportAuditEnabled(wrap func(http.Handler) http.Handler) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.auditEnabled = (wrap != nil)
+		h.auditWrap = wrap
+	}
+}
+
+// withTransportAuthEnabled enables bearer authentication by wrapping the handler with given middleware
+func withTransportAuthEnabled(wrap func(http.Handler) http.Handler) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.authEnabled = (wrap != nil)
+		h.authWrap = wrap
+	}
+}
+
+// withHTTPRoutes registers a custom installer function that can
+// attach additional HTTP routes to the server's root mux.
+func withHTTPRoutes(install func(*http.ServeMux) error) ServerOption {
+	return func(s *Server) {
+		s.config.routerInstallers = append(s.config.routerInstallers, install)
+	}
 }

@@ -18,9 +18,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/client"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
-	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
 // streamableHTTPClientTransport implements an HTTP-based MCP transport
@@ -50,9 +51,6 @@ type streamableHTTPClientTransport struct {
 
 	// Whether GET SSE is enabled
 	enableGetSSE bool
-
-	// Retry configuration
-	retryConfig *retry.Config
 
 	// GET SSE connection
 	getSSEConn struct {
@@ -85,6 +83,9 @@ type streamableHTTPClientTransport struct {
 
 	// Client reference for accessing rootsProvider.
 	client *Client
+
+	// OAuth client provider
+	oauthProvider client.OAuthClientProvider
 }
 
 // NotificationHandler is a handler for notifications.
@@ -191,42 +192,24 @@ func withTransportHTTPReqHandlerOption(option HTTPReqHandlerOption) transportOpt
 	}
 }
 
+// withTransportOAuthProvider adds an option for OAuth client provider
+func withTransportOAuthProvider(p client.OAuthClientProvider) transportOption {
+	return func(t *streamableHTTPClientTransport) {
+		t.oauthProvider = p
+	}
+}
+
 // start is a no-op for streamableHTTPClientTransport.
 func (t *streamableHTTPClientTransport) start(ctx context.Context) error {
 	return nil
 }
 
-// setRetryConfig sets the retry configuration for this transport
-func (t *streamableHTTPClientTransport) setRetryConfig(config *retry.Config) {
-	t.retryConfig = config
-}
-
-// SendRequest sends a request and waits for a response with retry support
+// SendRequest sends a request and waits for a response
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
-	// If no retry config, use original implementation
-	if t.retryConfig == nil {
-		return t.send(ctx, req, nil)
-	}
-
-	// Define the operation to be retried
-	var result *json.RawMessage
-	operation := func() error {
-		var err error
-		result, err = t.send(ctx, req, nil)
-		return err
-	}
-
-	// Execute with retry
-	operationName := fmt.Sprintf("sendRequest(%s)", req.Request.Method)
-	err := retry.Execute(ctx, operation, t.retryConfig, operationName)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return t.send(ctx, req, nil)
 }
 
 // send sends a request and handles the response
@@ -241,6 +224,11 @@ func (t *streamableHTTPClientTransport) send(
 		return nil, fmt.Errorf("%w: %v", ErrRequestSerialization, err)
 	}
 
+	ctx, err = t.ensureAuth(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(reqBytes))
 	if err != nil {
@@ -250,6 +238,7 @@ func (t *streamableHTTPClientTransport) send(
 		httpReq.URL.Path = t.path
 	}
 
+	t.setBasicHeaders(httpReq)
 	// Set request headers - accept both SSE and JSON responses
 	httpReq.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
 	httpReq.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
@@ -264,6 +253,13 @@ func (t *streamableHTTPClientTransport) send(
 		httpReq.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
 
+	// Authorization from ctx
+	t.setAuthorizationHeader(ctx, httpReq)
+
+	if authInfo, ok := client.GetAuthInfo(ctx); ok && authInfo != nil && authInfo.AccessToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+authInfo.AccessToken)
+	}
+
 	// Add custom headers
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
@@ -275,6 +271,51 @@ func (t *streamableHTTPClientTransport) send(
 	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
+	}
+
+	// 204/400: try once with fresh auth (rebuild request inside)
+	if httpResp.StatusCode == http.StatusNoContent || httpResp.StatusCode == http.StatusBadRequest {
+		httpResp.Body.Close()
+		return t.retryWithFreshAuth(ctx, reqBytes, options)
+	}
+
+	// 401/403: refresh/ensure auth, then REBUILD a new request and resend ONCE
+	if httpResp.StatusCode == http.StatusUnauthorized || httpResp.StatusCode == http.StatusForbidden {
+		httpResp.Body.Close()
+
+		if _, err := t.ensureAuth(ctx); err == nil {
+			httpReq2, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(reqBytes))
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
+			}
+			if len(t.path) != 0 {
+				httpReq2.URL.Path = t.path
+			}
+
+			// headers again (same as first send)
+			t.setBasicHeaders(httpReq2)
+			httpReq2.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
+			httpReq2.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
+			if t.sessionID != "" && !t.isStateless {
+				httpReq2.Header.Set(httputil.SessionIDHeader, t.sessionID)
+			}
+			if options != nil && options.lastEventID != "" {
+				httpReq2.Header.Set(httputil.LastEventIDHeader, options.lastEventID)
+			} else if t.lastEventID != "" {
+				httpReq2.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
+			}
+			t.setAuthorizationHeader(ctx, httpReq2) // new token if refreshed
+			for k, values := range t.httpHeaders {
+				for _, value := range values {
+					httpReq2.Header.Add(k, value)
+				}
+			}
+
+			httpResp, err = t.httpReqHandler.Handle(ctx, t.httpClient, httpReq2)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
+			}
+		}
 	}
 
 	// Handle session ID
@@ -634,6 +675,11 @@ func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 		return fmt.Errorf("cannot establish GET SSE connection: session ID is empty")
 	}
 
+	ctx, err := t.ensureAuth(ctx)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
 	// Build GET request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.serverURL.String(), nil)
 	if err != nil {
@@ -648,6 +694,10 @@ func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	req.Header.Set(httputil.SessionIDHeader, t.sessionID)
 	if t.lastEventID != "" {
 		req.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
+	}
+
+	if authInfo, ok := client.GetAuthInfo(ctx); ok && authInfo != nil && authInfo.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authInfo.AccessToken)
 	}
 
 	// Add custom headers
@@ -867,6 +917,10 @@ func (t *streamableHTTPClientTransport) sendResponseToServer(response interface{
 		}
 	}
 
+	if authInfo, ok := client.GetAuthInfo(ctx); ok && authInfo != nil && authInfo.AccessToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+authInfo.AccessToken)
+	}
+
 	// Add session ID if available
 	if t.sessionID != "" {
 		httpReq.Header.Set(httputil.SessionIDHeader, t.sessionID) // Use correct MCP protocol header: Mcp-Session-Id.
@@ -971,4 +1025,152 @@ func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
 	}
 
 	t.establishGetSSE()
+}
+
+// ensureAuth ensures that the current request context carries valid authentication information
+func (t *streamableHTTPClientTransport) ensureAuth(ctx context.Context) (context.Context, error) {
+	if t.oauthProvider == nil {
+		return ctx, nil
+	}
+
+	if info, ok := client.GetAuthInfo(ctx); ok && info != nil && !client.IsTokenExpired(info) {
+		return ctx, nil
+	}
+
+	_, err := client.Auth(t.oauthProvider, auth.AuthOptions{
+		ServerUrl: t.serverURL.String(),
+	})
+	if err != nil {
+		return client.WithAuthErr(ctx, err), err
+	}
+
+	tokens, terr := t.oauthProvider.Tokens()
+	if terr != nil {
+		return client.WithAuthErr(ctx, err), terr
+	}
+	if tokens == nil {
+		return client.WithAuthErr(ctx, fmt.Errorf("no tokens after auth")), fmt.Errorf("no tokens")
+	}
+	info := client.ConvertTokensToAuthInfo(tokens)
+	return client.WithAuthInfo(ctx, info), nil
+}
+
+// setBasicHeaders sets the basic headers that are common to all HTTP requests
+func (t *streamableHTTPClientTransport) setBasicHeaders(req *http.Request) {
+	// Set content type and accept headers
+	req.Header.Set(httputil.ContentTypeHeader, httputil.ContentTypeJSON)
+	req.Header.Set(httputil.AcceptHeader, httputil.ContentTypeJSON+", "+httputil.ContentTypeSSE)
+
+	// Set session ID if available and not in stateless mode
+	if t.sessionID != "" && !t.isStateless {
+		req.Header.Set(httputil.SessionIDHeader, t.sessionID)
+	}
+
+	// Set last event ID if available
+	if t.lastEventID != "" {
+		req.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
+	}
+
+	// Set path if specified
+	if len(t.path) != 0 {
+		req.URL.Path = t.path
+	}
+
+	// Add custom headers
+	for key, values := range t.httpHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+}
+
+// setAuthorizationHeader sets the Authorization header using context auth info
+func (t *streamableHTTPClientTransport) setAuthorizationHeader(ctx context.Context, req *http.Request) {
+	if authInfo, ok := client.GetAuthInfo(ctx); ok && authInfo != nil && authInfo.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authInfo.AccessToken)
+	}
+}
+
+// retryWithFreshAuth handles retry logic with fresh authentication
+func (t *streamableHTTPClientTransport) retryWithFreshAuth(ctx context.Context, reqBytes []byte, options *streamOptions) (*json.RawMessage, error) {
+	// 强制刷新认证
+	ctx, err := t.ensureAuth(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("re-authentication failed: %w", err)
+	}
+
+	// Create a new HTTP request
+	httpReq2, err := http.NewRequestWithContext(ctx, http.MethodPost, t.serverURL.String(), bytes.NewReader(reqBytes))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestCreation, err)
+	}
+
+	// Reset all headers
+	t.setBasicHeaders(httpReq2)
+
+	// Set up Authorization using the new context
+	t.setAuthorizationHeader(ctx, httpReq2)
+
+	// Process options specific to this request
+	if options != nil && options.lastEventID != "" {
+		httpReq2.Header.Set(httputil.LastEventIDHeader, options.lastEventID)
+	}
+
+	// Send a retry request
+	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq2)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
+	}
+	defer httpResp.Body.Close()
+
+	// Handle session IDs
+	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); sessionID != "" {
+		t.setSessionID(sessionID)
+		t.isStateless = false
+	}
+
+	// Check the content type
+	contentType := httpResp.Header.Get(httputil.ContentTypeHeader)
+	if strings.Contains(contentType, httputil.ContentTypeSSE) {
+		// Handle SSE Responses, reqID is set to nil because this is a retry
+		return t.handleSSEResponse(ctx, httpResp, nil, options)
+	}
+
+	// Check status code
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status code %d", ErrHTTPRequestFailed, httpResp.StatusCode)
+	}
+
+	// Read the response body
+	respBytes, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Parse JSON response
+	var jsonResp map[string]interface{}
+	if err := json.Unmarshal(respBytes, &jsonResp); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrResponseParsing, err)
+	}
+
+	// Check if it is an error response
+	if _, hasError := jsonResp["error"]; hasError {
+		rawMessage := json.RawMessage(respBytes)
+		return &rawMessage, nil
+	}
+
+	// Extraction results section
+	resultData, ok := jsonResp["result"]
+	if !ok {
+		return nil, ErrMissingResultField
+	}
+
+	// Serialized result is JSON
+	resultBytes, err := json.Marshal(resultData)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrResponseSerialization, err)
+	}
+
+	rawMessage := json.RawMessage(resultBytes)
+	return &rawMessage, nil
 }
