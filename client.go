@@ -749,15 +749,6 @@ func isZeroStruct(x interface{}) bool {
 	return reflect.ValueOf(x).IsZero()
 }
 
-func WithOAuthClientProvider(p client.OAuthClientProvider) ClientOption {
-	return func(c *Client) {
-		// 1) 存一份在 Client（后续取初始 token / 刷新等会用到）
-		c.oauthProvider = p
-		// 2) 也下发给 transport（与 a2a 同步，走 transportOptions 管线）
-		c.transportOptions = append(c.transportOptions, withTransportOAuthProvider(p))
-	}
-}
-
 // WithAuthFlow creates a client option that configures and executes the complete OAuth flow
 func WithAuthFlow(config AuthFlowConfig) ClientOption {
 	return func(c *Client) {
