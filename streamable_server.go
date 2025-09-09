@@ -270,8 +270,6 @@ func (h *httpServerHandler) handlePost(ctx context.Context, w http.ResponseWrite
 		enrichedCtx = fn(enrichedCtx, r)
 	}
 
-	// Authentication enforced by auth middleware when configured
-
 	var rawMessage json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawMessage); err != nil {
 		http.Error(w, ErrInvalidRequestBody.Error(), http.StatusBadRequest)
@@ -606,8 +604,6 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 		enrichedCtx = fn(enrichedCtx, r)
 	}
 
-	// Authentication enforced by auth middleware when configured
-
 	// Check if streaming is supported
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -885,22 +881,3 @@ func (rm *responseManager) DeliverResponse(requestID string, response *json.RawM
 		return false
 	}
 }
-
-// hasAll determines whether have contains all the elements of need
-func hasAll(have, need []string) bool {
-	if len(need) == 0 {
-		return true
-	}
-	set := make(map[string]struct{}, len(have))
-	for _, s := range have {
-		set[s] = struct{}{}
-	}
-	for _, n := range need {
-		if _, ok := set[n]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-// extractBearerFromHeader removed with old auth path

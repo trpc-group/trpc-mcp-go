@@ -18,9 +18,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	"trpc.group/trpc-go/trpc-mcp-go/internal/auth"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/auth/client"
-
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
@@ -1122,7 +1122,6 @@ func (t *streamableHTTPClientTransport) setAuthorizationHeader(ctx context.Conte
 
 // retryWithFreshAuth handles retry logic with fresh authentication
 func (t *streamableHTTPClientTransport) retryWithFreshAuth(ctx context.Context, reqBytes []byte, options *streamOptions) (*json.RawMessage, error) {
-	// 强制刷新认证
 	ctx, err := t.ensureAuth(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("re-authentication failed: %w", err)
