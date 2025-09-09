@@ -16,6 +16,11 @@ import (
 // resourceHandler defines the function type for handling resource reading
 type resourceHandler func(ctx context.Context, req *ReadResourceRequest) (ResourceContents, error)
 
+// ResourceListFilter defines a function type for filtering resources based on context.
+// The filter receives the request context and all registered resources, and returns
+// a filtered list of resources that should be visible to the client.
+type ResourceListFilter func(ctx context.Context, resources []*Resource) []*Resource
+
 // resourcesHandler defines the function type for handling resource reading with multiple contents.
 type resourcesHandler func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error)
 

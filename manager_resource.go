@@ -46,6 +46,9 @@ type resourceManager struct {
 
 	// Order of resources
 	resourcesOrder []string
+
+	// Resource list filter function
+	resourceListFilter ResourceListFilter
 }
 
 // newResourceManager creates a new resource manager
@@ -58,6 +61,12 @@ func newResourceManager() *resourceManager {
 		templates:   make(map[string]*registerResourceTemplate),
 		subscribers: make(map[string][]chan *JSONRPCNotification),
 	}
+}
+
+// withResourceListFilter sets the resource list filter.
+func (m *resourceManager) withResourceListFilter(filter ResourceListFilter) *resourceManager {
+	m.resourceListFilter = filter
+	return m
 }
 
 // registerResource registers a resource
@@ -230,12 +239,20 @@ func (m *resourceManager) notifyUpdate(uri string) {
 
 // handleListResources handles listing resources requests
 func (m *resourceManager) handleListResources(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	resources := m.getResources()
+	// Get all resources
+	resourcePtrs := m.getResources()
+
+	// Apply filter if available
+	if m.resourceListFilter != nil {
+		resourcePtrs = m.resourceListFilter(ctx, resourcePtrs)
+	}
 
 	// Convert []*mcp.Resource to []mcp.Resource for the result
-	resultResources := make([]Resource, len(resources))
-	for i, resource := range resources {
-		resultResources[i] = *resource
+	resultResources := make([]Resource, len(resourcePtrs))
+	for i, resource := range resourcePtrs {
+		if resource != nil {
+			resultResources[i] = *resource
+		}
 	}
 
 	// Create result

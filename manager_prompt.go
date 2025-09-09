@@ -36,6 +36,9 @@ type promptManager struct {
 
 	// Track insertion order of prompts
 	promptsOrder []string
+
+	// Prompt list filter function
+	promptListFilter PromptListFilter
 }
 
 // newPromptManager creates a new prompt manager
@@ -46,6 +49,12 @@ func newPromptManager() *promptManager {
 	return &promptManager{
 		prompts: make(map[string]*registeredPrompt),
 	}
+}
+
+// withPromptListFilter sets the prompt list filter.
+func (m *promptManager) withPromptListFilter(filter PromptListFilter) *promptManager {
+	m.promptListFilter = filter
+	return m
 }
 
 // registerPrompt registers a prompt
@@ -94,12 +103,20 @@ func (m *promptManager) getPrompts() []*Prompt {
 
 // handleListPrompts handles listing prompts requests
 func (m *promptManager) handleListPrompts(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	prompts := m.getPrompts()
+	// Get all prompts
+	promptPtrs := m.getPrompts()
+
+	// Apply filter if available
+	if m.promptListFilter != nil {
+		promptPtrs = m.promptListFilter(ctx, promptPtrs)
+	}
 
 	// Convert []*mcp.Prompt to []mcp.Prompt for the result
-	resultPrompts := make([]Prompt, len(prompts))
-	for i, prompt := range prompts {
-		resultPrompts[i] = *prompt
+	resultPrompts := make([]Prompt, len(promptPtrs))
+	for i, prompt := range promptPtrs {
+		if prompt != nil {
+			resultPrompts[i] = *prompt
+		}
 	}
 
 	result := &ListPromptsResult{

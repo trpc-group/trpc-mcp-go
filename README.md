@@ -960,13 +960,13 @@ func handleMyTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolR
 }
 ```
 
-### 3. How to dynamically filter tools based on user context?
+### 3. How to dynamically filter tools, prompts, and resources based on user context?
 
-The library provides a powerful tool filtering system that works with HTTP header extraction to enable dynamic access control. You can filter tools based on user context such as roles, permissions, client version, or any other criteria.
+The library provides a powerful filtering system that works with HTTP header extraction to enable dynamic access control. You can filter tools, prompts, and resources based on user context such as roles, permissions, client version, or any other criteria.
 
 #### Basic Context-Based Filtering
 
-Use `WithToolListFilter` combined with `WithHTTPContextFunc` to filter tools based on user context (e.g., roles, permissions, version, etc.):
+Use filtering options combined with `WithHTTPContextFunc` to filter tools, prompts, and resources based on user context (e.g., roles, permissions, version, etc.):
 
 ```go
 package main
@@ -985,7 +985,7 @@ func extractUserRole(ctx context.Context, r *http.Request) context.Context {
 	return ctx
 }
 
-// Create role-based filter
+// Create role-based filter for tools
 func createRoleBasedFilter() mcp.ToolListFilter {
 	return func(ctx context.Context, tools []*mcp.Tool) []*mcp.Tool {
 		userRole := "guest" // default
@@ -1012,18 +1012,80 @@ func createRoleBasedFilter() mcp.ToolListFilter {
 	}
 }
 
+// Create role-based filter for prompts
+func createPromptFilter() mcp.PromptListFilter {
+	return func(ctx context.Context, prompts []*mcp.Prompt) []*mcp.Prompt {
+		userRole := "guest" // default
+		if role, ok := ctx.Value("user_role").(string); ok && role != "" {
+			userRole = role
+		}
+
+		var filtered []*mcp.Prompt
+		for _, prompt := range prompts {
+			switch userRole {
+			case "admin":
+				filtered = append(filtered, prompt) // Admin sees all prompts
+			case "user":
+				if prompt.Name == "greeting" || prompt.Name == "summary" {
+					filtered = append(filtered, prompt)
+				}
+			case "guest":
+				if prompt.Name == "greeting" {
+					filtered = append(filtered, prompt)
+				}
+			}
+		}
+		return filtered
+	}
+}
+
+// Create role-based filter for resources
+func createResourceFilter() mcp.ResourceListFilter {
+	return func(ctx context.Context, resources []*mcp.Resource) []*mcp.Resource {
+		userRole := "guest" // default
+		if role, ok := ctx.Value("user_role").(string); ok && role != "" {
+			userRole = role
+		}
+
+		var filtered []*mcp.Resource
+		for _, resource := range resources {
+			switch userRole {
+			case "admin":
+				filtered = append(filtered, resource) // Admin sees all resources
+			case "user":
+				if resource.Name == "public_data" || resource.Name == "user_data" {
+					filtered = append(filtered, resource)
+				}
+			case "guest":
+				if resource.Name == "public_data" {
+					filtered = append(filtered, resource)
+				}
+			}
+		}
+		return filtered
+	}
+}
+
 func main() {
-	// Create server with context-based tool filtering
+	// Create server with context-based filtering for all types
 	server := mcp.NewServer(
 		"filtered-server", "1.0.0",
 		mcp.WithHTTPContextFunc(extractUserRole),
 		mcp.WithToolListFilter(createRoleBasedFilter()),
+		mcp.WithPromptListFilter(createPromptFilter()),
+		mcp.WithResourceListFilter(createResourceFilter()),
 	)
 
-	// Register tools as usual
+	// Register tools, prompts, and resources as usual
 	server.RegisterTool(calculatorTool, calculatorHandler)
 	server.RegisterTool(weatherTool, weatherHandler)
 	server.RegisterTool(adminTool, adminHandler)
+	
+	server.RegisterPrompt(userPrompt, userPromptHandler)
+	server.RegisterPrompt(adminPrompt, adminPromptHandler)
+	
+	server.RegisterResource(publicResource, publicResourceHandler)
+	server.RegisterResource(adminResource, adminResourceHandler)
 	
 	server.Start()
 }
@@ -1078,7 +1140,22 @@ func shouldShowTool(tool *mcp.Tool, userRole, clientVersion string) bool {
 }
 ```
 
-#### Testing Tool Filtering
+#### SSE Server Filtering
+
+For SSE servers, use the corresponding SSE filter options:
+
+```go
+// Create SSE server with filtering
+sseServer := mcp.NewSSEServer(
+	"filtered-sse-server", "1.0.0",
+	mcp.WithSSEContextFunc(extractUserRole),
+	mcp.WithSSEToolListFilter(createRoleBasedFilter()),
+	mcp.WithSSEPromptListFilter(createPromptFilter()),
+	mcp.WithSSEResourceListFilter(createResourceFilter()),
+)
+```
+
+#### Testing Filtering
 
 You can test different user contexts by sending HTTP headers:
 
@@ -1088,6 +1165,18 @@ curl -X POST http://localhost:3000/mcp \
   -H "Content-Type: application/json" \
   -H "X-User-Role: admin" \
   -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+
+# Test prompts filtering
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-User-Role: user" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "prompts/list"}'
+
+# Test resources filtering
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-User-Role: guest" \
+  -d '{"jsonrpc": "2.0", "id": 3, "method": "resources/list"}'
 
 # User sees filtered tools
 curl -X POST http://localhost:3000/mcp \

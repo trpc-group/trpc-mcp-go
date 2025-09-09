@@ -248,6 +248,27 @@ func WithSSEServerLogger(logger Logger) SSEOption {
 	}
 }
 
+// WithSSEToolListFilter sets a tool list filter for the SSE server.
+func WithSSEToolListFilter(filter ToolListFilter) SSEOption {
+	return func(s *SSEServer) {
+		s.toolManager.withToolListFilter(filter)
+	}
+}
+
+// WithSSEPromptListFilter sets a prompt list filter for the SSE server.
+func WithSSEPromptListFilter(filter PromptListFilter) SSEOption {
+	return func(s *SSEServer) {
+		s.promptManager.withPromptListFilter(filter)
+	}
+}
+
+// WithSSEResourceListFilter sets a resource list filter for the SSE server.
+func WithSSEResourceListFilter(filter ResourceListFilter) SSEOption {
+	return func(s *SSEServer) {
+		s.resourceManager.withResourceListFilter(filter)
+	}
+}
+
 // Start starts the SSE server on the given address.
 func (s *SSEServer) Start(addr string) error {
 	return http.ListenAndServe(addr, s)
