@@ -252,19 +252,19 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Get resource
 	registeredResource, exists := m.resources[uri]
 	if !exists {
-		return newJSONRPCErrorResponse(
+		return NewJSONRPCErrorResponse(
 			req.ID,
 			ErrCodeMethodNotFound,
 			fmt.Sprintf("%v: %s", errors.ErrResourceNotFound, uri),
@@ -285,7 +285,7 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 	// Call resource handler
 	contents, err := registeredResource.Handler(ctx, readReq)
 	if err != nil {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
 	}
 
 	// Create result
@@ -319,19 +319,19 @@ func (m *resourceManager) handleSubscribe(ctx context.Context, req *JSONRPCReque
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Check if resource exists
 	_, exists := m.getResource(uri)
 	if !exists {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, fmt.Sprintf("resource %s not found", uri), nil), nil
 	}
 
 	// subscribe to resource updates
@@ -351,13 +351,13 @@ func (m *resourceManager) handleUnsubscribe(ctx context.Context, req *JSONRPCReq
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get resource URI from parameters
 	uri, ok := paramsMap["uri"].(string)
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// unsubscribe from resource updates

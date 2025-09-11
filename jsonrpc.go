@@ -94,8 +94,8 @@ func newJSONRPCResponse(id interface{}, result interface{}) *JSONRPCResponse {
 	}
 }
 
-// newJSONRPCErrorResponse creates a new JSON-RPC error response
-func newJSONRPCErrorResponse(id interface{}, code int, message string, data interface{}) *JSONRPCError {
+// NewJSONRPCErrorResponse creates a new JSON-RPC error response
+func NewJSONRPCErrorResponse(id interface{}, code int, message string, data interface{}) *JSONRPCError {
 	errResp := &JSONRPCError{
 		JSONRPC: JSONRPCVersion,
 		ID:      id,

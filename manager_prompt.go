@@ -113,7 +113,7 @@ func (m *promptManager) handleListPrompts(ctx context.Context, req *JSONRPCReque
 func parseGetPromptParams(req *JSONRPCRequest) (name string, arguments map[string]interface{}, errResp JSONRPCMessage, ok bool) {
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return "", nil, newJSONRPCErrorResponse(
+		return "", nil, NewJSONRPCErrorResponse(
 			req.ID,
 			ErrCodeInvalidParams,
 			errors.ErrInvalidParams.Error(),
@@ -122,7 +122,7 @@ func parseGetPromptParams(req *JSONRPCRequest) (name string, arguments map[strin
 	}
 	name, ok = paramsMap["name"].(string)
 	if !ok {
-		return "", nil, newJSONRPCErrorResponse(
+		return "", nil, NewJSONRPCErrorResponse(
 			req.ID,
 			ErrCodeInvalidParams,
 			errors.ErrMissingParams.Error(),
@@ -162,7 +162,7 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 	}
 	registeredPrompt, exists := m.prompts[name]
 	if !exists {
-		return newJSONRPCErrorResponse(
+		return NewJSONRPCErrorResponse(
 			req.ID,
 			ErrCodeMethodNotFound,
 			fmt.Sprintf("%v: %s", errors.ErrPromptNotFound, name),
@@ -192,7 +192,7 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 	if registeredPrompt.Handler != nil {
 		result, err := registeredPrompt.Handler(ctx, getReq)
 		if err != nil {
-			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
+			return NewJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil), nil
 		}
 		return result, nil
 	}
@@ -213,19 +213,19 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 func parseCompletionCompleteParams(req *JSONRPCRequest) (promptName string, errResp JSONRPCMessage, ok bool) {
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
+		return "", NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
 	}
 	ref, ok := paramsMap["ref"].(map[string]interface{})
 	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+		return "", NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
 	}
 	refType, ok := ref["type"].(string)
 	if !ok || refType != "ref/prompt" {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
+		return "", NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
 	}
 	promptName, ok = ref["name"].(string)
 	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+		return "", NewJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
 	}
 	return promptName, nil, true
 }
@@ -243,5 +243,5 @@ func (m *promptManager) handleCompletionComplete(ctx context.Context, req *JSONR
 // Helper: Handle prompt completion business logic (can be further split if needed)
 func (m *promptManager) handlePromptCompletion(ctx context.Context, promptName string, req *JSONRPCRequest) (JSONRPCMessage, error) {
 	// Original handleCompletionComplete business logic placeholder
-	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "not implemented", nil), nil
+	return NewJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "not implemented", nil), nil
 }

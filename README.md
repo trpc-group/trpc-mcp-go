@@ -10,6 +10,7 @@ A Go implementation of the [Model Context Protocol (MCP)](https://github.com/mod
 - **Streaming Support**: Real-time data streaming with Server-Sent Events (SSE)
 - **Tool Framework**: Register and execute tools with structured parameter handling
 - **Struct-First API**: Generate schemas automatically from Go structs with type safety
+- **Middleware Architecture**: A pluggable middleware architecture for handling cross-cutting concerns like logging, metrics, and recovery.
 - **Resource Management**: Serve text and binary resources with RESTful interfaces
 - **Prompt Templates**: Create and manage prompt templates for LLM interactions
 - **Progress Notifications**: Built-in support for progress updates on long-running operations
@@ -80,7 +81,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"syscall"
+	syscall "syscall"
 
 	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
@@ -168,7 +169,7 @@ import (
 
 // initializeClient initializes the MCP client with server connection and session setup
 func initializeClient(ctx context.Context) (*mcp.Client, error) {
-	log.Println("===== Initialize client =====")
+	log.Println("===== Initialize client ====")
 	serverURL := "http://localhost:3000/mcp"
 	mcpClient, err := mcp.NewClient(
 		serverURL,
@@ -204,13 +205,14 @@ func initializeClient(ctx context.Context) (*mcp.Client, error) {
 
 // handleTools manages tool-related operations including listing and calling tools
 func handleTools(ctx context.Context, client *mcp.Client) error {
-	log.Println("===== List available tools =====")
+	log.Println("===== List available tools ====")
 	listToolsResp, err := client.ListTools(ctx, &mcp.ListToolsRequest{})
 	if err != nil {
 		return fmt.Errorf("failed to list tools: %v", err)
 	}
 
-	tools := listToolsResp.Tools
+
+tools := listToolsResp.Tools
 	if len(tools) == 0 {
 		log.Printf("No available tools.")
 		return nil
@@ -250,7 +252,7 @@ func terminateSession(ctx context.Context, client *mcp.Client) error {
 		return nil
 	}
 
-	log.Printf("===== Terminate session =====")
+	log.Printf("===== Terminate session ====")
 	if err := client.TerminateSession(ctx); err != nil {
 		return fmt.Errorf("failed to terminate session: %v", err)
 	}
@@ -352,6 +354,116 @@ func main() {
     fmt.Printf("Result: %v\n", result.Content[0])
 }
 ```
+
+## Middleware
+
+The server supports a pluggable middleware architecture, allowing for modular and reusable handling of cross-cutting concerns. Middlewares are executed in an "onion model" before the main tool handler is called.
+
+### How to Use
+
+Here is a brief example of how to set up a server with the `Recovery`, `Logging`, and `Metrics` middlewares.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+    "time"
+
+    mcp "trpc.group/trpc-go/trpc-mcp-go"
+    "trpc.group/trpc-go/trpc-mcp-go/examples/middlewares"
+    "trpc.group/trpc-go/trpc-mcp-go/examples/middlewares/logging"
+    metricmw "trpc.group/trpc-go/trpc-mcp-go/examples/middlewares/metrics"
+)
+
+func main() {
+    // 1. Create a new server.
+    s := mcp.NewServer(
+        "my-server", "1.0.0",
+        mcp.WithStatelessMode(true),
+        mcp.WithServerPath(""),
+    )
+
+    // 2. Set up and register the Metrics middleware.
+    rec, shutdown, _ := metricmw.NewOtelMetricsRecorder()
+    defer func() { _ = shutdown(context.Background()) }()
+    s.Use(metricmw.NewMetricsMiddleware(metricmw.WithRecorder(rec)))
+
+    // 3. Register Logging and Recovery middlewares.
+    // Note: Recovery middleware should generally be the first (outermost) to catch all panics.
+    s.Use(middlewares.Recovery())
+    s.Use(middlewares.NewLoggingMiddleware(mcp.GetDefaultLogger()))
+
+    // 4. Register your business tools...
+    // s.RegisterTool(...)
+
+    // 5. Start the server.
+    fmt.Println("Server starting on :8080")
+    http.ListenAndServe(":8080", s.Handler())
+}
+```
+
+### Available Middlewares
+
+All middleware implementations are provided as examples in the `examples/middlewares/` directory.
+
+#### Recovery
+- **Panic Safety**: Catches panics anywhere in the request lifecycle.
+- **Clean Error Response**: Returns a clean, JSON-RPC 2.0 compliant `Internal Server Error` response.
+- **Configurable**: Supports custom logging, stack trace control, and panic filtering.
+- **Usage**:
+  ```go
+  // Default usage
+  s.Use(middlewares.Recovery())
+
+  // Advanced usage with custom error response
+  s.Use(middlewares.RecoveryWithOptions(
+      middlewares.WithCustomErrorResponse(func(ctx context.Context, req *mcp.JSONRPCRequest, panicErr interface{}) mcp.JSONRPCMessage {
+          return mcp.NewJSONRPCErrorResponse(
+              req.ID,
+              mcp.ErrCodeInternal,
+              "Service temporarily unavailable. Please try again later.",
+              nil,
+          )
+      }),
+  ))
+  ```
+
+#### Logging
+- **Structured Logging**: Provides structured, leveled logging for the entire request lifecycle.
+- **Standardized Interface**: Integrates with the project's standard `mcp.Logger` interface.
+- **Rich Context**: Can be configured to log request/response payloads and add custom fields from the `context`.
+- **Usage**:
+  ```go
+  logger := mcp.GetDefaultLogger()
+
+  // Register middleware to log all requests and their payloads
+  s.Use(middlewares.NewLoggingMiddleware(logger,
+      // Default is to only log errors; this logs all requests
+      middlewares.WithShouldLog(func(level logging.Level, duration time.Duration, err error) bool { 
+          return true 
+      }),
+      // Log the full request and response content
+      middlewares.WithPayloadLogging(true),
+  ))
+  ```
+
+#### Metrics
+- **OpenTelemetry Based**: Built on the OpenTelemetry standard for broad compatibility with platforms like Prometheus and Jaeger.
+- **Core Metrics**: Tracks essential metrics out-of-the-box:
+    - `mcp.server.requests.count`: Total number of requests.
+    - `mcp.server.errors.count`: Number of failed requests.
+    - `mcp.server.request.latency`: Request duration histogram.
+    - `mcp.server.requests.in_flight`: Number of concurrent requests.
+- **Usage**:
+  The `metrics` middleware requires an OpenTelemetry Collector and a Prometheus instance. A `docker-compose.yaml` file is provided in `examples/middlewares/metrics/` to easily start these dependencies.
+  **Verification Steps**:
+  1. `cd examples/middlewares/metrics/`
+  2. `docker-compose up -d`
+  3. Run the `metrics_integration_main.go` example and send some requests.
+  4. Access `http://localhost:9090` to query the core metrics in the Prometheus UI.
 
 ## Configuration
 
@@ -735,13 +847,13 @@ Define MCP tools using Go structs for automatic schema generation and type safet
 ```go
 // Define input/output structures
 type WeatherInput struct {
-    Location string `json:"location" jsonschema:"required,description=City name"`
-    Units    string `json:"units,omitempty" jsonschema:"description=Temperature units,enum=celsius,enum=fahrenheit,default=celsius"`
+    Location string `json:"location" jsonschema:"required,description=City name"
+    Units    string `json:"units,omitempty" jsonschema:"description=Temperature units,enum=celsius,enum=fahrenheit,default=celsius"
 }
 
 type WeatherOutput struct {
-    Temperature float64 `json:"temperature" jsonschema:"description=Current temperature"`
-    Description string  `json:"description" jsonschema:"description=Weather description"`
+    Temperature float64 `json:"temperature" jsonschema:"description=Current temperature"
+    Description string  `json:"description" jsonschema:"description=Weather description"
 }
 
 // Create tool with automatic schema generation

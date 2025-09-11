@@ -173,7 +173,7 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 	// Execute tests
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := newJSONRPCErrorResponse(tc.id, tc.code, tc.message, tc.data)
+			result := NewJSONRPCErrorResponse(tc.id, tc.code, tc.message, tc.data)
 
 			assert.Equal(t, tc.expected.JSONRPC, result.JSONRPC)
 			assert.Equal(t, tc.expected.ID, result.ID)
@@ -185,8 +185,8 @@ func TestNewJSONRPCErrorResponse(t *testing.T) {
 
 	// Test backward compatibility function
 	t.Run("Backward compatibility", func(t *testing.T) {
-		errResp1 := newJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
-		errResp2 := newJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
+		errResp1 := NewJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
+		errResp2 := NewJSONRPCErrorResponse(1, ErrCodeInvalidRequest, "Invalid request", nil)
 
 		assert.Equal(t, errResp1.JSONRPC, errResp2.JSONRPC)
 		assert.Equal(t, errResp1.ID, errResp2.ID)

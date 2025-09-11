@@ -1,0 +1,9 @@
+bbg/
+GEMINI.md
+
+# IDE configuration
+.idea/
+.vscode/
+
+# Compiled binaries
+main
