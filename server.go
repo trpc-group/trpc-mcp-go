@@ -77,6 +77,12 @@ type serverConfig struct {
 	// Tool list filter function
 	toolListFilter ToolListFilter
 
+	// Prompt list filter function
+	promptListFilter PromptListFilter
+
+	// Resource list filter function
+	resourceListFilter ResourceListFilter
+
 	// Method name modifier for external customization.
 	methodNameModifier MethodNameModifier
 }
@@ -163,10 +169,18 @@ func (s *Server) initComponents() {
 
 	// Create resource manager.
 	resourceManager := newResourceManager()
+	// Only set resource list filter if not nil.
+	if s.config.resourceListFilter != nil {
+		resourceManager.withResourceListFilter(s.config.resourceListFilter)
+	}
 	s.resourceManager = resourceManager
 
 	// Create prompt manager.
 	promptManager := newPromptManager()
+	// Only set prompt list filter if not nil.
+	if s.config.promptListFilter != nil {
+		promptManager.withPromptListFilter(s.config.promptListFilter)
+	}
 	s.promptManager = promptManager
 
 	// Create MCP handler.
@@ -303,6 +317,56 @@ func WithStatelessMode(enabled bool) ServerOption {
 func WithToolListFilter(filter ToolListFilter) ServerOption {
 	return func(s *Server) {
 		s.config.toolListFilter = filter
+	}
+}
+
+// WithPromptListFilter sets a prompt list filter that will be applied to prompts/list requests.
+// The filter function receives the request context and all registered prompts, and should
+// return a filtered list of prompts that should be visible to the client.
+//
+// The context may contain user information extracted from HTTP headers (in stateless mode)
+// or session information (in stateful mode).
+//
+// Example:
+//
+//	server := mcp.NewServer("my-server", "1.0",
+//	    mcp.WithHTTPContextFunc(extractUserInfo), // Extract user info from headers
+//	    mcp.WithPromptListFilter(func(ctx context.Context, prompts []*mcp.Prompt) []*mcp.Prompt {
+//	        userRole := mcp.GetUserRole(ctx)
+//	        if userRole == "admin" {
+//	            return prompts // Admin sees all prompts
+//	        }
+//	        return filterUserPrompts(prompts) // Filter for regular users
+//	    }),
+//	)
+func WithPromptListFilter(filter PromptListFilter) ServerOption {
+	return func(s *Server) {
+		s.config.promptListFilter = filter
+	}
+}
+
+// WithResourceListFilter sets a resource list filter that will be applied to resources/list requests.
+// The filter function receives the request context and all registered resources, and should
+// return a filtered list of resources that should be visible to the client.
+//
+// The context may contain user information extracted from HTTP headers (in stateless mode)
+// or session information (in stateful mode).
+//
+// Example:
+//
+//	server := mcp.NewServer("my-server", "1.0",
+//	    mcp.WithHTTPContextFunc(extractUserInfo), // Extract user info from headers
+//	    mcp.WithResourceListFilter(func(ctx context.Context, resources []*mcp.Resource) []*mcp.Resource {
+//	        userRole := mcp.GetUserRole(ctx)
+//	        if userRole == "admin" {
+//	            return resources // Admin sees all resources
+//	        }
+//	        return filterUserResources(resources) // Filter for regular users
+//	    }),
+//	)
+func WithResourceListFilter(filter ResourceListFilter) ServerOption {
+	return func(s *Server) {
+		s.config.resourceListFilter = filter
 	}
 }
 
