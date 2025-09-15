@@ -739,6 +739,24 @@ func (s *SSEServer) processRequestAsync(ctx context.Context, request *JSONRPCReq
 		return
 	}
 
+	// Check if result is already a JSON-RPC error.
+	if errorResp, ok := result.(*JSONRPCError); ok {
+		// Send error response directly through SSE.
+		fullResponseData, err := json.Marshal(errorResp)
+		if err != nil {
+			s.logger.Errorf("Error encoding error response: %v", err)
+			return
+		}
+		event := formatSSEEvent("message", fullResponseData)
+		select {
+		case session.eventQueue <- event:
+			// Successfully queued
+		default:
+			s.logger.Errorf("Failed to queue error response: event queue full for session %s", session.sessionID)
+		}
+		return
+	}
+
 	s.sendSuccessResponse(request.ID, result, session)
 }
 

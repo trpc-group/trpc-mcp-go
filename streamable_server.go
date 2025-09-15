@@ -340,22 +340,29 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 		}
 		resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 		if err != nil {
-			h.logger.Infof("Request processing failed: %v", err)
-			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
-			err = sseResponder.respond(ctx, w, r, errorResp, session)
-			if err != nil {
-				h.logger.Infof("Failed to send SSE error response: %v", err)
+			errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil)
+			if err := sseResponder.respond(ctx, w, r, errorResp, session); err != nil {
+				h.logger.Errorf("Failed to send SSE system error response: %v", err)
 			}
 			return
 		}
+
+		// Check if result is already a JSON-RPC error.
+		if errorResp, ok := resp.(*JSONRPCError); ok {
+			if err := sseResponder.respond(ctx, w, r, errorResp, session); err != nil {
+				h.logger.Errorf("Failed to send SSE business error response: %v", err)
+			}
+			return
+		}
+
+		// Wrap the result in a proper JSON-RPC response.
 		jsonrpcResponse := JSONRPCResponse{
 			JSONRPC: JSONRPCVersion,
 			ID:      req.ID,
 			Result:  resp,
 		}
-		err = sseResponder.respond(ctx, w, r, jsonrpcResponse, session)
-		if err != nil {
-			h.logger.Infof("Failed to send SSE final response: %v", err)
+		if err := sseResponder.respond(ctx, w, r, jsonrpcResponse, session); err != nil {
+			h.logger.Errorf("Failed to send SSE success response: %v", err)
 		}
 		return
 	}
@@ -367,17 +374,30 @@ func (h *httpServerHandler) handlePostRequest(ctx context.Context, w http.Respon
 	}
 	resp, err := h.requestHandler.handleRequest(reqCtx, &req, session)
 	if err != nil {
-		h.logger.Infof("Request processing failed: %v", err)
-		errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, "Internal server error", nil)
-		responder.respond(respCtx, w, r, errorResp, session)
+		errorResp := newJSONRPCErrorResponse(req.ID, ErrCodeInternal, err.Error(), nil)
+		if err := responder.respond(respCtx, w, r, errorResp, session); err != nil {
+			h.logger.Errorf("Failed to send system error response: %v", err)
+		}
 		return
 	}
+
+	// Check if result is already a JSON-RPC error.
+	if errorResp, ok := resp.(*JSONRPCError); ok {
+		if err := responder.respond(respCtx, w, r, errorResp, session); err != nil {
+			h.logger.Errorf("Failed to send business error response: %v", err)
+		}
+		return
+	}
+
+	// Wrap the result in a proper JSON-RPC response.
 	jsonrpcResponse := JSONRPCResponse{
 		JSONRPC: JSONRPCVersion,
 		ID:      req.ID,
 		Result:  resp,
 	}
-	responder.respond(respCtx, w, r, jsonrpcResponse, session)
+	if err := responder.respond(respCtx, w, r, jsonrpcResponse, session); err != nil {
+		h.logger.Errorf("Failed to send success response: %v", err)
+	}
 }
 
 // handlePostNotification handles JSON-RPC notifications
