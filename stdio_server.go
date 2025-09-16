@@ -183,22 +183,22 @@ func (s *StdioServer) UnregisterTools(names ...string) error {
 }
 
 // RegisterPrompt registers a prompt with its handler using the prompt manager.
-func (s *StdioServer) RegisterPrompt(prompt *Prompt, handler promptHandler) {
+func (s *StdioServer) RegisterPrompt(prompt *Prompt, handler promptHandler, options ...registerdPromptOption) {
 	if prompt == nil || handler == nil {
 		s.logger.Errorf("RegisterPrompt: prompt and handler cannot be nil")
 		return
 	}
-	s.promptManager.registerPrompt(prompt, handler)
+	s.promptManager.registerPrompt(prompt, handler, options...)
 	s.logger.Debugf("Registered prompt: %s", prompt.Name)
 }
 
 // RegisterResource registers a resource with its handler using the resource manager.
-func (s *StdioServer) RegisterResource(resource *Resource, handler resourceHandler) {
+func (s *StdioServer) RegisterResource(resource *Resource, handler resourceHandler, options ...registeredResourceOption) {
 	if resource == nil || handler == nil {
 		s.logger.Errorf("RegisterResource: resource and handler cannot be nil")
 		return
 	}
-	s.resourceManager.registerResource(resource, handler)
+	s.resourceManager.registerResource(resource, handler, options...)
 	s.logger.Debugf("Registered resource: %s", resource.URI)
 }
 
@@ -213,12 +213,12 @@ func (s *StdioServer) RegisterResources(resource *Resource, handler resourcesHan
 }
 
 // RegisterResourceTemplate registers a resource template with its handler.
-func (s *StdioServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler) {
+func (s *StdioServer) RegisterResourceTemplate(template *ResourceTemplate, handler resourceTemplateHandler, options ...registerResourceTemplateOption) {
 	if template == nil || handler == nil {
 		s.logger.Errorf("RegisterResourceTemplate: template and handler cannot be nil")
 		return
 	}
-	s.resourceManager.registerTemplate(template, handler)
+	s.resourceManager.registerTemplate(template, handler, options...)
 	s.logger.Debugf("Registered resource template: %s", template.Name)
 }
 
