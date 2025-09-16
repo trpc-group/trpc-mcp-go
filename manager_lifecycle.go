@@ -46,6 +46,9 @@ type lifecycleManager struct {
 
 	// Mutex for concurrent access
 	mu sync.RWMutex
+
+	// Whether sampling is enabled
+	samplingEnabled bool
 }
 
 // newLifecycleManager creates a lifecycle manager
@@ -112,6 +115,12 @@ func (m *lifecycleManager) withStatelessMode(isStateless bool) *lifecycleManager
 	return m
 }
 
+// withServerSamplingEnabled sets the sampling capability flag
+func (m *lifecycleManager) withServerSamplingEnabled(enabled bool) *lifecycleManager {
+	m.samplingEnabled = enabled
+	return m
+}
+
 // updateCapabilities updates the server capability information
 func (m *lifecycleManager) updateCapabilities() {
 	// Use map as an intermediate variable
@@ -139,6 +148,10 @@ func (m *lifecycleManager) updateCapabilities() {
 	// Preserve existing experimental features
 	if exp, ok := m.capabilities["experimental"]; ok {
 		capMap["experimental"] = exp
+	}
+
+	if m.samplingEnabled {
+		capMap["sampling"] = map[string]interface{}{}
 	}
 
 	// Update capabilities
@@ -269,6 +282,11 @@ func convertToServerCapabilities(capMap map[string]interface{}) ServerCapabiliti
 	// Handle experimental capability
 	if expMap, ok := capMap["experimental"].(map[string]interface{}); ok {
 		capabilities.Experimental = expMap
+	}
+
+	// Handle sampling capability
+	if _, ok := capMap["sampling"].(map[string]interface{}); ok {
+		capabilities.Sampling = &SamplingCapability{}
 	}
 
 	return capabilities
