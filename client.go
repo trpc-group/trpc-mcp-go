@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/reconnect"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
@@ -124,6 +125,9 @@ type Client struct {
 
 	// Retry configuration.
 	retryConfig *retry.Config // Configuration for retry behavior (optional).
+
+	// Reconnect configuration.
+	reconnectConfig *reconnect.Config // Configuration for reconnection behavior (optional).
 
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
@@ -662,6 +666,17 @@ func (c *Client) SendRootsListChangedNotification(ctx context.Context) error {
 	// Create roots list changed notification.
 	notification := NewJSONRPCNotificationFromMap(MethodNotificationsRootsListChanged, nil)
 	return c.transport.sendNotification(ctx, notification)
+}
+
+// setReconnectConfig sets the reconnection configuration for the client and its transport.
+func (c *Client) setReconnectConfig(config *reconnect.Config) {
+	c.reconnectConfig = config
+	// Set reconnect config on transport if it exists and supports reconnection
+	if c.transport != nil {
+		if reconnectableTransport, ok := c.transport.(interface{ setReconnectConfig(*reconnect.Config) }); ok {
+			reconnectableTransport.setReconnectConfig(c.reconnectConfig)
+		}
+	}
 }
 
 func isZeroStruct(x interface{}) bool {
