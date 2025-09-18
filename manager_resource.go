@@ -299,6 +299,13 @@ func (m *resourceManager) handleReadResource(ctx context.Context, req *JSONRPCRe
 		},
 	}
 
+	// Extract and set arguments if present.
+	if args, ok := paramsMap["arguments"]; ok && args != nil {
+		if argsMap, ok := args.(map[string]interface{}); ok {
+			readReq.Params.Arguments = argsMap
+		}
+	}
+
 	// Call resource handler
 	contents, err := registeredResource.Handler(ctx, readReq)
 	if err != nil {
