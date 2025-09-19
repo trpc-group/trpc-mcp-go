@@ -769,6 +769,187 @@ weatherHandler := mcp.NewTypedToolHandler(func(ctx context.Context, req *mcp.Cal
 
 See [`examples/schema-generation/`](examples/schema-generation/) for a complete example.
 
+## OAuth 2.1 Authentication Support
+The library provides comprehensive OAuth 2.1 authentication support for securing MCP servers and enabling authenticated client access.
+
+### Feature
+
+- **OAuth 2.1 Authorization Code Flow:** Full RFC-compliant authorization code flow with PKCE support
+- **JWT Token Handling:** HMAC-signed JWT access and refresh tokens with automatic validation
+- **Token Introspection:** RFC 7662 compliant token introspection for real-time validation
+- **Metadata Endpoints:** OAuth 2.1 and OpenID Connect discovery endpoints
+- **Audit Logging:** Comprehensive security logging with sensitive data protection
+- **Bearer Token Protection:** Automatic token verification for MCP endpoints
+
+### Server Configuration
+
+#### Basic OAuth Server Setup
+
+```go
+// Create OAuth provider (or use built-in proxy provider)
+provider := providers.NewProxyOAuthServerProvider(providers.ProxyOptions{
+    Endpoints: providers.ProxyEndpoints{
+        AuthorizationURL: "https://your-oauth-server.com/authorize",
+        TokenURL:         "https://your-oauth-server.com/token",
+        RevocationURL:    "https://your-oauth-server.com/revoke",
+        RegistrationURL:  "https://your-oauth-server.com/register",
+    },
+    VerifyAccessToken: yourTokenVerificationFunc,
+    GetClient: yourClientLookupFunc,
+})
+
+// Configure token verifier with introspection
+verifier, err := server.NewTokenVerifier(ctx, server.TokenVerifierConfig{
+    Introspection: &server.IntrospectionConfig{
+        Endpoint:         "https://your-oauth-server.com/introspect",
+        Timeout:          5 * time.Second,
+        CacheTTL:         30 * time.Second,
+        NegativeCacheTTL: 10 * time.Second,
+        UseOnJWTFail:     true,
+    },
+})
+
+// Create MCP server with OAuth protection
+mcpServer := mcp.NewServer(
+    "Secure-MCP-Server", "1.0.0",
+    
+    // OAuth routes for client authorization
+    mcp.WithOAuthRoutes(mcp.OAuthRoutesConfig{
+        Provider:        provider,
+        IssuerURL:       mustURL("https://your-oauth-server.com"),
+        BaseURL:         mustURL("https://your-mcp-server.com"),
+        ScopesSupported: []string{"mcp.read", "mcp.write"},
+    }),
+    
+    // OAuth metadata endpoints
+    mcp.WithOAuthMetadata(mcp.OAuthMetadataConfig{
+        ResourceServerURL: mustURL("https://your-mcp-server.com"),
+        ScopesSupported:   []string{"mcp.read", "mcp.write"},
+        ResourceName:      &"MCP Server",
+    }),
+    
+    // Bearer token authentication
+    mcp.WithBearerAuth(&mcp.BearerAuthConfig{
+        Enabled:        true,
+        RequiredScopes: []string{"mcp.read", "mcp.write"},
+        Verifier:       verifier,
+    }),
+    
+    // Security audit logging
+    mcp.WithAudit(&mcp.AuditConfig{
+        Enabled:             true,
+        Level:               "basic",
+        HashSensitiveData:   true,
+        IncludeRequestBody:  false,
+        IncludeResponseBody: false,
+        EndpointPatterns:    []string{"/mcp/", "/authorize", "/token"},
+    }),
+)
+```
+
+### Client Configuration
+
+#### OAuth-Enabled Client
+
+```go
+// Configure OAuth authentication flow
+authFlow := mcp.AuthFlowConfig{
+    ServerURL: "https://your-mcp-server.com",
+    ClientMetadata: auth.OAuthClientMetadata{
+        ClientName:              &"my-mcp-client",
+        GrantTypes:              []string{"authorization_code", "refresh_token"},
+        TokenEndpointAuthMethod: "client_secret_post",
+        RedirectURIs:            []string{"http://localhost:8080/callback"},
+        Scope:                   &"mcp.read mcp.write",
+    },
+    ResourceMetadataURL: &"https://your-mcp-server.com/.well-known/oauth-protected-resource",
+    RedirectURL:         "http://localhost:8080/callback",
+    Scope:               &"mcp.read mcp.write",
+    OnRedirect: func(u *url.URL) error {
+        fmt.Printf("Please authorize at: %s\n", u.String())
+        // Open browser or handle redirect
+        return nil
+    },
+}
+
+// Create authenticated MCP client
+client, err := mcp.NewClient(
+    "https://your-mcp-server.com/mcp",
+    mcp.Implementation{Name: "My-Client", Version: "1.0.0"},
+    mcp.WithAuthFlow(authFlow),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Complete authorization flow
+ctx := context.Background()
+_, err = client.Initialize(ctx, &mcp.InitializeRequest{})
+if err != nil {
+    log.Fatal(err)
+}
+
+// Handle authorization callback (typically in HTTP handler)
+authCode := "received_from_redirect"
+if err := client.CompleteAuthFlow(ctx, authCode); err != nil {
+    log.Fatal(err)
+}
+
+// Use authenticated client normally
+result, err := client.CallTool(ctx, &mcp.CallToolRequest{
+    Params: mcp.CallToolParams{Name: "secure_tool"},
+})
+```
+
+### Security Features
+
+#### Token Verification
+
+The library supports multiple token verification methods:
+
+- **JWT Verification:** Direct HMAC/RSA signature validation
+- **Token Introspection:** RFC 7662 compliant real-time validation
+- **Hybrid Mode:** JWT first with introspection fallback
+- **Caching:** Configurable positive/negative caching for performance
+
+#### Audit Logger
+
+Comprehensive security logging with configurable levels:
+
+```go
+mcp.WithAudit(&mcp.AuditConfig{
+    Enabled:             true,
+    Level:               "detailed", // "basic" or "detailed"
+    HashSensitiveData:   true,       // Hash tokens/secrets in logs
+    IncludeRequestBody:  true,       // Log request payloads
+    IncludeResponseBody: false,      // Log response payloads
+    EndpointPatterns:    []string{"/mcp/", "/oauth/"},
+    ExcludePatterns:     []string{"/health", "/metrics"},
+})
+```
+
+### OAuth Endpoints
+
+When OAuth is enabled, the server automatically provides:
+
+| Endpoint                                  | Description |
+|-------------------------------------------|-------------|
+| `/.well-known/oauth-protected-resource`   | OAuth 2.1 Resource Server Metadata (RFC 8705) |
+| `/.well-known/oauth-authorization-server` | OAuth 2.1 Authorization Server Metadata (RFC 8414) |
+| `/authorize`                              | Authorization endpoint for client redirects |
+| `/token`                                  |    Token endpoint for code/refresh exchange                                                 |
+| `/register`                               |  Dynamic client registration (RFC 7591)                                                   |
+| `/revoke`                                 |  Token revocation endpoint (RFC 7009)                                                   |
+
+### Complete Example
+
+See the OAuth authentication example at [`examples/auth/`](examples/auth) for a complete working implementation including:
+
+- Mock OAuth 2.1 server setup
+- MCP server with OAuth protection
+- MCP client with authorization flow
+- Token handling and refresh
+- Security audit logging
 
 ## Example Patterns
 
