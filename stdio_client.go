@@ -46,6 +46,10 @@ type StdioClient struct {
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
 	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
+
+	// Sampling support
+	samplingEnabled bool
+	samplingHandler SamplingHandler
 }
 
 // StdioClientOption defines configuration options for StdioClient.
@@ -113,6 +117,23 @@ func WithStdioCapabilities(capabilities map[string]interface{}) StdioClientOptio
 			c.capabilities[k] = v
 		}
 	}
+}
+
+// WithStdioSampling enables sampling capabilities and registers the processor
+func WithStdioSampling(handler SamplingHandler) StdioClientOption {
+	return func(c *StdioClient) {
+		c.samplingEnabled = true
+		c.samplingHandler = handler
+		if c.capabilities == nil {
+			c.capabilities = make(map[string]interface{})
+		}
+		c.capabilities["sampling"] = map[string]interface{}{}
+	}
+}
+
+// RegisterStdioSamplingHandler replaces the sampling processor at runtime
+func (c *StdioClient) RegisterStdioSamplingHandler(handler SamplingHandler) {
+	c.samplingHandler = handler
 }
 
 // Initialize initializes the client connection

@@ -57,6 +57,10 @@ type ServerCapabilities struct {
 	// autocompletion suggestions."}
 	Completions *CompletionsCapability `json:"completions,omitempty"`
 
+	// Sampling indicates whether the server supports requesting client-side sampling
+	// Corresponds to schema: "sampling": {"description": "Present if the server may request client-side sampling."}
+	Sampling *SamplingCapability `json:"sampling,omitempty"`
+
 	// Experimental indicates non-standard experimental capabilities that the server supports
 	// Corresponds to schema: "experimental": {"description": "Experimental, non-standard capabilities
 	// that the server supports."}
@@ -198,6 +202,9 @@ const (
 	// Utilities
 	MethodLoggingSetLevel = "logging/setLevel"
 	MethodPing            = "ping"
+
+	// Sampling
+	MethodSamplingCreateMessage = "sampling/createMessage"
 )
 
 // Protocol version constants

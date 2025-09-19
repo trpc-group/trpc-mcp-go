@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -128,6 +129,10 @@ type Client struct {
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
 	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
+
+	// Sampling support
+	samplingEnabled bool
+	samplingHandler SamplingHandler
 }
 
 // ClientOption client option function
@@ -198,6 +203,11 @@ type transportConfig struct {
 	// These options are typically not used by the default handler, but may be used by custom
 	// implementations that replace the default NewHTTPReqHandler function for extensibility.
 	httpReqHandlerOptions []HTTPReqHandlerOption
+}
+
+// SamplingHandler processes server to client sampling/createMessage requests
+type SamplingHandler interface {
+	CreateMessage(ctx context.Context, params *CreateMessageParams) (*CreateMessageResult, error)
 }
 
 // newDefaultTransportConfig creates a default transport configuration.
@@ -305,6 +315,24 @@ func WithHTTPReqHandlerOption(options ...HTTPReqHandlerOption) ClientOption {
 			c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
 		}
 	}
+}
+
+// WithSampling enables client-side sampling capability and registers a handler.
+func WithSampling(handler SamplingHandler) ClientOption {
+	return func(c *Client) {
+		c.samplingEnabled = true
+		c.samplingHandler = handler
+
+		if c.capabilities == nil {
+			c.capabilities = make(map[string]interface{})
+		}
+		c.capabilities["sampling"] = map[string]interface{}{}
+	}
+}
+
+// RegisterSamplingHandler allows changing the handler at runtime.
+func (c *Client) RegisterSamplingHandler(handler SamplingHandler) {
+	c.samplingHandler = handler
 }
 
 // GetState returns the current client state.
@@ -666,4 +694,34 @@ func (c *Client) SendRootsListChangedNotification(ctx context.Context) error {
 
 func isZeroStruct(x interface{}) bool {
 	return reflect.ValueOf(x).IsZero()
+}
+
+// dispatchReverseRequest is called by transports when the server sends a request to the client
+// It handles sampling/createMessage and returns (resultRaw, handled, error)
+func (c *Client) dispatchReverseRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, bool, error) {
+	switch req.Method {
+	case MethodSamplingCreateMessage:
+		if !c.samplingEnabled || c.samplingHandler == nil {
+			return nil, true, fmt.Errorf("sampling not enabled on client")
+		}
+		var params CreateMessageParams
+		if req.Params != nil {
+			b, _ := json.Marshal(req.Params)
+			if err := json.Unmarshal(b, &params); err != nil {
+				return nil, true, fmt.Errorf("invalid sampling params: %w", err)
+			}
+		}
+		res, err := c.samplingHandler.CreateMessage(ctx, &params)
+		if err != nil {
+			return nil, true, err
+		}
+		buf, err := json.Marshal(res)
+		if err != nil {
+			return nil, true, fmt.Errorf("marshal CreateMessageResult failed: %w", err)
+		}
+		raw := json.RawMessage(buf)
+		return &raw, true, nil
+	default:
+		return nil, false, nil
+	}
 }

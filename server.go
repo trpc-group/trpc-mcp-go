@@ -85,6 +85,9 @@ type serverConfig struct {
 
 	// Method name modifier for external customization.
 	methodNameModifier MethodNameModifier
+
+	// Whether to enable the Sampling function
+	enableSampling bool
 }
 
 // ServerNotificationHandler defines a function that handles notifications on the server side.
@@ -190,6 +193,7 @@ func (s *Server) initComponents() {
 		withResourceManager(resourceManager),
 		withPromptManager(promptManager),
 		withServer(s), // Set the server reference for notification handling.
+		withServerSamplingEnabled(s.config.enableSampling),
 	)
 
 	// Collect HTTP handler options.
@@ -374,6 +378,13 @@ func WithResourceListFilter(filter ResourceListFilter) ServerOption {
 func WithServerAddress(addr string) ServerOption {
 	return func(s *Server) {
 		s.config.addr = addr
+	}
+}
+
+// WithSamplingEnabled enables or disables the Sampling capability on the server.
+func WithSamplingEnabled(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.config.enableSampling = enabled
 	}
 }
 
@@ -720,4 +731,47 @@ func (s *Server) handleServerNotification(ctx context.Context, notification *JSO
 		s.logger.Debugf("No handler registered for notification method: %s", notification.Method)
 	}
 	return nil
+}
+
+// RequestSampling sends a sampling/createMessage request to the client and waits for the result
+func (s *Server) RequestSampling(ctx context.Context, params *CreateMessageParams) (*CreateMessageResult, error) {
+	if s.config.isStateless {
+		return nil, ErrStatelessMode
+	}
+
+	// Get session
+	session := ClientSessionFromContext(ctx)
+	if session == nil {
+		return nil, ErrSessionNotFound
+	}
+	sessionID := session.GetID()
+	if sessionID == "" {
+		return nil, ErrSessionNotFound
+	}
+
+	// Assemble a JSON-RPC request
+	requestID := s.requestID.Add(1)
+	req := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodSamplingCreateMessage,
+		},
+	}
+	if params != nil {
+		req.Params = *params
+	}
+
+	// Send and wait response
+	raw, err := s.SendRequest(ctx, sessionID, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send %s: %w", MethodSamplingCreateMessage, err)
+	}
+
+	// Parse result
+	var result CreateMessageResult
+	if err := json.Unmarshal(*raw, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse CreateMessageResult: %w", err)
+	}
+	return &result, nil
 }

@@ -343,3 +343,64 @@ func (p *DefaultRootsProvider) GetRoots() []Root {
 	copy(result, p.roots)
 	return result
 }
+
+// CreateMessage defines a server to client request to sample an LLM via the client
+// The client selects/guards the model and may include human-in-the-loop review
+type CreateMessage struct {
+	Request
+	CreateMessageParams `json:"params"`
+}
+
+// CreateMessageParms carries the prompt/messages and optional preferences
+type CreateMessageParams struct {
+	// Ordered chat history/messages (roles and multimodal content)
+	Messages []SamplingMessage `json:"messages"`
+
+	// Optional model selection hints/priorities
+	ModelPreferences *ModelPreferences `json:"modelPreferences,omitempty"`
+
+	// Optional system prompt to steer behavior
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+
+	// Whether to include MCP context (e.g., this server/all servers)
+	IncludeContext string `json:"includeContext,omitempty"`
+
+	// Usual generation controls
+	Temperature   float64  `json:"temperature,omitempty"`
+	MaxTokens     int      `json:"maxTokens,omitempty"`
+	StopSequences []string `json:"stopSequences,omitempty"`
+
+	// Free-form metadata (echoed back if useful to the client)
+	Metadata any `json:"metadata,omitempty"`
+}
+
+// CreateMessageResult is the client->server response with the sampled message
+type CreateMessageResult struct {
+	Result
+	SamplingMessage
+	Model      string `json:"model"`
+	StopReason string `json:"stopReason,omitempty"`
+}
+
+// SamplingMessage represents a chat message for/from the LLM.
+type SamplingMessage struct {
+	Role Role `json:"role"`
+	// Can be single item or array; we accept interface{} for flexibility.
+	// If you prefer strict typing, you can switch to []Content and marshal accordingly.
+	Content any `json:"content"`
+}
+
+// ModelPreferences guides the client when choosing a model.
+type ModelPreferences struct {
+	// Ordered hints; the client SHOULD check in order, then consider priorities.
+	Hints []ModelHint `json:"hints,omitempty"`
+	// 0..1 weights for trade-offs (optional)
+	CostPriority         float64 `json:"costPriority,omitempty"`
+	SpeedPriority        float64 `json:"speedPriority,omitempty"`
+	IntelligencePriority float64 `json:"intelligencePriority,omitempty"`
+}
+
+// ModelHint defines an extensible hint (e.g., substring of a model name).
+type ModelHint struct {
+	Name string `json:"name,omitempty"`
+}
