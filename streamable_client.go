@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/reconnect"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
@@ -53,6 +54,9 @@ type streamableHTTPClientTransport struct {
 
 	// Retry configuration
 	retryConfig *retry.Config
+
+	// Reconnect configuration
+	reconnectConfig *reconnect.Config
 
 	// GET SSE connection
 	getSSEConn struct {
@@ -201,21 +205,21 @@ func (t *streamableHTTPClientTransport) setRetryConfig(config *retry.Config) {
 	t.retryConfig = config
 }
 
-// SendRequest sends a request and waits for a response with retry support
+// SendRequest sends a request and waits for a response with retry and reconnect support
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
 	// If no retry config, use original implementation
 	if t.retryConfig == nil {
-		return t.send(ctx, req, nil)
+		return t.sendWithReconnect(ctx, req)
 	}
 
 	// Define the operation to be retried
 	var result *json.RawMessage
 	operation := func() error {
 		var err error
-		result, err = t.send(ctx, req, nil)
+		result, err = t.sendWithReconnect(ctx, req)
 		return err
 	}
 
@@ -227,6 +231,32 @@ func (t *streamableHTTPClientTransport) sendRequest(
 	}
 
 	return result, nil
+}
+
+// sendWithReconnect sends a request with reconnection support for stream disconnections
+func (t *streamableHTTPClientTransport) sendWithReconnect(
+	ctx context.Context,
+	req *JSONRPCRequest,
+) (*json.RawMessage, error) {
+	result, err := t.send(ctx, req, nil)
+
+	// Check if reconnection is needed and configured
+	if err != nil && t.reconnectConfig != nil {
+		if reconnect.IsStreamDisconnectedError(err) {
+			// Attempt stream reconnection
+			if reconnectErr := t.executeReconnect(ctx); reconnectErr != nil {
+				t.logger.Debug("Stream reconnection failed", "error", reconnectErr)
+				return nil, err // Return original error
+			}
+			// Retry the request after successful reconnection
+			return t.send(ctx, req, nil)
+		} else if reconnect.IsSessionExpiredError(err) {
+			// Session expired - wrap error for Agent layer handling
+			return nil, fmt.Errorf("session_expired: %w", err)
+		}
+	}
+
+	return result, err
 }
 
 // send sends a request and handles the response
@@ -971,4 +1001,89 @@ func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
 	}
 
 	t.establishGetSSE()
+}
+
+// setReconnectConfig sets the reconnection configuration for this transport.
+func (t *streamableHTTPClientTransport) setReconnectConfig(config *reconnect.Config) {
+	t.reconnectConfig = config
+}
+
+// executeReconnect attempts to reconnect the GET SSE stream using exponential backoff
+func (t *streamableHTTPClientTransport) executeReconnect(ctx context.Context) error {
+	if t.isStateless {
+		// Stateless mode doesn't support stream reconnection
+		return fmt.Errorf("reconnection not supported in stateless mode")
+	}
+
+	if !t.enableGetSSE {
+		// GET SSE is not enabled, nothing to reconnect
+		return fmt.Errorf("GET SSE not enabled, cannot reconnect stream")
+	}
+
+	config := t.reconnectConfig
+
+	for attempt := 1; attempt <= config.MaxReconnectAttempts; attempt++ {
+		// Calculate delay for this attempt
+		delay := config.CalculateDelay(attempt)
+
+		if delay > 0 {
+			t.logger.Debug("Waiting before reconnection attempt",
+				"attempt", attempt,
+				"delay", delay)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		t.logger.Debug("Attempting stream reconnection",
+			"attempt", attempt,
+			"last_event_id", t.lastEventID)
+
+		// Attempt to re-establish GET SSE connection
+		if err := t.reestablishGetSSE(ctx); err != nil {
+			t.logger.Debug("Reconnection attempt failed",
+				"attempt", attempt,
+				"error", err)
+
+			if attempt == config.MaxReconnectAttempts {
+				return fmt.Errorf("stream reconnection failed after %d attempts: %w",
+					attempt, err)
+			}
+			continue
+		}
+
+		t.logger.Debug("Stream reconnection successful", "attempt", attempt)
+		return nil
+	}
+
+	return fmt.Errorf("stream reconnection failed: max attempts exceeded")
+}
+
+// reestablishGetSSE re-establishes the GET SSE connection with last event ID for resumption
+func (t *streamableHTTPClientTransport) reestablishGetSSE(ctx context.Context) error {
+	// Close existing GET SSE connection if any
+	t.getSSEConn.mutex.Lock()
+	if t.getSSEConn.cancel != nil {
+		t.getSSEConn.cancel()
+	}
+	t.getSSEConn.active = false
+	t.getSSEConn.mutex.Unlock()
+
+	// Re-establish GET SSE connection using the last event ID for resumption
+	// This leverages the existing establishGetSSE method
+	t.establishGetSSE()
+
+	// Verify the connection was established
+	t.getSSEConn.mutex.Lock()
+	isActive := t.getSSEConn.active
+	t.getSSEConn.mutex.Unlock()
+
+	if !isActive {
+		return fmt.Errorf("failed to re-establish GET SSE connection")
+	}
+
+	return nil
 }
