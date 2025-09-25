@@ -17,7 +17,25 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// SessionIDGenerator defines an interface for generating custom session IDs.
+type SessionIDGenerator interface {
+	// GenerateSessionID generates a session ID based on the HTTP request.
+	// This allows implementations to include client IP, port, headers, etc.
+	GenerateSessionID(r *http.Request) string
+}
+
+// DefaultSessionIDGenerator is the default implementation that generates
+// UUID-based session IDs following the same pattern as trpc-agent-go.
+type DefaultSessionIDGenerator struct{}
+
+// GenerateSessionID generates a UUID-based session ID.
+func (g *DefaultSessionIDGenerator) GenerateSessionID(r *http.Request) string {
+	return fmt.Sprintf("sse-%s", uuid.New().String())
+}
 
 // sseSession represents an active SSE connection.
 type sseSession struct {
@@ -122,6 +140,7 @@ type SSEServer struct {
 	sessions             sync.Map                                                   // Active sessions.
 	httpServer           *http.Server                                               // HTTP server.
 	contextFunc          func(ctx context.Context, r *http.Request) context.Context // HTTP context function.
+	sessionIDGenerator   SessionIDGenerator                                         // Custom session ID generator.
 	keepAlive            bool                                                       // Whether to keep the connection alive.
 	keepAliveInterval    time.Duration                                              // Keep-alive interval.
 	logger               Logger                                                     // Logger for this server.
@@ -170,6 +189,7 @@ func NewSSEServer(name, version string, opts ...SSEOption) *SSEServer {
 		serverInfo:           serverInfo,
 		sseEndpoint:          "/sse",
 		messageEndpoint:      "/message",
+		sessionIDGenerator:   &DefaultSessionIDGenerator{}, // Default session ID generator
 		keepAlive:            true,
 		keepAliveInterval:    30 * time.Second,
 		logger:               GetDefaultLogger(),
@@ -269,6 +289,15 @@ func WithSSEResourceListFilter(filter ResourceListFilter) SSEOption {
 	}
 }
 
+// WithSSESessionIDGenerator sets a custom session ID generator for the SSE server.
+// This allows users to customize session ID generation, for example, to include
+// client IP and port information for load balancing node affinity.
+func WithSSESessionIDGenerator(generator SessionIDGenerator) SSEOption {
+	return func(s *SSEServer) {
+		s.sessionIDGenerator = generator
+	}
+}
+
 // Start starts the SSE server on the given address.
 func (s *SSEServer) Start(addr string) error {
 	return http.ListenAndServe(addr, s)
@@ -342,7 +371,7 @@ func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Create session.
-	sessionID := generateSessionID()
+	sessionID := s.sessionIDGenerator.GenerateSessionID(r)
 	session := &sseSession{
 		done:                make(chan struct{}),
 		eventQueue:          make(chan string, 100),
@@ -1072,11 +1101,6 @@ func (s *SSEServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	expectedEndpoints := fmt.Sprintf("%s%s, %s%s", s.basePath, sseEndpoint, s.basePath, messageEndpoint)
 	fmt.Fprintf(w, "Path not found: %s (expected endpoints: %s)", r.URL.Path, expectedEndpoints)
-}
-
-// generateSessionID generates a unique session ID.
-func generateSessionID() string {
-	return fmt.Sprintf("sse-%d-%d", time.Now().UnixNano(), time.Now().Unix())
 }
 
 // RegisterTool registers a tool with its handler.
