@@ -28,12 +28,12 @@ type SessionIDGenerator interface {
 	GenerateSessionID(r *http.Request) string
 }
 
-// DefaultSessionIDGenerator is the default implementation that generates
+// defaultSessionIDGenerator is the default implementation that generates
 // UUID-based session IDs following the same pattern as trpc-agent-go.
-type DefaultSessionIDGenerator struct{}
+type defaultSessionIDGenerator struct{}
 
 // GenerateSessionID generates a UUID-based session ID.
-func (g *DefaultSessionIDGenerator) GenerateSessionID(r *http.Request) string {
+func (g *defaultSessionIDGenerator) GenerateSessionID(r *http.Request) string {
 	return fmt.Sprintf("sse-%s", uuid.New().String())
 }
 
@@ -189,7 +189,7 @@ func NewSSEServer(name, version string, opts ...SSEOption) *SSEServer {
 		serverInfo:           serverInfo,
 		sseEndpoint:          "/sse",
 		messageEndpoint:      "/message",
-		sessionIDGenerator:   &DefaultSessionIDGenerator{}, // Default session ID generator
+		sessionIDGenerator:   &defaultSessionIDGenerator{}, // Default session ID generator
 		keepAlive:            true,
 		keepAliveInterval:    30 * time.Second,
 		logger:               GetDefaultLogger(),

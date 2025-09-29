@@ -253,8 +253,8 @@ func TestSSEServer_PathMethods(t *testing.T) {
 
 // TestSessionIDGenerator tests the custom session ID generator functionality
 func TestSessionIDGenerator(t *testing.T) {
-	t.Run("DefaultSessionIDGenerator", func(t *testing.T) {
-		generator := &DefaultSessionIDGenerator{}
+	t.Run("defaultSessionIDGenerator", func(t *testing.T) {
+		generator := &defaultSessionIDGenerator{}
 		req, _ := http.NewRequest("GET", "http://localhost:8080/sse", nil)
 
 		sessionID := generator.GenerateSessionID(req)
