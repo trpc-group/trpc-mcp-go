@@ -21,8 +21,9 @@ import (
 // a comprehensive schema that's compatible with the MCP protocol.
 func ConvertStructToOpenAPISchema[T any]() *openapi3.Schema {
 	var zero T
+	t := reflect.TypeOf(zero)
 	visited := make(map[reflect.Type]*openapi3.Schema)
-	return convertReflectTypeToSchemaWithVisited(reflect.TypeOf(zero), visited)
+	return convertReflectTypeToSchemaWithVisited(t, visited)
 }
 
 // convertReflectTypeToSchema converts a reflect.Type to openapi3.Schema
@@ -187,8 +188,25 @@ func getJSONFieldName(field reflect.StructField) string {
 func isRequiredField(field reflect.StructField) bool {
 	// Check jsonschema tag for explicit required
 	jsonschemaTag := field.Tag.Get("jsonschema")
-	if strings.Contains(jsonschemaTag, "required") {
+
+	// More precise matching for "required" - it should be either:
+	// 1. "required" (standalone)
+	// 2. "required," or "required;" (with comma or semicolon)
+	// 3. Start with "required," or "required;"
+	// 4. Support both comma and semicolon separators
+	if jsonschemaTag == "required" ||
+		strings.HasPrefix(jsonschemaTag, "required,") ||
+		strings.HasPrefix(jsonschemaTag, "required;") ||
+		strings.Contains(jsonschemaTag, ",required,") ||
+		strings.Contains(jsonschemaTag, ";required;") ||
+		strings.HasSuffix(jsonschemaTag, ",required") ||
+		strings.HasSuffix(jsonschemaTag, ";required") {
 		return true
+	}
+
+	// If jsonschema tag exists but doesn't contain required, respect that
+	if jsonschemaTag != "" {
+		return false
 	}
 
 	// Check json tag for omitempty
@@ -197,8 +215,79 @@ func isRequiredField(field reflect.StructField) bool {
 		return false
 	}
 
-	// Non-pointer types are typically required (unless omitempty)
-	return field.Type.Kind() != reflect.Ptr
+	// Non-pointer types are typically required (unless omitempty or explicitly specified in jsonschema)
+	result := field.Type.Kind() != reflect.Ptr
+	return result
+}
+
+// IsRequiredFieldForTest exports isRequiredField for testing
+func IsRequiredFieldForTest(field reflect.StructField) bool {
+	return isRequiredField(field)
+}
+
+// parseDirectives splits jsonschema tag by semicolon (new format) or comma (legacy format)
+func parseDirectives(tag string) []string {
+	// Check if using new semicolon-based format
+	if strings.Contains(tag, ";") {
+		parts := strings.Split(tag, ";")
+		var directives []string
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				directives = append(directives, part)
+			}
+		}
+		return directives
+	}
+
+	// Legacy comma-based format - handle description with commas
+	var directives []string
+	var current strings.Builder
+	inDescription := false
+
+	parts := strings.Split(tag, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+
+		if strings.HasPrefix(part, "description=") {
+			if current.Len() > 0 {
+				directives = append(directives, current.String())
+				current.Reset()
+			}
+			current.WriteString(part)
+			inDescription = true
+		} else if inDescription {
+			// Continue building description until we hit a known directive
+			if strings.Contains(part, "=") && (strings.HasPrefix(part, "title=") ||
+				strings.HasPrefix(part, "minLength=") || strings.HasPrefix(part, "maxLength=") ||
+				strings.HasPrefix(part, "minimum=") || strings.HasPrefix(part, "maximum=") ||
+				strings.HasPrefix(part, "minItems=") || strings.HasPrefix(part, "maxItems=") ||
+				strings.HasPrefix(part, "default=") || strings.HasPrefix(part, "enum=") ||
+				part == "required" || part == "uniqueItems") {
+				// This is a new directive, finish description
+				directives = append(directives, current.String())
+				current.Reset()
+				current.WriteString(part)
+				inDescription = false
+			} else {
+				// Continue description, preserve original spacing
+				current.WriteString(", ")
+				current.WriteString(part)
+			}
+		} else {
+			if current.Len() > 0 {
+				directives = append(directives, current.String())
+				current.Reset()
+			}
+			current.WriteString(part)
+		}
+	}
+
+	if current.Len() > 0 {
+		directives = append(directives, current.String())
+	}
+
+	return directives
 }
 
 // parseJSONSchemaTags parses jsonschema struct tags and applies them to the schema
@@ -208,8 +297,8 @@ func parseJSONSchemaTags(tag reflect.StructTag, schema *openapi3.Schema) error {
 		return nil
 	}
 
-	// Split by comma to get individual directives
-	directives := strings.Split(jsonschemaTag, ",")
+	// Split by comma to get individual directives, but handle special cases like description with commas
+	directives := parseDirectives(jsonschemaTag)
 
 	for _, directive := range directives {
 		directive = strings.TrimSpace(directive)
@@ -230,6 +319,8 @@ func parseJSONSchemaTags(tag reflect.StructTag, schema *openapi3.Schema) error {
 			value := strings.TrimSpace(parts[1])
 
 			switch key {
+			case "title":
+				schema.Title = value
 			case "description":
 				schema.Description = value
 			case "format":
@@ -252,6 +343,14 @@ func parseJSONSchemaTags(tag reflect.StructTag, schema *openapi3.Schema) error {
 				if maxLen, err := strconv.ParseUint(value, 10, 64); err == nil {
 					schema.MaxLength = &maxLen
 				}
+			case "minItems":
+				if minItems, err := strconv.ParseUint(value, 10, 64); err == nil {
+					schema.MinItems = minItems
+				}
+			case "maxItems":
+				if maxItems, err := strconv.ParseUint(value, 10, 64); err == nil {
+					schema.MaxItems = &maxItems
+				}
 			case "enum":
 				// Handle enum values (multiple enum=value directives)
 				if schema.Enum == nil {
@@ -260,10 +359,39 @@ func parseJSONSchemaTags(tag reflect.StructTag, schema *openapi3.Schema) error {
 				// Add single enum value (standard format: enum=val1,enum=val2,enum=val3)
 				schema.Enum = append(schema.Enum, value)
 			case "default":
-				schema.Default = value
+				// Convert default value based on schema type
+				if schema.Type != nil && len(*schema.Type) > 0 {
+					switch (*schema.Type)[0] {
+					case "integer":
+						if intVal, err := strconv.ParseInt(value, 10, 64); err == nil {
+							schema.Default = int(intVal)
+						} else {
+							schema.Default = value // fallback to string
+						}
+					case "number":
+						if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+							schema.Default = floatVal
+						} else {
+							schema.Default = value // fallback to string
+						}
+					case "boolean":
+						if boolVal, err := strconv.ParseBool(value); err == nil {
+							schema.Default = boolVal
+						} else {
+							schema.Default = value // fallback to string
+						}
+					default:
+						schema.Default = value // string types
+					}
+				} else {
+					schema.Default = value // fallback to string
+				}
 			case "example":
 				schema.Example = value
 			}
+		} else if directive == "uniqueItems" {
+			// Handle standalone uniqueItems directive (no value)
+			schema.UniqueItems = true
 		}
 	}
 
