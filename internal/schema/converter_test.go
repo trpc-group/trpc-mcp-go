@@ -706,3 +706,198 @@ func TestConvertStructToOpenAPISchema_MoreEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestConvertStructToOpenAPISchema_SemicolonSeparator(t *testing.T) {
+	t.Run("SemicolonFormat", func(t *testing.T) {
+		type TestStruct struct {
+			// Test semicolon format with comma in description
+			SeriesName string `jsonschema:"title=系列名称;description=数据系列的显示名称, 支持中文;required"`
+			Theme      string `jsonschema:"enum=light;enum=dark;default=light;description=UI主题选择"`
+			Count      int    `jsonschema:"minimum=1;maximum=100;default=10;description=数据项数量"`
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		// Test SeriesName with semicolon format and comma in description
+		seriesField := schema.Properties["SeriesName"]
+		if seriesField.Value.Title != "系列名称" {
+			t.Errorf("Title: got %q, want %q", seriesField.Value.Title, "系列名称")
+		}
+		if seriesField.Value.Description != "数据系列的显示名称, 支持中文" {
+			t.Errorf("Description: got %q, want %q", seriesField.Value.Description, "数据系列的显示名称, 支持中文")
+		}
+		if !contains(schema.Required, "SeriesName") {
+			t.Error("SeriesName should be required")
+		}
+
+		// Test Theme enum with semicolon format
+		themeField := schema.Properties["Theme"]
+		expectedEnum := []interface{}{"light", "dark"}
+		if !reflect.DeepEqual(themeField.Value.Enum, expectedEnum) {
+			t.Errorf("Theme enum: got %v, want %v", themeField.Value.Enum, expectedEnum)
+		}
+		if themeField.Value.Default != "light" {
+			t.Errorf("Theme default: got %v, want %v", themeField.Value.Default, "light")
+		}
+
+		// Test Count with semicolon format
+		countField := schema.Properties["Count"]
+		if countField.Value.Min == nil || *countField.Value.Min != 1 {
+			t.Errorf("Count minimum: got %v, want 1", countField.Value.Min)
+		}
+		if countField.Value.Max == nil || *countField.Value.Max != 100 {
+			t.Errorf("Count maximum: got %v, want 100", countField.Value.Max)
+		}
+		if countField.Value.Default != 10 {
+			t.Errorf("Count default: got %v, want 10", countField.Value.Default)
+		}
+	})
+
+	t.Run("LegacyCommaFormat", func(t *testing.T) {
+		type TestStruct struct {
+			// Test legacy comma format without comma in description
+			Status string `jsonschema:"required,description=Status value,enum=success,enum=error"`
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		statusField := schema.Properties["Status"]
+		if statusField.Value.Description != "Status value" {
+			t.Errorf("Description: got %q, want %q", statusField.Value.Description, "Status value")
+		}
+		expectedEnum := []interface{}{"success", "error"}
+		if !reflect.DeepEqual(statusField.Value.Enum, expectedEnum) {
+			t.Errorf("Status enum: got %v, want %v", statusField.Value.Enum, expectedEnum)
+		}
+		if !contains(schema.Required, "Status") {
+			t.Error("Status should be required")
+		}
+	})
+}
+
+func TestConvertStructToOpenAPISchema_NewJSONSchemaTags(t *testing.T) {
+	t.Run("TitleTag", func(t *testing.T) {
+		type TestStruct struct {
+			UserName string `jsonschema:"title=用户名;description=用户的显示名称"`
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		userField := schema.Properties["UserName"]
+		if userField.Value.Title != "用户名" {
+			t.Errorf("Title: got %q, want %q", userField.Value.Title, "用户名")
+		}
+		if userField.Value.Description != "用户的显示名称" {
+			t.Errorf("Description: got %q, want %q", userField.Value.Description, "用户的显示名称")
+		}
+	})
+
+	t.Run("ArrayConstraints", func(t *testing.T) {
+		type TestStruct struct {
+			Tags      []string `jsonschema:"minItems=1;maxItems=5;description=标签列表"`
+			UniqueIDs []int    `jsonschema:"uniqueItems;minItems=0;description=唯一ID列表"`
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		// Test Tags with minItems and maxItems
+		tagsField := schema.Properties["Tags"]
+		if tagsField.Value.MinItems != 1 {
+			t.Errorf("Tags minItems: got %v, want 1", tagsField.Value.MinItems)
+		}
+		if tagsField.Value.MaxItems == nil || *tagsField.Value.MaxItems != 5 {
+			t.Errorf("Tags maxItems: got %v, want 5", tagsField.Value.MaxItems)
+		}
+		if tagsField.Value.Description != "标签列表" {
+			t.Errorf("Tags description: got %q, want %q", tagsField.Value.Description, "标签列表")
+		}
+
+		// Test UniqueIDs with uniqueItems
+		uniqueField := schema.Properties["UniqueIDs"]
+		if !uniqueField.Value.UniqueItems {
+			t.Error("UniqueIDs should have uniqueItems=true")
+		}
+		if uniqueField.Value.MinItems != 0 {
+			t.Errorf("UniqueIDs minItems: got %v, want 0", uniqueField.Value.MinItems)
+		}
+	})
+
+	t.Run("SmartDefaultConversion", func(t *testing.T) {
+		type TestStruct struct {
+			Count       int     `jsonschema:"default=42"`
+			Price       float64 `jsonschema:"default=19.99"`
+			IsActive    bool    `jsonschema:"default=true"`
+			Name        string  `jsonschema:"default=defaultName"`
+			InvalidInt  int     `jsonschema:"default=notAnInt"`
+			InvalidBool bool    `jsonschema:"default=notABool"`
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		// Test integer default conversion
+		countField := schema.Properties["Count"]
+		if countField.Value.Default != 42 {
+			t.Errorf("Count default: got %v (type %T), want 42 (int)", countField.Value.Default, countField.Value.Default)
+		}
+
+		// Test float default conversion
+		priceField := schema.Properties["Price"]
+		if priceField.Value.Default != 19.99 {
+			t.Errorf("Price default: got %v (type %T), want 19.99 (float64)", priceField.Value.Default, priceField.Value.Default)
+		}
+
+		// Test boolean default conversion
+		activeField := schema.Properties["IsActive"]
+		if activeField.Value.Default != true {
+			t.Errorf("IsActive default: got %v (type %T), want true (bool)", activeField.Value.Default, activeField.Value.Default)
+		}
+
+		// Test string default (no conversion)
+		nameField := schema.Properties["Name"]
+		if nameField.Value.Default != "defaultName" {
+			t.Errorf("Name default: got %v, want %q", nameField.Value.Default, "defaultName")
+		}
+
+		// Test invalid conversions fall back to string
+		invalidIntField := schema.Properties["InvalidInt"]
+		if invalidIntField.Value.Default != "notAnInt" {
+			t.Errorf("InvalidInt default: got %v, want %q (fallback to string)", invalidIntField.Value.Default, "notAnInt")
+		}
+
+		invalidBoolField := schema.Properties["InvalidBool"]
+		if invalidBoolField.Value.Default != "notABool" {
+			t.Errorf("InvalidBool default: got %v, want %q (fallback to string)", invalidBoolField.Value.Default, "notABool")
+		}
+	})
+}
+
+func TestConvertStructToOpenAPISchema_RequiredFieldLogicEnhanced(t *testing.T) {
+	t.Run("SemicolonRequiredHandling", func(t *testing.T) {
+		type TestStruct struct {
+			// Test various required patterns with semicolon
+			Required1    string `jsonschema:"required"`
+			Required2    string `jsonschema:"required;description=test"`
+			Required3    string `jsonschema:"description=test;required"`
+			Required4    string `jsonschema:"title=标题;required;description=描述"`
+			NotRequired1 string `jsonschema:"description=test"`
+			NotRequired2 string `json:",omitempty"`
+			NotRequired3 *string
+		}
+		schema := ConvertStructToOpenAPISchema[TestStruct]()
+
+		expectedRequired := []string{"Required1", "Required2", "Required3", "Required4"}
+
+		if len(schema.Required) != len(expectedRequired) {
+			t.Errorf("Expected %d required fields, got %d: %v", len(expectedRequired), len(schema.Required), schema.Required)
+		}
+
+		for _, field := range expectedRequired {
+			if !contains(schema.Required, field) {
+				t.Errorf("Field %s should be required", field)
+			}
+		}
+
+		// These should not be required
+		notRequiredFields := []string{"NotRequired1", "NotRequired2", "NotRequired3"}
+		for _, field := range notRequiredFields {
+			if contains(schema.Required, field) {
+				t.Errorf("Field %s should not be required", field)
+			}
+		}
+	})
+}

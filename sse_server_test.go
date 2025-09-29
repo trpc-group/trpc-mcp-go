@@ -145,6 +145,112 @@ func TestSSEServer_RegisterAndUnregisterTool(t *testing.T) {
 	}
 }
 
+func TestSSEServer_PathMethods(t *testing.T) {
+	t.Run("DefaultPaths", func(t *testing.T) {
+		// Create SSE server with default configuration
+		server := NewSSEServer("test-server", "1.0.0")
+
+		// Test default paths
+		if server.BasePath() != "" {
+			t.Errorf("Expected default BasePath to be empty, got %q", server.BasePath())
+		}
+		if server.SSEEndpoint() != "/sse" {
+			t.Errorf("Expected default SSEEndpoint to be '/sse', got %q", server.SSEEndpoint())
+		}
+		if server.MessageEndpoint() != "/message" {
+			t.Errorf("Expected default MessageEndpoint to be '/message', got %q", server.MessageEndpoint())
+		}
+		if server.SSEPath() != "/sse" {
+			t.Errorf("Expected default SSEPath to be '/sse', got %q", server.SSEPath())
+		}
+		if server.MessagePath() != "/message" {
+			t.Errorf("Expected default MessagePath to be '/message', got %q", server.MessagePath())
+		}
+	})
+
+	t.Run("CustomBasePath", func(t *testing.T) {
+		// Create SSE server with custom base path
+		server := NewSSEServer("test-server", "1.0.0", WithBasePath("/api/v1"))
+
+		// Test custom paths
+		if server.BasePath() != "/api/v1" {
+			t.Errorf("Expected BasePath to be '/api/v1', got %q", server.BasePath())
+		}
+		if server.SSEEndpoint() != "/sse" {
+			t.Errorf("Expected SSEEndpoint to be '/sse', got %q", server.SSEEndpoint())
+		}
+		if server.MessageEndpoint() != "/message" {
+			t.Errorf("Expected MessageEndpoint to be '/message', got %q", server.MessageEndpoint())
+		}
+		if server.SSEPath() != "/api/v1/sse" {
+			t.Errorf("Expected SSEPath to be '/api/v1/sse', got %q", server.SSEPath())
+		}
+		if server.MessagePath() != "/api/v1/message" {
+			t.Errorf("Expected MessagePath to be '/api/v1/message', got %q", server.MessagePath())
+		}
+	})
+
+	t.Run("CustomEndpoints", func(t *testing.T) {
+		// Create SSE server with custom endpoints
+		server := NewSSEServer("test-server", "1.0.0",
+			WithBasePath("/mcp"),
+			WithSSEEndpoint("/events"),
+			WithMessageEndpoint("/msgs"))
+
+		// Test custom endpoint paths
+		if server.BasePath() != "/mcp" {
+			t.Errorf("Expected BasePath to be '/mcp', got %q", server.BasePath())
+		}
+		if server.SSEEndpoint() != "/events" {
+			t.Errorf("Expected SSEEndpoint to be '/events', got %q", server.SSEEndpoint())
+		}
+		if server.MessageEndpoint() != "/msgs" {
+			t.Errorf("Expected MessageEndpoint to be '/msgs', got %q", server.MessageEndpoint())
+		}
+		if server.SSEPath() != "/mcp/events" {
+			t.Errorf("Expected SSEPath to be '/mcp/events', got %q", server.SSEPath())
+		}
+		if server.MessagePath() != "/mcp/msgs" {
+			t.Errorf("Expected MessagePath to be '/mcp/msgs', got %q", server.MessagePath())
+		}
+	})
+
+	t.Run("EmptyBasePath", func(t *testing.T) {
+		// Create SSE server with empty base path
+		server := NewSSEServer("test-server", "1.0.0", WithBasePath(""))
+
+		// Test empty base path
+		if server.BasePath() != "" {
+			t.Errorf("Expected BasePath to be empty, got %q", server.BasePath())
+		}
+		if server.SSEPath() != "/sse" {
+			t.Errorf("Expected SSEPath to be '/sse', got %q", server.SSEPath())
+		}
+		if server.MessagePath() != "/message" {
+			t.Errorf("Expected MessagePath to be '/message', got %q", server.MessagePath())
+		}
+	})
+
+	t.Run("RootBasePath", func(t *testing.T) {
+		// Create SSE server with root base path
+		server := NewSSEServer("test-server", "1.0.0", WithBasePath("/"))
+
+		// Test root base path - "/" might be normalized to empty string
+		basePath := server.BasePath()
+		if basePath != "/" && basePath != "" {
+			t.Errorf("Expected BasePath to be '/' or empty, got %q", basePath)
+		}
+
+		// SSE and Message paths should still be correct
+		if server.SSEPath() != "/sse" {
+			t.Errorf("Expected SSEPath to be '/sse', got %q", server.SSEPath())
+		}
+		if server.MessagePath() != "/message" {
+			t.Errorf("Expected MessagePath to be '/message', got %q", server.MessagePath())
+		}
+	})
+}
+
 // TestSessionIDGenerator tests the custom session ID generator functionality
 func TestSessionIDGenerator(t *testing.T) {
 	t.Run("DefaultSessionIDGenerator", func(t *testing.T) {

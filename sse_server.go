@@ -1356,3 +1356,28 @@ func (s *SSEServer) UnregisterNotificationHandler(method string) {
 		s.logger.Debugf("Unregistered notification handler for method: %s", method)
 	}
 }
+
+// BasePath returns the base path of the SSE server.
+func (s *SSEServer) BasePath() string {
+	return s.basePath
+}
+
+// SSEEndpoint returns the SSE endpoint path.
+func (s *SSEServer) SSEEndpoint() string {
+	return s.sseEndpoint
+}
+
+// MessageEndpoint returns the message endpoint path.
+func (s *SSEServer) MessageEndpoint() string {
+	return s.messageEndpoint
+}
+
+// SSEPath returns the full SSE path (basePath + sseEndpoint).
+func (s *SSEServer) SSEPath() string {
+	return s.basePath + s.sseEndpoint
+}
+
+// MessagePath returns the full message path (basePath + messageEndpoint).
+func (s *SSEServer) MessagePath() string {
+	return s.basePath + s.messageEndpoint
+}
