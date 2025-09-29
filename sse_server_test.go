@@ -8,6 +8,8 @@ package mcp
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -247,4 +249,92 @@ func TestSSEServer_PathMethods(t *testing.T) {
 			t.Errorf("Expected MessagePath to be '/message', got %q", server.MessagePath())
 		}
 	})
+}
+
+// TestSessionIDGenerator tests the custom session ID generator functionality
+func TestSessionIDGenerator(t *testing.T) {
+	t.Run("defaultSessionIDGenerator", func(t *testing.T) {
+		generator := &defaultSessionIDGenerator{}
+		req, _ := http.NewRequest("GET", "http://localhost:8080/sse", nil)
+
+		sessionID := generator.GenerateSessionID(req)
+
+		// Should start with "sse-" prefix
+		if !strings.HasPrefix(sessionID, "sse-") {
+			t.Errorf("Expected session ID to start with 'sse-', got: %s", sessionID)
+		}
+
+		// Should be longer than just the prefix (UUID should be added)
+		if len(sessionID) <= 4 {
+			t.Errorf("Expected session ID to be longer than prefix, got: %s", sessionID)
+		}
+
+		// Multiple calls should generate different IDs
+		sessionID2 := generator.GenerateSessionID(req)
+		if sessionID == sessionID2 {
+			t.Errorf("Expected different session IDs, got same: %s", sessionID)
+		}
+	})
+
+	t.Run("CustomSessionIDGenerator", func(t *testing.T) {
+		// Custom generator that includes client IP in session ID
+		generator := customSessionIDGenerator(func(r *http.Request) string {
+			return "custom-session-" + r.RemoteAddr
+		})
+
+		req, _ := http.NewRequest("GET", "http://localhost:8080/sse", nil)
+		req.RemoteAddr = "192.168.1.100:54321"
+
+		sessionID := generator.GenerateSessionID(req)
+		expected := "custom-session-192.168.1.100:54321"
+
+		if sessionID != expected {
+			t.Errorf("Expected session ID '%s', got: %s", expected, sessionID)
+		}
+	})
+}
+
+// TestSSEServerWithCustomSessionIDGenerator tests SSE server with custom session ID generator
+func TestSSEServerWithCustomSessionIDGenerator(t *testing.T) {
+	// Create a custom session ID generator
+	testGenerator := &testSessionIDGenerator{
+		prefix: "test-session",
+	}
+
+	// Create SSE server with custom generator
+	server := NewSSEServer(
+		"test-server",
+		"1.0.0",
+		WithSSESessionIDGenerator(testGenerator),
+	)
+
+	// Verify the custom generator is set
+	if server.sessionIDGenerator != testGenerator {
+		t.Errorf("Expected custom session ID generator to be set")
+	}
+
+	// Test session ID generation
+	req, _ := http.NewRequest("GET", "http://localhost:8080/sse", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+
+	sessionID := server.sessionIDGenerator.GenerateSessionID(req)
+
+	if !strings.HasPrefix(sessionID, "test-session") {
+		t.Errorf("Expected session ID to start with 'test-session', got: %s", sessionID)
+	}
+}
+
+// Helper types for testing
+type customSessionIDGenerator func(r *http.Request) string
+
+func (f customSessionIDGenerator) GenerateSessionID(r *http.Request) string {
+	return f(r)
+}
+
+type testSessionIDGenerator struct {
+	prefix string
+}
+
+func (g *testSessionIDGenerator) GenerateSessionID(r *http.Request) string {
+	return g.prefix + "-" + r.RemoteAddr + "-generated"
 }
