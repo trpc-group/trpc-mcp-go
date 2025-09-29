@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.6 (2025-09-29)
+
+### Features
+- feat: enhance jsonschema tag support and add SSE server path method (#84)
+- feat: align prompt/resource list filtering with tools (#77)
+- feat(sse): add custom session ID generator support (#83)
+
+### Fixes
+- fix: Resource arguments not passed to handler (#82)
+- fix: fix double-wrapped JSON-RPC error in HTTP transports (#79)
+
 ## 0.0.5 (2025-09-05)
 
 ### Features
