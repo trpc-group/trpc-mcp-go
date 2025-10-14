@@ -110,10 +110,18 @@ type ConfigSetting struct {
 	Value string `json:"value" jsonschema:"required"`
 }
 
-// Test cases
+// Helper function for inline mode tests
+func convertInlineMode[T any]() *openapi3.Schema {
+	return ConvertStructToOpenAPISchemaWithOptions[T](ConverterOptions{
+		UseReferences:  false,
+		MaxInlineDepth: 6,
+	})
+}
+
+// Test cases - Inline Mode
 
 func TestConvertStructToOpenAPISchema_BasicTypes(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[BasicTypesStruct]()
+	schema := convertInlineMode[BasicTypesStruct]()
 
 	// Verify it's an object
 	if schema.Type == nil || (*schema.Type)[0] != "object" {
@@ -141,7 +149,7 @@ func TestConvertStructToOpenAPISchema_BasicTypes(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_PointerTypes(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[PointerTypesStruct]()
+	schema := convertInlineMode[PointerTypesStruct]()
 
 	// Pointer fields should not be required (have omitempty)
 	if len(schema.Required) != 0 {
@@ -156,7 +164,7 @@ func TestConvertStructToOpenAPISchema_PointerTypes(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_ArraySlice(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[ArraySliceStruct]()
+	schema := convertInlineMode[ArraySliceStruct]()
 
 	// Test string array
 	arrayField := schema.Properties["stringArray"].Value
@@ -184,7 +192,7 @@ func TestConvertStructToOpenAPISchema_ArraySlice(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_Maps(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[MapStruct]()
+	schema := convertInlineMode[MapStruct]()
 
 	// Test string map
 	stringMapField := schema.Properties["stringMap"].Value
@@ -208,7 +216,7 @@ func TestConvertStructToOpenAPISchema_Maps(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_JSONSchemaTags(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[JSONSchemaTagsStruct]()
+	schema := convertInlineMode[JSONSchemaTagsStruct]()
 
 	// Debug: print all properties
 	for name, prop := range schema.Properties {
@@ -277,7 +285,7 @@ func TestConvertStructToOpenAPISchema_JSONSchemaTags(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_NestedStruct(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[NestedStruct]()
+	schema := convertInlineMode[NestedStruct]()
 
 	// Test top-level required fields
 	expectedRequired := []string{"id", "user"}
@@ -322,7 +330,7 @@ func TestConvertStructToOpenAPISchema_NestedStruct(t *testing.T) {
 }
 
 func TestConvertStructToOpenAPISchema_ComplexNested(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[ComplexNestedStruct]()
+	schema := convertInlineMode[ComplexNestedStruct]()
 
 	// Test deeply nested structure
 	itemsField := schema.Properties["items"].Value
@@ -348,13 +356,13 @@ func TestConvertStructToOpenAPISchema_ComplexNested(t *testing.T) {
 
 func TestConvertStructToOpenAPISchema_SerializesToValidJSON(t *testing.T) {
 	testCases := []interface{}{
-		ConvertStructToOpenAPISchema[BasicTypesStruct](),
-		ConvertStructToOpenAPISchema[PointerTypesStruct](),
-		ConvertStructToOpenAPISchema[ArraySliceStruct](),
-		ConvertStructToOpenAPISchema[MapStruct](),
-		ConvertStructToOpenAPISchema[JSONSchemaTagsStruct](),
-		ConvertStructToOpenAPISchema[NestedStruct](),
-		ConvertStructToOpenAPISchema[ComplexNestedStruct](),
+		convertInlineMode[BasicTypesStruct](),
+		convertInlineMode[PointerTypesStruct](),
+		convertInlineMode[ArraySliceStruct](),
+		convertInlineMode[MapStruct](),
+		convertInlineMode[JSONSchemaTagsStruct](),
+		convertInlineMode[NestedStruct](),
+		convertInlineMode[ComplexNestedStruct](),
 	}
 
 	for i, schema := range testCases {
@@ -368,7 +376,7 @@ func TestConvertStructToOpenAPISchema_SerializesToValidJSON(t *testing.T) {
 func TestConvertStructToOpenAPISchema_EmptyStruct(t *testing.T) {
 	type EmptyStruct struct{}
 
-	schema := ConvertStructToOpenAPISchema[EmptyStruct]()
+	schema := convertInlineMode[EmptyStruct]()
 
 	if schema.Type == nil || (*schema.Type)[0] != "object" {
 		t.Errorf("Expected object type for empty struct")
@@ -389,7 +397,7 @@ func TestConvertStructToOpenAPISchema_UnexportedFields(t *testing.T) {
 		private string // Should be ignored
 	}
 
-	schema := ConvertStructToOpenAPISchema[StructWithUnexported]()
+	schema := convertInlineMode[StructWithUnexported]()
 
 	if _, exists := schema.Properties["public"]; !exists {
 		t.Errorf("Expected public field to be included")
@@ -412,7 +420,7 @@ func TestConvertStructToOpenAPISchema_JSONTagHandling(t *testing.T) {
 		Field4 string // Should use field name
 	}
 
-	schema := ConvertStructToOpenAPISchema[JSONTagStruct]()
+	schema := convertInlineMode[JSONTagStruct]()
 
 	if _, exists := schema.Properties["customName"]; !exists {
 		t.Errorf("Expected customName field")
@@ -459,7 +467,7 @@ func TestConvertStructToOpenAPISchema_EnumHandling(t *testing.T) {
 		type TestStruct struct {
 			Status string `jsonschema:"enum=success,enum=error,enum=pending"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		property, exists := schema.Properties["Status"]
 		if !exists {
@@ -482,7 +490,7 @@ func TestConvertStructToOpenAPISchema_EnumHandling(t *testing.T) {
 		type TestStruct struct {
 			Priority string `jsonschema:"description=Task priority,enum=high,enum=medium,enum=low,required"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		property, exists := schema.Properties["Priority"]
 		if !exists {
@@ -510,7 +518,7 @@ func TestConvertStructToOpenAPISchema_EnumHandling(t *testing.T) {
 		type TestStruct struct {
 			State string `jsonschema:"enum=active"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		property, exists := schema.Properties["State"]
 		if !exists {
@@ -536,7 +544,7 @@ func TestConvertStructToOpenAPISchema_EdgeCases(t *testing.T) {
 			InvalidMinLen string `jsonschema:"minLength=abc"`
 			InvalidMaxLen string `jsonschema:"maxLength=-1"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// These fields should exist but without the invalid constraints
 		minField := schema.Properties["InvalidMin"]
@@ -569,7 +577,7 @@ func TestConvertStructToOpenAPISchema_EdgeCases(t *testing.T) {
 			OnlyCommas     string `jsonschema:",,,"`
 			TrailingComma  string `jsonschema:"description=test,"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// All fields should exist without errors
 		if len(schema.Properties) != 6 {
@@ -596,7 +604,7 @@ func TestConvertStructToOpenAPISchema_EdgeCases(t *testing.T) {
 			CommaInEnum  string `jsonschema:"enum=val1,val2,enum=val3"` // Only enum= directives should be parsed
 			SpecialChars string `jsonschema:"enum=@#$%,enum=中文,enum=🎉"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// EmptyEnum should have one empty enum value
 		emptyField := schema.Properties["EmptyEnum"]
@@ -650,7 +658,7 @@ func TestConvertStructToOpenAPISchema_MoreEdgeCases(t *testing.T) {
 			unexported    string // Should be ignored
 			Ignored       string `json:"-"` // Should be ignored
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// Should only have NoJSONTag and ExportedField (unexported and json:"-" should be ignored)
 		expectedFields := []string{"NoJSONTag", "ExportedField"}
@@ -684,7 +692,7 @@ func TestConvertStructToOpenAPISchema_MoreEdgeCases(t *testing.T) {
 			NonPointerField  string
 			BothTags         string `json:",omitempty" jsonschema:"required"` // jsonschema should override
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		expectedRequired := []string{"ExplicitRequired", "NonPointerField", "BothTags"}
 
@@ -715,7 +723,7 @@ func TestConvertStructToOpenAPISchema_SemicolonSeparator(t *testing.T) {
 			Theme      string `jsonschema:"enum=light;enum=dark;default=light;description=UI主题选择"`
 			Count      int    `jsonschema:"minimum=1;maximum=100;default=10;description=数据项数量"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// Test SeriesName with semicolon format and comma in description
 		seriesField := schema.Properties["SeriesName"]
@@ -757,7 +765,7 @@ func TestConvertStructToOpenAPISchema_SemicolonSeparator(t *testing.T) {
 			// Test legacy comma format without comma in description
 			Status string `jsonschema:"required,description=Status value,enum=success,enum=error"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		statusField := schema.Properties["Status"]
 		if statusField.Value.Description != "Status value" {
@@ -778,7 +786,7 @@ func TestConvertStructToOpenAPISchema_NewJSONSchemaTags(t *testing.T) {
 		type TestStruct struct {
 			UserName string `jsonschema:"title=用户名;description=用户的显示名称"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		userField := schema.Properties["UserName"]
 		if userField.Value.Title != "用户名" {
@@ -794,7 +802,7 @@ func TestConvertStructToOpenAPISchema_NewJSONSchemaTags(t *testing.T) {
 			Tags      []string `jsonschema:"minItems=1;maxItems=5;description=标签列表"`
 			UniqueIDs []int    `jsonschema:"uniqueItems;minItems=0;description=唯一ID列表"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// Test Tags with minItems and maxItems
 		tagsField := schema.Properties["Tags"]
@@ -827,7 +835,7 @@ func TestConvertStructToOpenAPISchema_NewJSONSchemaTags(t *testing.T) {
 			InvalidInt  int     `jsonschema:"default=notAnInt"`
 			InvalidBool bool    `jsonschema:"default=notABool"`
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		// Test integer default conversion
 		countField := schema.Properties["Count"]
@@ -878,7 +886,7 @@ func TestConvertStructToOpenAPISchema_RequiredFieldLogicEnhanced(t *testing.T) {
 			NotRequired2 string `json:",omitempty"`
 			NotRequired3 *string
 		}
-		schema := ConvertStructToOpenAPISchema[TestStruct]()
+		schema := convertInlineMode[TestStruct]()
 
 		expectedRequired := []string{"Required1", "Required2", "Required3", "Required4"}
 

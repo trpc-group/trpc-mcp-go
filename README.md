@@ -761,11 +761,24 @@ weatherHandler := mcp.NewTypedToolHandler(func(ctx context.Context, req *mcp.Cal
 })
 ```
 
+**Schema Generation Styles:**
+
+By default, schemas use `$defs + $ref` for compact representation (~2KB). You can customize the generation style:
+
+```go
+// Ref style (default) - compact schemas with $defs + $ref
+mcp.WithInputStruct[Input](mcp.WithRefStyle())
+
+// Inline style - expand all types inline (larger schemas)
+mcp.WithOutputStruct[Output](mcp.WithInlineStyle())
+```
+
 **Benefits:**
 - 🛡️ **Type Safety**: Compile-time type checking and automatic validation
 - 📋 **Rich Schemas**: Auto-generated OpenAPI schemas with descriptions, enums, defaults
 - 🔄 **Structured Output**: Type-safe responses with backward compatibility
 - 🎯 **DRY Principle**: Single source of truth for data structures
+- 🎨 **Flexible Styles**: Choose between compact ($ref) or expanded (inline) schemas
 
 See [`examples/schema-generation/`](examples/schema-generation/) for a complete example.
 

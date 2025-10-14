@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.7 (2025-10-15)
+
+### Features
+- feat: refactor context handling to use WithoutCancel (#86)
+
+### Fixes
+- schema: fix circular reference recursion (#87)
+
 ## 0.0.6 (2025-09-29)
 
 ### Features

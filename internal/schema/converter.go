@@ -16,17 +16,419 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// ConverterOptions controls schema generation behavior.
+type ConverterOptions struct {
+	// UseReferences determines whether to use $defs + $ref for type references.
+	// When true (default), generates compact schemas with $defs and $ref.
+	// When false, uses inline expansion with depth limit (legacy behavior).
+	UseReferences bool
+
+	// MaxInlineDepth is the maximum depth for inline expansion mode.
+	// Only used when UseReferences is false. Default is 6.
+	MaxInlineDepth int
+}
+
+// DefaultConverterOptions provides default configuration.
+// Default uses $ref mode for compact, standard-compliant schemas.
+var DefaultConverterOptions = ConverterOptions{
+	UseReferences:  true, // Default: use $defs + $ref
+	MaxInlineDepth: 6,
+}
+
+// Generator manages schema generation with $defs support.
+//
+// IMPORTANT: Generator is NOT safe for concurrent use.
+// Create a new generator for each schema generation operation.
+//
+// The generator uses a placeholder pattern to handle circular references:
+// 1. Mark type as visited
+// 2. Create placeholder in $defs
+// 3. Generate full schema
+// 4. Replace placeholder with full schema
+type Generator struct {
+	options ConverterOptions
+	defs    map[string]*openapi3.Schema // $defs storage
+	visited map[reflect.Type]string     // Type → type name mapping
+}
+
+// NewGenerator creates a new generator with the given options.
+func NewGenerator(options ConverterOptions) *Generator {
+	return &Generator{
+		options: options,
+		defs:    make(map[string]*openapi3.Schema),
+		visited: make(map[reflect.Type]string),
+	}
+}
+
 // ConvertStructToOpenAPISchema converts a Go struct type to OpenAPI 3.0 Schema.
-// It uses reflection to analyze the struct fields and their tags to generate
-// a comprehensive schema that's compatible with the MCP protocol.
+// Uses default options (UseReferences=true).
 func ConvertStructToOpenAPISchema[T any]() *openapi3.Schema {
+	return ConvertStructToOpenAPISchemaWithOptions[T](DefaultConverterOptions)
+}
+
+// ConvertStructToOpenAPISchemaWithOptions converts with custom options.
+func ConvertStructToOpenAPISchemaWithOptions[T any](options ConverterOptions) *openapi3.Schema {
 	var zero T
 	t := reflect.TypeOf(zero)
+
+	if options.UseReferences {
+		// New mode: use $defs + $ref.
+		gen := NewGenerator(options)
+		schema := gen.generateWithRefs(t)
+		// Add $defs to the schema.
+		if len(gen.defs) > 0 {
+			schema.Extensions = map[string]interface{}{
+				"$defs": gen.defs,
+			}
+		}
+		return schema
+	}
+
+	// Legacy mode: inline expansion with depth limit.
 	visited := make(map[reflect.Type]*openapi3.Schema)
 	return convertReflectTypeToSchemaWithVisited(t, visited)
 }
 
-// convertReflectTypeToSchema converts a reflect.Type to openapi3.Schema
+// generateWithRefs generates schema with $defs + $ref support.
+// This is the main entry point for the new reference-based mode.
+func (g *Generator) generateWithRefs(t reflect.Type) *openapi3.Schema {
+	// Dereference pointers.
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// Check if already visited.
+	if typeName, exists := g.visited[t]; exists {
+		// Return schema with reference in extensions.
+		schema := openapi3.NewObjectSchema()
+		schema.Extensions = map[string]interface{}{
+			"$ref": "#/$defs/" + typeName,
+		}
+		return schema
+	}
+
+	// For non-struct types, generate inline.
+	if t.Kind() != reflect.Struct {
+		return g.generateTypeSchemaWithRefs(t)
+	}
+
+	// For structs: use placeholder pattern.
+	typeName := getTypeName(t)
+	g.visited[t] = typeName
+
+	// Create placeholder.
+	placeholder := openapi3.NewObjectSchema()
+	g.defs[typeName] = placeholder
+
+	// Generate full schema.
+	schema := g.generateStructSchemaWithRefs(t)
+	g.defs[typeName] = schema
+
+	// Return schema with reference in extensions.
+	refSchema := openapi3.NewObjectSchema()
+	refSchema.Extensions = map[string]interface{}{
+		"$ref": "#/$defs/" + typeName,
+	}
+	return refSchema
+}
+
+// generateStructSchemaWithRefs generates schema for a struct type with $ref support.
+func (g *Generator) generateStructSchemaWithRefs(t reflect.Type) *openapi3.Schema {
+	schema := openapi3.NewObjectSchema()
+	schema.Properties = make(openapi3.Schemas)
+	var required []string
+	requiredSet := make(map[string]bool)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		jsonName := getJSONFieldName(field)
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+
+		// Generate field schema with $ref support.
+		fieldSchema := g.generateFieldSchemaWithRefs(field.Type, field)
+
+		if err := parseJSONSchemaTags(field.Tag, fieldSchema); err != nil {
+			continue
+		}
+
+		schema.Properties[jsonName] = openapi3.NewSchemaRef("", fieldSchema)
+
+		if isRequiredField(field) && !requiredSet[jsonName] {
+			required = append(required, jsonName)
+			requiredSet[jsonName] = true
+		}
+	}
+
+	if len(required) > 0 {
+		schema.Required = required
+	}
+
+	return schema
+}
+
+// generateFieldSchemaWithRefs generates schema for a field type with $ref support.
+func (g *Generator) generateFieldSchemaWithRefs(t reflect.Type, field reflect.StructField) *openapi3.Schema {
+	// Dereference pointers.
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.Struct:
+		// For structs, check if already visited.
+		if typeName, exists := g.visited[t]; exists {
+			// Return schema with reference in extensions.
+			refSchema := openapi3.NewObjectSchema()
+			refSchema.Extensions = map[string]interface{}{
+				"$ref": "#/$defs/" + typeName,
+			}
+			return refSchema
+		}
+		// Otherwise, generate and add to defs.
+		typeName := getTypeName(t)
+		g.visited[t] = typeName
+		placeholder := openapi3.NewObjectSchema()
+		g.defs[typeName] = placeholder
+		schema := g.generateStructSchemaWithRefs(t)
+		g.defs[typeName] = schema
+		refSchema := openapi3.NewObjectSchema()
+		refSchema.Extensions = map[string]interface{}{
+			"$ref": "#/$defs/" + typeName,
+		}
+		return refSchema
+
+	case reflect.Slice, reflect.Array:
+		elemSchema := g.generateFieldSchemaWithRefs(t.Elem(), field)
+		arraySchema := openapi3.NewArraySchema()
+		arraySchema.Items = openapi3.NewSchemaRef("", elemSchema)
+		return arraySchema
+
+	case reflect.Map:
+		valueSchema := g.generateFieldSchemaWithRefs(t.Elem(), field)
+		mapSchema := openapi3.NewObjectSchema()
+		mapSchema.AdditionalProperties = openapi3.AdditionalProperties{
+			Schema: openapi3.NewSchemaRef("", valueSchema),
+		}
+		return mapSchema
+
+	default:
+		// Primitive types.
+		return convertPrimitiveType(t)
+	}
+}
+
+// generateTypeSchemaWithRefs generates schema for non-struct types with $ref support.
+func (g *Generator) generateTypeSchemaWithRefs(t reflect.Type) *openapi3.Schema {
+	// Dereference pointers.
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		elemSchema := g.generateTypeSchemaWithRefs(t.Elem())
+		arraySchema := openapi3.NewArraySchema()
+		arraySchema.Items = openapi3.NewSchemaRef("", elemSchema)
+		return arraySchema
+
+	case reflect.Map:
+		valueSchema := g.generateTypeSchemaWithRefs(t.Elem())
+		mapSchema := openapi3.NewObjectSchema()
+		mapSchema.AdditionalProperties = openapi3.AdditionalProperties{
+			Schema: openapi3.NewSchemaRef("", valueSchema),
+		}
+		return mapSchema
+
+	default:
+		return convertPrimitiveType(t)
+	}
+}
+
+// getTypeName returns a readable type name for use in $defs.
+func getTypeName(t reflect.Type) string {
+	if t.Name() != "" {
+		// Use package name + type name for uniqueness.
+		if t.PkgPath() != "" {
+			// Strip common prefixes and keep last part.
+			pkgParts := strings.Split(t.PkgPath(), "/")
+			pkgName := pkgParts[len(pkgParts)-1]
+			return pkgName + "." + t.Name()
+		}
+		return t.Name()
+	}
+	// Fallback for anonymous types.
+	return fmt.Sprintf("Type%p", t)
+}
+
+// convertPrimitiveType converts primitive Go types to OpenAPI schemas.
+func convertPrimitiveType(t reflect.Type) *openapi3.Schema {
+	switch t.Kind() {
+	case reflect.String:
+		return openapi3.NewStringSchema()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return openapi3.NewIntegerSchema()
+	case reflect.Float32, reflect.Float64:
+		schema := openapi3.NewSchema()
+		schema.Type = &openapi3.Types{"number"}
+		return schema
+	case reflect.Bool:
+		return openapi3.NewBoolSchema()
+	default:
+		return openapi3.NewObjectSchema()
+	}
+}
+
+// generateCycleRef generates a schema reference for circular/recursive types.
+// This follows the kin-openapi/openapi3gen approach of using $ref to handle cycles.
+func generateCycleRef(t reflect.Type) *openapi3.Schema {
+	// Dereference pointer types
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		// For arrays, create array schema with ref to element type.
+		elemRef := generateCycleRef(t.Elem())
+		arraySchema := openapi3.NewArraySchema()
+		arraySchema.Items = openapi3.NewSchemaRef("", elemRef)
+		return arraySchema
+	case reflect.Map:
+		// For maps, create object schema with additionalProperties ref.
+		valueRef := generateCycleRef(t.Elem())
+		mapSchema := openapi3.NewObjectSchema()
+		mapSchema.AdditionalProperties = openapi3.AdditionalProperties{
+			Schema: openapi3.NewSchemaRef("", valueRef),
+		}
+		return mapSchema
+	default:
+		// For structs and other types, generate a recursive object reference.
+		// Instead of using $ref (which requires components/schemas setup),
+		// we recursively generate the schema with limited depth.
+		// Increased depth to 6 to match inputSchema complexity (which goes 5-6 levels deep).
+		return convertReflectTypeToSchemaWithDepth(t, 6)
+	}
+}
+
+// convertReflectTypeToSchemaWithDepth converts with a depth limit to handle recursion.
+func convertReflectTypeToSchemaWithDepth(t reflect.Type, maxDepth int) *openapi3.Schema {
+	if maxDepth <= 0 {
+		// At maximum depth, return a simple object schema.
+		schema := openapi3.NewObjectSchema()
+		schema.Description = fmt.Sprintf("Recursive reference to %s (depth limit reached)", t.Name())
+		return schema
+	}
+
+	visited := make(map[reflect.Type]*openapi3.Schema)
+	return convertStructToSchemaWithDepthLimit(t, visited, maxDepth)
+}
+
+// convertTypeWithDepthLimit converts any type with depth tracking.
+func convertTypeWithDepthLimit(t reflect.Type, visited map[reflect.Type]*openapi3.Schema, depth int) *openapi3.Schema {
+	if depth <= 0 {
+		schema := openapi3.NewObjectSchema()
+		schema.Description = "Depth limit reached"
+		return schema
+	}
+
+	switch t.Kind() {
+	case reflect.Struct:
+		return convertStructToSchemaWithDepthLimit(t, visited, depth)
+	case reflect.Slice, reflect.Array:
+		schema := openapi3.NewArraySchema()
+		elemSchema := convertTypeWithDepthLimit(t.Elem(), visited, depth-1)
+		schema.Items = openapi3.NewSchemaRef("", elemSchema)
+		return schema
+	case reflect.Map:
+		schema := openapi3.NewObjectSchema()
+		valueSchema := convertTypeWithDepthLimit(t.Elem(), visited, depth-1)
+		schema.AdditionalProperties = openapi3.AdditionalProperties{
+			Schema: openapi3.NewSchemaRef("", valueSchema),
+		}
+		return schema
+	case reflect.String:
+		return openapi3.NewStringSchema()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return openapi3.NewIntegerSchema()
+	case reflect.Float32, reflect.Float64:
+		schema := openapi3.NewSchema()
+		schema.Type = &openapi3.Types{"number"}
+		return schema
+	case reflect.Bool:
+		return openapi3.NewBoolSchema()
+	default:
+		return openapi3.NewObjectSchema()
+	}
+}
+
+// convertStructToSchemaWithDepthLimit converts a struct with depth tracking.
+func convertStructToSchemaWithDepthLimit(t reflect.Type, visited map[reflect.Type]*openapi3.Schema, depth int) *openapi3.Schema {
+	if depth <= 0 {
+		schema := openapi3.NewObjectSchema()
+		schema.Description = fmt.Sprintf("Recursive reference to %s (depth limit)", t.Name())
+		return schema
+	}
+
+	schema := openapi3.NewObjectSchema()
+	schema.Properties = make(openapi3.Schemas)
+	var required []string
+	requiredSet := make(map[string]bool)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		if !field.IsExported() {
+			continue
+		}
+
+		jsonName := getJSONFieldName(field)
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+
+		// For recursive fields, decrease depth.
+		fieldType := field.Type
+		for fieldType.Kind() == reflect.Ptr {
+			fieldType = fieldType.Elem()
+		}
+
+		var fieldSchema *openapi3.Schema
+		if fieldType == t {
+			// Self-referencing: recurse with reduced depth.
+			fieldSchema = convertStructToSchemaWithDepthLimit(fieldType, visited, depth-1)
+		} else {
+			// Different type: continue with depth-limited conversion to avoid infinite loops.
+			fieldSchema = convertTypeWithDepthLimit(fieldType, visited, depth-1)
+		}
+
+		if err := parseJSONSchemaTags(field.Tag, fieldSchema); err != nil {
+			continue
+		}
+
+		schema.Properties[jsonName] = openapi3.NewSchemaRef("", fieldSchema)
+
+		if isRequiredField(field) && !requiredSet[jsonName] {
+			required = append(required, jsonName)
+			requiredSet[jsonName] = true
+		}
+	}
+
+	if len(required) > 0 {
+		schema.Required = required
+	}
+
+	return schema
+}
+
+// convertReflectTypeToSchema converts a reflect.Type to openapi3.Schema.
 func convertReflectTypeToSchema(t reflect.Type) *openapi3.Schema {
 	visited := make(map[reflect.Type]*openapi3.Schema)
 	return convertReflectTypeToSchemaWithVisited(t, visited)
@@ -35,6 +437,7 @@ func convertReflectTypeToSchema(t reflect.Type) *openapi3.Schema {
 // convertReflectTypeToSchemaWithVisited converts a reflect.Type to openapi3.Schema with cycle detection
 func convertReflectTypeToSchemaWithVisited(t reflect.Type, visited map[reflect.Type]*openapi3.Schema) *openapi3.Schema {
 	// Handle pointer types
+	originalType := t
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -45,10 +448,9 @@ func convertReflectTypeToSchemaWithVisited(t reflect.Type, visited map[reflect.T
 			if schema != nil {
 				return schema
 			}
-			// Create a placeholder to prevent infinite recursion
-			placeholder := openapi3.NewObjectSchema()
-			placeholder.Description = fmt.Sprintf("Circular reference to %s", t.String())
-			return placeholder
+			// Generate recursive schema with depth limit for circular reference.
+			refSchema := generateCycleRef(originalType)
+			return refSchema
 		}
 		// Mark this struct type as being processed
 		visited[t] = nil
