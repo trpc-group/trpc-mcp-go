@@ -705,3 +705,171 @@ func TestStdioServer_GetTools(t *testing.T) {
 	assert.Len(t, tools, 1)
 	assert.Equal(t, "stdio-tool", tools[0].Name)
 }
+
+// TestSchemaOptions tests SchemaOption functions
+func TestSchemaOptions(t *testing.T) {
+	t.Run("WithInlineStyle", func(t *testing.T) {
+		opt := WithInlineStyle()
+		assert.NotNil(t, opt, "WithInlineStyle should return a non-nil option")
+	})
+
+	t.Run("WithRefStyle", func(t *testing.T) {
+		opt := WithRefStyle()
+		assert.NotNil(t, opt, "WithRefStyle should return a non-nil option")
+	})
+}
+
+// Test struct for schema generation
+type TestSchemaStruct struct {
+	Name  string `json:"name"`
+	Age   int    `json:"age"`
+	Email string `json:"email,omitempty"`
+}
+
+// TestWithInputStruct tests WithInputStruct function
+func TestWithInputStruct(t *testing.T) {
+	t.Run("WithInputStruct without options", func(t *testing.T) {
+		tool := NewTool("test-tool",
+			WithDescription("Test tool"),
+			WithInputStruct[TestSchemaStruct](),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		// Default uses ref style, which has $ref
+		assert.NotNil(t, tool.InputSchema)
+		// Check if schema has $defs or is a direct reference
+		if tool.InputSchema.Extensions != nil {
+			if defs, ok := tool.InputSchema.Extensions["$defs"]; ok {
+				assert.NotNil(t, defs, "Should have $defs in ref mode")
+			}
+		}
+	})
+
+	t.Run("WithInputStruct with WithRefStyle", func(t *testing.T) {
+		tool := NewTool("test-tool-ref",
+			WithDescription("Test tool with ref style"),
+			WithInputStruct[TestSchemaStruct](WithRefStyle()),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		// Ref style should generate a valid schema
+		assert.NotNil(t, tool.InputSchema)
+	})
+
+	t.Run("WithInputStruct with WithInlineStyle", func(t *testing.T) {
+		tool := NewTool("test-tool-inline",
+			WithDescription("Test tool with inline style"),
+			WithInputStruct[TestSchemaStruct](WithInlineStyle()),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		assert.NotNil(t, tool.InputSchema.Type)
+
+		// Inline mode should have direct properties (no $ref)
+		assert.NotNil(t, tool.InputSchema.Properties)
+		// In inline mode, properties should be directly accessible
+		assert.Greater(t, len(tool.InputSchema.Properties), 0, "Inline mode should have direct properties")
+	})
+}
+
+// TestWithOutputStruct tests WithOutputStruct function
+func TestWithOutputStruct(t *testing.T) {
+	t.Run("WithOutputStruct without options", func(t *testing.T) {
+		tool := NewTool("test-tool",
+			WithDescription("Test tool"),
+			WithOutputStruct[TestSchemaStruct](),
+		)
+
+		assert.NotNil(t, tool.OutputSchema)
+		// Default uses ref style
+		assert.NotNil(t, tool.OutputSchema)
+	})
+
+	t.Run("WithOutputStruct with WithRefStyle", func(t *testing.T) {
+		tool := NewTool("test-tool-ref",
+			WithDescription("Test tool with ref style"),
+			WithOutputStruct[TestSchemaStruct](WithRefStyle()),
+		)
+
+		assert.NotNil(t, tool.OutputSchema)
+		assert.NotNil(t, tool.OutputSchema)
+	})
+
+	t.Run("WithOutputStruct with WithInlineStyle", func(t *testing.T) {
+		tool := NewTool("test-tool-inline",
+			WithDescription("Test tool with inline style"),
+			WithOutputStruct[TestSchemaStruct](WithInlineStyle()),
+		)
+
+		assert.NotNil(t, tool.OutputSchema)
+		assert.NotNil(t, tool.OutputSchema.Type)
+
+		// Inline mode should have direct properties
+		assert.NotNil(t, tool.OutputSchema.Properties)
+		assert.Greater(t, len(tool.OutputSchema.Properties), 0, "Inline mode should have direct properties")
+	})
+}
+
+// Nested struct for testing complex schemas
+type NestedTestStruct struct {
+	ID      int                         `json:"id"`
+	Data    TestSchemaStruct            `json:"data"`
+	Items   []TestSchemaStruct          `json:"items"`
+	Mapping map[string]TestSchemaStruct `json:"mapping,omitempty"`
+}
+
+// TestWithInputOutputStruct_Complex tests complex nested structures
+func TestWithInputOutputStruct_Complex(t *testing.T) {
+	t.Run("Nested struct with ref style", func(t *testing.T) {
+		tool := NewTool("nested-tool",
+			WithDescription("Tool with nested structures"),
+			WithInputStruct[NestedTestStruct](WithRefStyle()),
+			WithOutputStruct[NestedTestStruct](WithRefStyle()),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		assert.NotNil(t, tool.OutputSchema)
+
+		// Both schemas should be generated
+		assert.NotNil(t, tool.InputSchema)
+		assert.NotNil(t, tool.OutputSchema)
+	})
+
+	t.Run("Nested struct with inline style", func(t *testing.T) {
+		tool := NewTool("nested-tool-inline",
+			WithDescription("Tool with nested structures (inline)"),
+			WithInputStruct[NestedTestStruct](WithInlineStyle()),
+			WithOutputStruct[NestedTestStruct](WithInlineStyle()),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		assert.NotNil(t, tool.OutputSchema)
+
+		// Verify nested structure is expanded in inline mode
+		assert.NotNil(t, tool.InputSchema.Type)
+		assert.NotNil(t, tool.OutputSchema.Type)
+
+		// Check that nested properties exist
+		inputProps := tool.InputSchema.Properties
+		assert.NotNil(t, inputProps)
+		assert.Greater(t, len(inputProps), 0, "Inline mode should have direct properties")
+	})
+
+	t.Run("Different styles for input and output", func(t *testing.T) {
+		tool := NewTool("mixed-style-tool",
+			WithDescription("Tool with mixed schema styles"),
+			WithInputStruct[TestSchemaStruct](WithInlineStyle()),
+			WithOutputStruct[TestSchemaStruct](WithRefStyle()),
+		)
+
+		assert.NotNil(t, tool.InputSchema)
+		assert.NotNil(t, tool.OutputSchema)
+
+		// Input should be inline (has direct properties)
+		assert.NotNil(t, tool.InputSchema.Type)
+		assert.Greater(t, len(tool.InputSchema.Properties), 0, "Input inline mode should have properties")
+
+		// Output should be ref style
+		assert.NotNil(t, tool.OutputSchema)
+	})
+}

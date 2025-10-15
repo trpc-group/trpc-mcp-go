@@ -15,6 +15,27 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/schema"
 )
 
+// SchemaOption configures schema generation behavior for both input and output schemas.
+type SchemaOption func(*schema.ConverterOptions)
+
+// WithInlineStyle sets schema generation to inline expansion style.
+// This expands all types inline up to depth 6, resulting in larger schemas.
+// with circular references truncated at the depth limit.
+func WithInlineStyle() SchemaOption {
+	return func(opts *schema.ConverterOptions) {
+		opts.UseReferences = false
+		opts.MaxInlineDepth = 6
+	}
+}
+
+// WithRefStyle sets schema generation to $defs + $ref style (default).
+// This generates compact schemas that fully support circular references.
+func WithRefStyle() SchemaOption {
+	return func(opts *schema.ConverterOptions) {
+		opts.UseReferences = true
+	}
+}
+
 // ListToolsRequest represents a request to list available tools
 type ListToolsRequest struct {
 	PaginatedRequest
@@ -171,17 +192,53 @@ func WithDescription(description string) ToolOption {
 	}
 }
 
-// WithInputStruct generates input schema from a Go struct type
-func WithInputStruct[T any]() ToolOption {
+// WithInputStruct generates input schema from a Go struct type.
+//
+// By default, uses ref style ($defs + $ref) for compact schemas.
+// You can customize the generation style by passing SchemaOption:
+//
+// Example:
+//
+//	mcp.WithInputStruct[T]()                      // default ref style
+//	mcp.WithInputStruct[T](mcp.WithInlineStyle()) // inline style
+func WithInputStruct[T any](opts ...SchemaOption) ToolOption {
 	return func(t *Tool) {
-		t.InputSchema = schema.ConvertStructToOpenAPISchema[T]()
+		if len(opts) == 0 {
+			// No options: use default (fast path)
+			t.InputSchema = schema.ConvertStructToOpenAPISchema[T]()
+		} else {
+			// Apply custom options
+			converterOpts := schema.DefaultConverterOptions
+			for _, opt := range opts {
+				opt(&converterOpts)
+			}
+			t.InputSchema = schema.ConvertStructToOpenAPISchemaWithOptions[T](converterOpts)
+		}
 	}
 }
 
-// WithOutputStruct generates output schema from a Go struct type
-func WithOutputStruct[T any]() ToolOption {
+// WithOutputStruct generates output schema from a Go struct type.
+//
+// By default, uses ref style ($defs + $ref) for compact schemas.
+// You can customize the generation style by passing SchemaOption:
+//
+// Example:
+//
+//	mcp.WithOutputStruct[T]()                      // default ref style
+//	mcp.WithOutputStruct[T](mcp.WithInlineStyle()) // inline style
+func WithOutputStruct[T any](opts ...SchemaOption) ToolOption {
 	return func(t *Tool) {
-		t.OutputSchema = schema.ConvertStructToOpenAPISchema[T]()
+		if len(opts) == 0 {
+			// No options: use default (fast path)
+			t.OutputSchema = schema.ConvertStructToOpenAPISchema[T]()
+		} else {
+			// Apply custom options
+			converterOpts := schema.DefaultConverterOptions
+			for _, opt := range opts {
+				opt(&converterOpts)
+			}
+			t.OutputSchema = schema.ConvertStructToOpenAPISchemaWithOptions[T](converterOpts)
+		}
 	}
 }
 
