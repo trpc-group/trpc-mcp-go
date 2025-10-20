@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	icontext "trpc.group/trpc-go/trpc-mcp-go/internal/context"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
 
@@ -115,10 +116,7 @@ func NewSSEClient(serverURL string, clientInfo Implementation, options ...Client
 		return nil, err
 	}
 
-	err = c.transport.start(context.Background())
-	if err != nil {
-		return nil, err
-	}
+	// Transport will auto-start on first request (e.g., Initialize) with the correct context.
 
 	return c, nil
 }
@@ -141,7 +139,7 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 	}
 
 	// Create a new context with cancellation for the SSE stream.
-	sseCtx, cancel := context.WithCancel(context.Background())
+	sseCtx, cancel := context.WithCancel(icontext.WithoutCancel(ctx))
 	t.sseConn.mutex.Lock()
 	t.sseConn.ctx = sseCtx
 	t.sseConn.cancel = cancel
@@ -533,7 +531,9 @@ func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCReques
 func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	// Auto-start the transport if not already started.
 	if !t.started.Load() {
-		return nil, errors.New("transport not started")
+		if err := t.start(ctx); err != nil {
+			return nil, fmt.Errorf("failed to start transport: %w", err)
+		}
 	}
 
 	if t.closed.Load() {
