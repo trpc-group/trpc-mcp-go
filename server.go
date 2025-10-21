@@ -106,6 +106,7 @@ type Server struct {
 	requestID            atomic.Int64                         // Request ID counter for generating unique request IDs.
 	notificationHandlers map[string]ServerNotificationHandler // Map of notification handlers by method name.
 	notificationMu       sync.RWMutex                         // Mutex for notification handlers map.
+	pendingMiddlewares   []Middleware                         // Middlewares to be applied after component initialization.
 }
 
 // NewServer creates a new MCP server
@@ -191,6 +192,11 @@ func (s *Server) initComponents() {
 		withPromptManager(promptManager),
 		withServer(s), // Set the server reference for notification handling.
 	)
+
+	// Apply pending middlewares that were registered via WithMiddleware option.
+	for _, mw := range s.pendingMiddlewares {
+		s.mcpHandler.use(mw)
+	}
 
 	// Collect HTTP handler options.
 	var httpOptions []func(*httpServerHandler)
@@ -367,6 +373,31 @@ func WithPromptListFilter(filter PromptListFilter) ServerOption {
 func WithResourceListFilter(filter ResourceListFilter) ServerOption {
 	return func(s *Server) {
 		s.config.resourceListFilter = filter
+	}
+}
+
+// WithMiddleware registers one or more middlewares to the server.
+// Middlewares are executed in the order they are provided.
+// All middlewares must be configured at server creation time.
+//
+// Example:
+//
+//	server := mcp.NewServer("name", "1.0.0",
+//	    mcp.WithServerAddress(":3000"),
+//	    mcp.WithMiddleware(TraceMiddleware, LoggingMiddleware, MetricsMiddleware),
+//	)
+//
+// Multiple WithMiddleware calls can be used:
+//
+//	server := mcp.NewServer("name", "1.0.0",
+//	    mcp.WithMiddleware(TraceMiddleware, LoggingMiddleware),
+//	    mcp.WithMiddleware(MetricsMiddleware),
+//	)
+func WithMiddleware(middlewares ...Middleware) ServerOption {
+	return func(s *Server) {
+		// Save middlewares to be applied after component initialization
+		// to avoid initialization order issues.
+		s.pendingMiddlewares = append(s.pendingMiddlewares, middlewares...)
 	}
 }
 
