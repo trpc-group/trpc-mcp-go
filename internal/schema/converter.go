@@ -16,22 +16,41 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// ReferenceStyle defines how type references are handled in schema generation.
+type ReferenceStyle int
+
+const (
+	// RefStyleInline :No $ref, fully expanded (legacy mode)
+	RefStyleInline ReferenceStyle = 0
+
+	// RefStyleDefs : $ref + $defs (Go style, compact)
+	// Example: "$ref": "#/$defs/TreeNode"
+	RefStyleDefs ReferenceStyle = 1
+
+	// RefStyleNested : Inline $ref
+	// Example: "$ref": "#/properties/tree"
+	RefStyleNested ReferenceStyle = 2
+)
+
 // ConverterOptions controls schema generation behavior.
 type ConverterOptions struct {
-	// UseReferences determines whether to use $defs + $ref for type references.
-	// When true (default), generates compact schemas with $defs and $ref.
-	// When false, uses inline expansion with depth limit (legacy behavior).
-	UseReferences bool
+	// RefStyle determines the reference style for schema generation.
+	// - RefStyleInline: No $ref, fully expanded (legacy)
+	// - RefStyleDefs: $ref + $defs (Go style)
+	// - RefStyleNested: Inline $ref
+	RefStyle ReferenceStyle
 
 	// MaxInlineDepth is the maximum depth for inline expansion mode.
-	// Only used when UseReferences is false. Default is 6.
+	// Only used when RefStyle is RefStyleInline. Default is 6.
 	MaxInlineDepth int
 }
 
 // DefaultConverterOptions provides default configuration.
-// Default uses $ref mode for compact, standard-compliant schemas.
+// Default uses nested inline $ref style for:
+// - Full circular reference support
+// - Cleaner schemas compared to $defs approach
 var DefaultConverterOptions = ConverterOptions{
-	UseReferences:  true, // Default: use $defs + $ref
+	RefStyle:       RefStyleNested, // Default
 	MaxInlineDepth: 6,
 }
 
@@ -61,7 +80,7 @@ func NewGenerator(options ConverterOptions) *Generator {
 }
 
 // ConvertStructToOpenAPISchema converts a Go struct type to OpenAPI 3.0 Schema.
-// Uses default options (UseReferences=true).
+// Uses default options (RefStyle=RefStyleNested).
 func ConvertStructToOpenAPISchema[T any]() *openapi3.Schema {
 	return ConvertStructToOpenAPISchemaWithOptions[T](DefaultConverterOptions)
 }
@@ -71,22 +90,30 @@ func ConvertStructToOpenAPISchemaWithOptions[T any](options ConverterOptions) *o
 	var zero T
 	t := reflect.TypeOf(zero)
 
-	if options.UseReferences {
-		// New mode: use $defs + $ref.
+	switch options.RefStyle {
+	case RefStyleDefs:
+		// Mode 1: $defs + $ref (Go style)
 		gen := NewGenerator(options)
 		schema := gen.generateWithRefs(t)
 		// Add $defs to the schema.
+		// IMPORTANT: Preserve existing Extensions (like $ref) before adding $defs
 		if len(gen.defs) > 0 {
-			schema.Extensions = map[string]interface{}{
-				"$defs": gen.defs,
+			if schema.Extensions == nil {
+				schema.Extensions = make(map[string]interface{})
 			}
+			schema.Extensions["$defs"] = gen.defs
 		}
 		return schema
-	}
 
-	// Legacy mode: inline expansion with depth limit.
-	visited := make(map[reflect.Type]*openapi3.Schema)
-	return convertReflectTypeToSchemaWithVisited(t, visited)
+	case RefStyleNested:
+		// Mode 2: Inline $ref
+		return convertWithNestedRefs(t)
+
+	default:
+		// Mode 0: Legacy inline expansion with depth limit
+		visited := make(map[reflect.Type]*openapi3.Schema)
+		return convertReflectTypeToSchemaWithVisited(t, visited)
+	}
 }
 
 // generateWithRefs generates schema with $defs + $ref support.
@@ -125,6 +152,7 @@ func (g *Generator) generateWithRefs(t reflect.Type) *openapi3.Schema {
 	g.defs[typeName] = schema
 
 	// Return schema with reference in extensions.
+	// Keep "type: object" at root level as MCP protocol validation requires it
 	refSchema := openapi3.NewObjectSchema()
 	refSchema.Extensions = map[string]interface{}{
 		"$ref": "#/$defs/" + typeName,
@@ -798,4 +826,220 @@ func parseJSONSchemaTags(tag reflect.StructTag, schema *openapi3.Schema) error {
 	}
 
 	return nil
+}
+
+// NestedRefGenerator manages nested inline $ref generation.
+type NestedRefGenerator struct {
+	seen        map[reflect.Type]*NestedSeenInfo
+	currentPath []string
+}
+
+// NestedSeenInfo records first occurrence information for a type.
+type NestedSeenInfo struct {
+	FirstPath []string
+	Schema    *openapi3.Schema
+}
+
+// convertWithNestedRefs converts using nested inline $ref style.
+func convertWithNestedRefs(t reflect.Type) *openapi3.Schema {
+	gen := &NestedRefGenerator{
+		seen:        make(map[reflect.Type]*NestedSeenInfo),
+		currentPath: []string{"#"},
+	}
+	return gen.generateSchema(t)
+}
+
+func (g *NestedRefGenerator) generateSchema(t reflect.Type) *openapi3.Schema {
+	// Dereference pointers
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	// Primitive types: always expand, never use $ref
+	switch t.Kind() {
+	case reflect.String:
+		return openapi3.NewStringSchema()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return openapi3.NewIntegerSchema()
+	case reflect.Float32, reflect.Float64:
+		return openapi3.NewFloat64Schema()
+	case reflect.Bool:
+		return openapi3.NewBoolSchema()
+	}
+
+	// Arrays and Maps: always expand container, use $ref for elements
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		return g.generateArraySchema(t)
+	case reflect.Map:
+		return g.generateMapSchema(t)
+	}
+
+	// Struct types: check if already seen
+	if seenInfo, exists := g.seen[t]; exists {
+		// Generate inline $ref pointing to first occurrence
+		refPath := strings.Join(seenInfo.FirstPath, "/")
+		return &openapi3.Schema{
+			Extensions: map[string]interface{}{
+				"$ref": refPath,
+			},
+		}
+	}
+
+	// Record first occurrence
+	seenInfo := &NestedSeenInfo{
+		FirstPath: append([]string{}, g.currentPath...),
+	}
+	g.seen[t] = seenInfo
+
+	// Generate struct schema
+	var schema *openapi3.Schema
+	if t.Kind() == reflect.Struct {
+		schema = g.generateStructSchema(t)
+	} else {
+		schema = &openapi3.Schema{} // any
+	}
+
+	seenInfo.Schema = schema
+	return schema
+}
+
+func (g *NestedRefGenerator) generateStructSchema(t reflect.Type) *openapi3.Schema {
+	schema := openapi3.NewObjectSchema()
+	schema.Properties = make(openapi3.Schemas)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+
+		// Get JSON tag
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+
+		fieldName := field.Name
+		omitempty := false
+		if jsonTag != "" {
+			parts := strings.Split(jsonTag, ",")
+			if parts[0] != "" {
+				fieldName = parts[0]
+			}
+			for _, opt := range parts[1:] {
+				if opt == "omitempty" {
+					omitempty = true
+				}
+			}
+		}
+
+		// Check if field is a pointer type (nullable)
+		isPointer := field.Type.Kind() == reflect.Ptr
+
+		// Update current path
+		originalPath := g.currentPath
+		// For nullable fields (pointer + omitempty), the actual path will include anyOf/0
+		// because the field will be wrapped in anyOf: [schema, null]
+		// So we need to adjust the path for child fields to reflect the actual JSON path
+		if isPointer && omitempty {
+			g.currentPath = append(g.currentPath, "properties", fieldName, "anyOf", "0")
+		} else {
+			g.currentPath = append(g.currentPath, "properties", fieldName)
+		}
+
+		// Recursively generate field schema
+		fieldSchema := g.generateSchema(field.Type)
+
+		// Restore path
+		g.currentPath = originalPath
+
+		// Process jsonschema tags for constraints
+		parseJSONSchemaTags(field.Tag, fieldSchema)
+
+		// Add description (only if not set by jsonschema tag)
+		if fieldSchema.Description == "" {
+			if desc := field.Tag.Get("description"); desc != "" {
+				fieldSchema.Description = desc
+			}
+		}
+
+		// Make field nullable using JSON Schema standard anyOf syntax
+		// This allows JSON null values for proto3 optional message fields
+		if isPointer && omitempty {
+			// Preserve description at the outer level
+			outerDescription := fieldSchema.Description
+
+			nullSchema := &openapi3.Schema{
+				Type: &openapi3.Types{openapi3.TypeNull},
+			}
+
+			fieldSchema = &openapi3.Schema{
+				Description: outerDescription, // Keep description at outer level
+				AnyOf: openapi3.SchemaRefs{
+					openapi3.NewSchemaRef("", fieldSchema),
+					openapi3.NewSchemaRef("", nullSchema),
+				},
+			}
+		}
+
+		schema.Properties[fieldName] = openapi3.NewSchemaRef("", fieldSchema)
+
+		// Handle required
+		if !omitempty {
+			schema.Required = append(schema.Required, fieldName)
+		}
+	}
+
+	// Add additionalProperties: false
+	falseValue := false
+	schema.AdditionalProperties = openapi3.AdditionalProperties{
+		Has: &falseValue,
+	}
+
+	return schema
+}
+
+func (g *NestedRefGenerator) generateArraySchema(t reflect.Type) *openapi3.Schema {
+	schema := openapi3.NewArraySchema()
+	elemType := t.Elem()
+
+	// Update current path
+	originalPath := g.currentPath
+	g.currentPath = append(g.currentPath, "items")
+
+	// Recursively generate element schema
+	itemSchema := g.generateSchema(elemType)
+
+	// Restore path
+	g.currentPath = originalPath
+
+	schema.Items = openapi3.NewSchemaRef("", itemSchema)
+	return schema
+}
+
+func (g *NestedRefGenerator) generateMapSchema(t reflect.Type) *openapi3.Schema {
+	schema := &openapi3.Schema{
+		Type: &openapi3.Types{"object"},
+	}
+	valueType := t.Elem()
+
+	// Update current path (map's additionalProperties)
+	originalPath := g.currentPath
+	g.currentPath = append(g.currentPath, "additionalProperties")
+
+	// Recursively generate value schema
+	valueSchema := g.generateSchema(valueType)
+
+	// Restore path
+	g.currentPath = originalPath
+
+	schema.AdditionalProperties = openapi3.AdditionalProperties{
+		Schema: openapi3.NewSchemaRef("", valueSchema),
+	}
+
+	return schema
 }

@@ -88,7 +88,7 @@ func assertHasRef(t *testing.T, schema *openapi3.Schema, expectedRef string) {
 
 // TestRefMode_BasicTypes tests basic type conversion with $defs + $ref
 func TestRefMode_BasicTypes(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[BasicTypesStruct]()
+	schema := convertRefMode[BasicTypesStruct]()
 
 	// 1. Verify top-level structure
 	defs := getDefs(t, schema)
@@ -137,7 +137,7 @@ func TestRefMode_BasicTypes(t *testing.T) {
 
 // TestRefMode_NestedTypes tests nested types with $defs + $ref
 func TestRefMode_NestedTypes(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[NestedStruct]()
+	schema := convertRefMode[NestedStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -193,7 +193,7 @@ func TestRefMode_NestedTypes(t *testing.T) {
 
 // TestRefMode_CircularReference tests self-referencing types
 func TestRefMode_CircularReference(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[TreeNode]()
+	schema := convertRefMode[TreeNode]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -238,7 +238,7 @@ func TestRefMode_CircularReference(t *testing.T) {
 
 // TestRefMode_MapWithCircularReference tests map with self-referencing values
 func TestRefMode_MapWithCircularReference(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[NestedMap]()
+	schema := convertRefMode[NestedMap]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -280,7 +280,7 @@ func TestRefMode_MapWithCircularReference(t *testing.T) {
 
 // TestRefMode_LinkedList tests linked list pattern
 func TestRefMode_LinkedList(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[LinkedListNode]()
+	schema := convertRefMode[LinkedListNode]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -311,7 +311,7 @@ func TestRefMode_LinkedList(t *testing.T) {
 
 // TestRefMode_ComplexNesting tests deeply nested structures
 func TestRefMode_ComplexNesting(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[ComplexNestedStruct]()
+	schema := convertRefMode[ComplexNestedStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -337,7 +337,7 @@ func TestRefMode_ComplexNesting(t *testing.T) {
 
 // TestRefMode_ArrayOfStructs tests arrays with struct elements
 func TestRefMode_ArrayOfStructs(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[ArraySliceStruct]()
+	schema := convertRefMode[ArraySliceStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -368,7 +368,7 @@ func TestRefMode_ArrayOfStructs(t *testing.T) {
 
 // TestRefMode_MapOfStructs tests maps with struct values
 func TestRefMode_MapOfStructs(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[MapStruct]()
+	schema := convertRefMode[MapStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -399,7 +399,7 @@ func TestRefMode_MapOfStructs(t *testing.T) {
 
 // TestRefMode_PointerTypes tests pointer types with refs
 func TestRefMode_PointerTypes(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[PointerTypesStruct]()
+	schema := convertRefMode[PointerTypesStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -445,7 +445,7 @@ func TestRefMode_EmptyStruct(t *testing.T) {
 	// Define EmptyStruct locally for this test
 	type EmptyStruct struct{}
 
-	schema := ConvertStructToOpenAPISchema[EmptyStruct]()
+	schema := convertRefMode[EmptyStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -469,7 +469,7 @@ func TestRefMode_EmptyStruct(t *testing.T) {
 
 // TestRefMode_JSONSchemaTags tests jsonschema tags with ref mode
 func TestRefMode_JSONSchemaTags(t *testing.T) {
-	schema := ConvertStructToOpenAPISchema[JSONSchemaTagsStruct]()
+	schema := convertRefMode[JSONSchemaTagsStruct]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)
@@ -526,7 +526,7 @@ func TestRefMode_DefsDeduplication(t *testing.T) {
 		Third  BasicTypesStruct `json:"third"`
 	}
 
-	schema := ConvertStructToOpenAPISchema[MultipleReferences]()
+	schema := convertRefMode[MultipleReferences]()
 
 	// 1. Get $defs
 	defs := getDefs(t, schema)

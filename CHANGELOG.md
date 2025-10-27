@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.8 (2025-10-29)
+
+### Features
+- feat: add nested $ref schema generation mode with Inspector compatibility (#90)
+
+### Fixes
+- fix: preserve context metadata in SSE transport (#88)
+
 ## 0.0.7 (2025-10-15)
 
 ### Features

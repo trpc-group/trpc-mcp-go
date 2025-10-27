@@ -23,16 +23,25 @@ type SchemaOption func(*schema.ConverterOptions)
 // with circular references truncated at the depth limit.
 func WithInlineStyle() SchemaOption {
 	return func(opts *schema.ConverterOptions) {
-		opts.UseReferences = false
+		opts.RefStyle = schema.RefStyleInline
 		opts.MaxInlineDepth = 6
 	}
 }
 
-// WithRefStyle sets schema generation to $defs + $ref style (default).
-// This generates compact schemas that fully support circular references.
+// WithRefStyle sets schema generation to $defs + $ref style.
+// This generates compact schemas with $defs and $ref (Go style).
+// Example: "$ref": "#/$defs/TreeNode"
 func WithRefStyle() SchemaOption {
 	return func(opts *schema.ConverterOptions) {
-		opts.UseReferences = true
+		opts.RefStyle = schema.RefStyleDefs
+	}
+}
+
+// WithNestedRefStyle sets schema generation to nested inline $ref style.
+// Example: "$ref": "#/properties/tree"
+func WithNestedRefStyle() SchemaOption {
+	return func(opts *schema.ConverterOptions) {
+		opts.RefStyle = schema.RefStyleNested
 	}
 }
 
