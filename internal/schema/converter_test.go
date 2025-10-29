@@ -113,8 +113,15 @@ type ConfigSetting struct {
 // Helper function for inline mode tests
 func convertInlineMode[T any]() *openapi3.Schema {
 	return ConvertStructToOpenAPISchemaWithOptions[T](ConverterOptions{
-		UseReferences:  false,
+		RefStyle:       RefStyleInline,
 		MaxInlineDepth: 6,
+	})
+}
+
+// Helper function for ref mode tests ($defs + $ref)
+func convertRefMode[T any]() *openapi3.Schema {
+	return ConvertStructToOpenAPISchemaWithOptions[T](ConverterOptions{
+		RefStyle: RefStyleDefs,
 	})
 }
 
