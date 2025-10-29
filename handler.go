@@ -17,6 +17,14 @@ const (
 	defaultServerVersion = "0.1.0"
 )
 
+// HandlerFunc defines a simplified handler function for middleware.
+// It uses only ctx and req parameters, session can be retrieved from ctx using ClientSessionFromContext.
+type HandlerFunc func(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error)
+
+// Middleware defines a function that wraps a HandlerFunc to add cross-cutting concerns.
+// Middlewares can be chained together to form a processing pipeline.
+type Middleware func(next HandlerFunc) HandlerFunc
+
 // handler interface defines the MCP protocol handler
 type handler interface {
 	// HandleRequest processes requests
@@ -42,6 +50,9 @@ type mcpHandler struct {
 
 	// Server reference for notification handling.
 	server serverNotificationDispatcher
+
+	// Middleware chain for request processing.
+	middlewares []Middleware
 }
 
 // serverNotificationDispatcher defines the interface for dispatching notifications to handlers.
@@ -144,13 +155,58 @@ func (h *mcpHandler) requestDispatchTable() map[string]requestHandlerFunc {
 	}
 }
 
-// Refactored handleRequest
+// handleRequest processes a JSON-RPC request with optional middleware support.
+// If middlewares are registered, it adapts the request to use the simplified HandlerFunc signature.
 func (h *mcpHandler) handleRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
+	// If middlewares are registered, use the middleware chain.
+	if len(h.middlewares) > 0 {
+		// Create core handler that adapts from HandlerFunc (2 params) to internal handler (3 params).
+		coreHandler := func(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
+			// Try to get session from context (should already be injected by outer layer).
+			sessionFromCtx := ClientSessionFromContext(ctx)
+			if sessionFromCtx != nil {
+				// Use session from context.
+				return h.dispatchRequest(ctx, req, sessionFromCtx)
+			}
+			// Fallback: use session parameter (for backward compatibility).
+			return h.dispatchRequest(ctx, req, session)
+		}
+
+		// Apply middleware chain (with read lock).
+		wrappedHandler := h.applyMiddlewares(coreHandler)
+
+		// Execute with simplified signature (only ctx and req).
+		return wrappedHandler(ctx, req)
+	}
+
+	// No middlewares: use original dispatch logic directly.
+	return h.dispatchRequest(ctx, req, session)
+}
+
+// dispatchRequest is the core request dispatcher (original logic).
+func (h *mcpHandler) dispatchRequest(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
 	dispatchTable := h.requestDispatchTable()
 	if handler, ok := dispatchTable[req.Method]; ok {
 		return handler(ctx, req, session)
 	}
 	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "method not found", nil), nil
+}
+
+// applyMiddlewares applies the middleware chain to a handler.
+// Middlewares are applied in reverse order (last registered = outermost layer).
+func (h *mcpHandler) applyMiddlewares(handler HandlerFunc) HandlerFunc {
+	// Apply from last to first (onion model).
+	for i := len(h.middlewares) - 1; i >= 0; i-- {
+		handler = h.middlewares[i](handler)
+	}
+	return handler
+}
+
+// use registers a middleware to the handler.
+// This is only called during initialization (via WithMiddleware option),
+// so no locking is needed.
+func (h *mcpHandler) use(middleware Middleware) {
+	h.middlewares = append(h.middlewares, middleware)
 }
 
 // Private methods for each case branch

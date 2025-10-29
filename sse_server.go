@@ -300,6 +300,24 @@ func WithSSESessionIDGenerator(generator SessionIDGenerator) SSEOption {
 	}
 }
 
+// WithSSEMiddleware registers one or more middlewares to the SSE server.
+// Middlewares are executed in the order they are provided.
+// All middlewares must be configured at server creation time.
+//
+// Example:
+//
+//	server := mcp.NewSSEServer("name", "1.0.0",
+//	    mcp.WithSSEEndpoint("/sse"),
+//	    mcp.WithSSEMiddleware(LoggingMiddleware, MetricsMiddleware),
+//	)
+func WithSSEMiddleware(middlewares ...Middleware) SSEOption {
+	return func(s *SSEServer) {
+		for _, mw := range middlewares {
+			s.mcpHandler.use(mw)
+		}
+	}
+}
+
 // Start starts the SSE server on the given address.
 func (s *SSEServer) Start(addr string) error {
 	return http.ListenAndServe(addr, s)
