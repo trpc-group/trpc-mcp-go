@@ -104,7 +104,7 @@ type transport interface {
 	start(ctx context.Context) error
 
 	// Send a request and wait for a response
-	sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error)
+	sendRequest(ctx context.Context, req *JSONRPCRequest, opts ...RequestOption) (*json.RawMessage, error)
 
 	// Send a notification (no response expected)
 	sendNotification(ctx context.Context, notification *JSONRPCNotification) error

@@ -37,6 +37,49 @@ func (s State) String() string {
 	return string(s)
 }
 
+// RequestOption is a functional option type for configuring individual requests.
+type RequestOption func(*requestConfig)
+
+// requestConfig holds per-request configuration.
+type requestConfig struct {
+	headers map[string]string
+}
+
+// WithRequestHeader sets a single custom HTTP header for a single request.
+// This is useful for adding authentication tokens, tracing IDs, or other custom headers.
+//
+// Example:
+//
+//	client.CallTool(ctx, req, mcp.WithRequestHeader("X-Request-ID", "12345"))
+func WithRequestHeader(key, value string) RequestOption {
+	return func(rc *requestConfig) {
+		if rc.headers == nil {
+			rc.headers = make(map[string]string)
+		}
+		rc.headers[key] = value
+	}
+}
+
+// WithRequestHeaders sets multiple custom HTTP headers for a single request.
+// These headers will be added to the specific request only.
+//
+// Example:
+//
+//	client.CallTool(ctx, req, mcp.WithRequestHeaders(map[string]string{
+//	    "X-Request-ID": "12345",
+//	    "Authorization": "Bearer token",
+//	}))
+func WithRequestHeaders(headers map[string]string) RequestOption {
+	return func(rc *requestConfig) {
+		if rc.headers == nil {
+			rc.headers = make(map[string]string)
+		}
+		for k, v := range headers {
+			rc.headers[k] = v
+		}
+	}
+}
+
 // Connector defines the core interface that all MCP clients must implement.
 // This provides a unified interface for different transport implementations.
 type Connector interface {
@@ -47,17 +90,17 @@ type Connector interface {
 	// GetState returns the current client state.
 	GetState() State
 	// ListTools retrieves all available tools from the server.
-	ListTools(ctx context.Context, req *ListToolsRequest) (*ListToolsResult, error)
+	ListTools(ctx context.Context, req *ListToolsRequest, opts ...RequestOption) (*ListToolsResult, error)
 	// CallTool executes a specific tool with given parameters.
-	CallTool(ctx context.Context, req *CallToolRequest) (*CallToolResult, error)
+	CallTool(ctx context.Context, req *CallToolRequest, opts ...RequestOption) (*CallToolResult, error)
 	// ListPrompts retrieves all available prompts from the server.
-	ListPrompts(ctx context.Context, req *ListPromptsRequest) (*ListPromptsResult, error)
+	ListPrompts(ctx context.Context, req *ListPromptsRequest, opts ...RequestOption) (*ListPromptsResult, error)
 	// GetPrompt retrieves a specific prompt by name.
-	GetPrompt(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error)
+	GetPrompt(ctx context.Context, req *GetPromptRequest, opts ...RequestOption) (*GetPromptResult, error)
 	// ListResources retrieves all available resources from the server.
-	ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error)
+	ListResources(ctx context.Context, req *ListResourcesRequest, opts ...RequestOption) (*ListResourcesResult, error)
 	// ReadResource reads the content of a specific resource.
-	ReadResource(ctx context.Context, req *ReadResourceRequest) (*ReadResourceResult, error)
+	ReadResource(ctx context.Context, req *ReadResourceRequest, opts ...RequestOption) (*ReadResourceResult, error)
 	// RegisterNotificationHandler registers a handler for server notifications.
 	RegisterNotificationHandler(method string, handler NotificationHandler)
 	// UnregisterNotificationHandler removes a notification handler.
@@ -336,7 +379,7 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 		req.Params = initReq.Params
 	}
 
-	// Send request and wait for response
+	// Send request and wait for response (Initialize doesn't take opts)
 	rawResp, err := c.transport.sendRequest(ctx, req)
 	if err != nil {
 		c.setState(StateDisconnected)
@@ -391,7 +434,7 @@ func (c *Client) SendInitialized(ctx context.Context) error {
 }
 
 // ListTools lists available tools.
-func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) (*ListToolsResult, error) {
+func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest, opts ...RequestOption) (*ListToolsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -408,7 +451,7 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 		Params: listToolsReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %v", err)
 	}
@@ -428,7 +471,7 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 }
 
 // CallTool calls a tool.
-func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*CallToolResult, error) {
+func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest, opts ...RequestOption) (*CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -445,7 +488,7 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 		Params: callToolReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tool call request failed: %w", err)
 	}
@@ -503,7 +546,7 @@ func (c *Client) UnregisterNotificationHandler(method string) {
 }
 
 // ListPrompts lists available prompts.
-func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsRequest) (*ListPromptsResult, error) {
+func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsRequest, opts ...RequestOption) (*ListPromptsResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -520,7 +563,7 @@ func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsReq
 		Params: listPromptsReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list prompts request failed: %w", err)
 	}
@@ -540,7 +583,7 @@ func (c *Client) ListPrompts(ctx context.Context, listPromptsReq *ListPromptsReq
 }
 
 // GetPrompt gets a specific prompt.
-func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) (*GetPromptResult, error) {
+func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest, opts ...RequestOption) (*GetPromptResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
@@ -557,7 +600,7 @@ func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) 
 		Params: getPromptReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt request failed: %v", err)
 	}
@@ -577,7 +620,7 @@ func (c *Client) GetPrompt(ctx context.Context, getPromptReq *GetPromptRequest) 
 }
 
 // ListResources lists available resources.
-func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResourcesRequest) (*ListResourcesResult, error) {
+func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResourcesRequest, opts ...RequestOption) (*ListResourcesResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
@@ -594,7 +637,7 @@ func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResour
 		Params: listResourcesReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list resources request failed: %v", err)
 	}
@@ -614,7 +657,7 @@ func (c *Client) ListResources(ctx context.Context, listResourcesReq *ListResour
 }
 
 // ReadResource reads a specific resource.
-func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResourceRequest) (*ReadResourceResult, error) {
+func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResourceRequest, opts ...RequestOption) (*ReadResourceResult, error) {
 	// Check if initialized.
 	if !c.initialized {
 		return nil, fmt.Errorf("%w", errors.ErrNotInitialized)
@@ -631,7 +674,7 @@ func (c *Client) ReadResource(ctx context.Context, readResourceReq *ReadResource
 		Params: readResourceReq.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, req)
+	rawResp, err := c.transport.sendRequest(ctx, req, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("read resource request failed: %v", err)
 	}

@@ -503,17 +503,23 @@ func (t *sseClientTransport) setRetryConfig(config *retry.Config) {
 }
 
 // sendRequest sends a request and waits for a response with retry support.
-func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest, opts ...RequestOption) (*json.RawMessage, error) {
+	// Apply request options to get custom headers
+	cfg := &requestConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	// If no retry config, use original implementation
 	if t.retryConfig == nil {
-		return t.sendRequestInternal(ctx, req)
+		return t.sendRequestInternal(ctx, req, cfg.headers)
 	}
 
 	// Define the operation to be retried
 	var result *json.RawMessage
 	operation := func() error {
 		var err error
-		result, err = t.sendRequestInternal(ctx, req)
+		result, err = t.sendRequestInternal(ctx, req, cfg.headers)
 		return err
 	}
 
@@ -528,7 +534,7 @@ func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCReques
 }
 
 // sendRequestInternal is the original implementation without retry logic
-func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONRPCRequest, customHeaders map[string]string) (*json.RawMessage, error) {
 	// Auto-start the transport if not already started.
 	if !t.started.Load() {
 		if err := t.start(ctx); err != nil {
@@ -575,11 +581,16 @@ func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONR
 	// Set content type.
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Add custom headers.
+	// Add custom headers from client config.
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
 		}
+	}
+
+	// Add per-request custom headers (these override client-level headers)
+	for key, value := range customHeaders {
+		httpReq.Header.Set(key, value)
 	}
 
 	// Send the request.

@@ -207,7 +207,7 @@ func (c *StdioClient) setState(state State) {
 }
 
 // ListTools lists available tools.
-func (c *StdioClient) ListTools(ctx context.Context, req *ListToolsRequest) (*ListToolsResult, error) {
+func (c *StdioClient) ListTools(ctx context.Context, req *ListToolsRequest, opts ...RequestOption) (*ListToolsResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -222,7 +222,7 @@ func (c *StdioClient) ListTools(ctx context.Context, req *ListToolsRequest) (*Li
 		Params: req.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list tools request failed: %w", err)
 	}
@@ -240,7 +240,7 @@ func (c *StdioClient) ListTools(ctx context.Context, req *ListToolsRequest) (*Li
 }
 
 // CallTool calls a specific tool.
-func (c *StdioClient) CallTool(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+func (c *StdioClient) CallTool(ctx context.Context, req *CallToolRequest, opts ...RequestOption) (*CallToolResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -251,7 +251,7 @@ func (c *StdioClient) CallTool(ctx context.Context, req *CallToolRequest) (*Call
 		"arguments": req.Params.Arguments,
 	})
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("call tool request failed: %w", err)
 	}
@@ -269,7 +269,7 @@ func (c *StdioClient) CallTool(ctx context.Context, req *CallToolRequest) (*Call
 }
 
 // ListPrompts lists available prompts.
-func (c *StdioClient) ListPrompts(ctx context.Context, req *ListPromptsRequest) (*ListPromptsResult, error) {
+func (c *StdioClient) ListPrompts(ctx context.Context, req *ListPromptsRequest, opts ...RequestOption) (*ListPromptsResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -284,7 +284,7 @@ func (c *StdioClient) ListPrompts(ctx context.Context, req *ListPromptsRequest) 
 		Params: req.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list prompts request failed: %w", err)
 	}
@@ -302,7 +302,7 @@ func (c *StdioClient) ListPrompts(ctx context.Context, req *ListPromptsRequest) 
 }
 
 // GetPrompt gets a specific prompt.
-func (c *StdioClient) GetPrompt(ctx context.Context, req *GetPromptRequest) (*GetPromptResult, error) {
+func (c *StdioClient) GetPrompt(ctx context.Context, req *GetPromptRequest, opts ...RequestOption) (*GetPromptResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -313,7 +313,7 @@ func (c *StdioClient) GetPrompt(ctx context.Context, req *GetPromptRequest) (*Ge
 		"arguments": req.Params.Arguments,
 	})
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("get prompt request failed: %w", err)
 	}
@@ -331,7 +331,7 @@ func (c *StdioClient) GetPrompt(ctx context.Context, req *GetPromptRequest) (*Ge
 }
 
 // ListResources lists available resources.
-func (c *StdioClient) ListResources(ctx context.Context, req *ListResourcesRequest) (*ListResourcesResult, error) {
+func (c *StdioClient) ListResources(ctx context.Context, req *ListResourcesRequest, opts ...RequestOption) (*ListResourcesResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -346,7 +346,7 @@ func (c *StdioClient) ListResources(ctx context.Context, req *ListResourcesReque
 		Params: req.Params,
 	}
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("list resources request failed: %w", err)
 	}
@@ -364,7 +364,7 @@ func (c *StdioClient) ListResources(ctx context.Context, req *ListResourcesReque
 }
 
 // ReadResource reads a specific resource.
-func (c *StdioClient) ReadResource(ctx context.Context, req *ReadResourceRequest) (*ReadResourceResult, error) {
+func (c *StdioClient) ReadResource(ctx context.Context, req *ReadResourceRequest, opts ...RequestOption) (*ReadResourceResult, error) {
 	if !c.initialized.Load() {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -375,7 +375,7 @@ func (c *StdioClient) ReadResource(ctx context.Context, req *ReadResourceRequest
 		"arguments": req.Params.Arguments,
 	})
 
-	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
+	rawResp, err := c.transport.sendRequest(ctx, jsonReq, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("read resource request failed: %w", err)
 	}
