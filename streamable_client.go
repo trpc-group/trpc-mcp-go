@@ -205,17 +205,24 @@ func (t *streamableHTTPClientTransport) setRetryConfig(config *retry.Config) {
 func (t *streamableHTTPClientTransport) sendRequest(
 	ctx context.Context,
 	req *JSONRPCRequest,
+	opts ...RequestOption,
 ) (*json.RawMessage, error) {
+	// Apply request options to get custom headers
+	cfg := &requestConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	// If no retry config, use original implementation
 	if t.retryConfig == nil {
-		return t.send(ctx, req, nil)
+		return t.send(ctx, req, nil, cfg.headers)
 	}
 
 	// Define the operation to be retried
 	var result *json.RawMessage
 	operation := func() error {
 		var err error
-		result, err = t.send(ctx, req, nil)
+		result, err = t.send(ctx, req, nil, cfg.headers)
 		return err
 	}
 
@@ -234,6 +241,7 @@ func (t *streamableHTTPClientTransport) send(
 	ctx context.Context,
 	req *JSONRPCRequest,
 	options *streamOptions,
+	customHeaders map[string]string,
 ) (*json.RawMessage, error) {
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
@@ -264,11 +272,16 @@ func (t *streamableHTTPClientTransport) send(
 		httpReq.Header.Set(httputil.LastEventIDHeader, t.lastEventID)
 	}
 
-	// Add custom headers
+	// Add custom headers from client config
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
 		}
+	}
+
+	// Add per-request custom headers (these override client-level headers)
+	for key, value := range customHeaders {
+		httpReq.Header.Set(key, value)
 	}
 
 	// Send request using the handler
@@ -955,7 +968,7 @@ func (t *streamableHTTPClientTransport) sendRequestWithStream(
 	req *JSONRPCRequest,
 	options *streamOptions,
 ) (*json.RawMessage, error) {
-	return t.send(ctx, req, options)
+	return t.send(ctx, req, options, nil)
 }
 
 // establishGetSSEConnection attempts to establish a GET SSE connection if enabled

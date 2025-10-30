@@ -192,7 +192,10 @@ func (t *stdioClientTransport) setRetryConfig(config *retry.Config) {
 }
 
 // sendRequest sends a request and waits for a response with retry support.
-func (t *stdioClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
+func (t *stdioClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest, opts ...RequestOption) (*json.RawMessage, error) {
+	// Note: stdio transport doesn't support HTTP headers, opts are ignored for compatibility
+	_ = opts // Explicitly mark as intentionally unused
+
 	if t.closed.Load() {
 		return nil, fmt.Errorf("transport is closed")
 	}
