@@ -37,10 +37,11 @@ type sseClientTransport struct {
 	responsesMu    sync.RWMutex                     // Mutex for responses map.
 
 	sseConn struct {
-		active bool               // Flag indicating if connection is active.
-		ctx    context.Context    // Context for the SSE connection.
-		cancel context.CancelFunc // Function to cancel the SSE connection.
-		mutex  sync.Mutex         // Mutex for synchronizing connection operations.
+		active    bool               // Flag indicating if connection is active.
+		ctx       context.Context    // Context for the SSE connection.
+		cancel    context.CancelFunc // Function to cancel the SSE connection.
+		bodyClose func() error       // Function to close the response body.
+		mutex     sync.Mutex         // Mutex for synchronizing connection operations.
 	}
 
 	onNotification func(notification *JSONRPCNotification) // Notification handler.
@@ -186,6 +187,7 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 
 	t.sseConn.mutex.Lock()
 	t.sseConn.active = true
+	t.sseConn.bodyClose = resp.Body.Close // Save the body close function.
 	t.sseConn.mutex.Unlock()
 
 	// Start reading SSE events.
@@ -699,12 +701,19 @@ func (t *sseClientTransport) close() error {
 		return nil // Already closed.
 	}
 
-	// Cancel the SSE connection if active.
+	// Close the SSE connection if active.
 	t.sseConn.mutex.Lock()
+	// Close the response body first to immediately terminate the connection.
+	if t.sseConn.bodyClose != nil {
+		t.sseConn.bodyClose()
+		t.sseConn.bodyClose = nil
+	}
+	// Then cancel the context.
 	if t.sseConn.cancel != nil {
 		t.sseConn.cancel()
-		t.sseConn.active = false
+		t.sseConn.cancel = nil
 	}
+	t.sseConn.active = false
 	t.sseConn.mutex.Unlock()
 
 	// Close all response channels.
