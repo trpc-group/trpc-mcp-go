@@ -797,6 +797,26 @@ func (t *streamableHTTPClientTransport) handleIncomingRequest(request *JSONRPCRe
 	switch request.Method {
 	case MethodRootsList:
 		t.handleRootsListRequest(request)
+	case MethodSamplingCreateMessage:
+		// Server to Client request, hand over the request to the upper client's dispatchReverseRequest
+		if t.client != nil {
+			resRaw, handled, err := t.client.dispatchReverseRequest(context.Background(), request)
+			if handled {
+				if err != nil {
+					t.sendErrorResponse(request, ErrCodeInternal, err.Error())
+					return
+				}
+				// Construct JSON-RPC response and POST to server
+				resp := &JSONRPCResponse{
+					JSONRPC: JSONRPCVersion,
+					ID:      request.ID,
+					Result:  resRaw,
+				}
+				t.sendResponseToServer(resp)
+				return
+			}
+		}
+		t.sendErrorResponse(request, ErrCodeMethodNotFound, "sampling not enabled")
 	default:
 		// Send method not found error.
 		t.sendErrorResponse(request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))

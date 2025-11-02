@@ -480,6 +480,26 @@ func (t *stdioClientTransport) handleIncomingRequest(rawMessage json.RawMessage)
 	switch request.Method {
 	case MethodRootsList:
 		t.handleRootsListRequest(&request)
+	case MethodSamplingCreateMessage:
+		if t.client != nil {
+			resRaw, handled, err := t.client.dispatchReverseRequest(context.Background(), &request)
+			if handled {
+				if err != nil {
+					t.sendErrorResponse(&request, ErrCodeInternal, err.Error())
+					return
+				}
+				resp := &JSONRPCResponse{
+					JSONRPC: JSONRPCVersion,
+					ID:      request.ID,
+					Result:  resRaw,
+				}
+				if err := t.sendResponse(context.Background(), resp); err != nil {
+					t.logger.Errorf("Client handleIncomingRequest: Failed to send sampling response: %v", err)
+				}
+				return
+			}
+		}
+		t.sendErrorResponse(&request, ErrCodeMethodNotFound, "sampling not enabled")
 	default:
 		t.logger.Warnf("Client handleIncomingRequest: Unknown method: %s", request.Method)
 		// Send method not found error
@@ -698,4 +718,34 @@ func (t *stdioClientTransport) isProcessRunning() bool {
 
 	// On Unix systems, sending signal 0 checks if process exists.
 	return t.process.Process.Signal(syscall.Signal(0)) == nil
+}
+
+// dispatchReverseRequest is called by transports when the server sends a request to the client
+// It handles sampling/createMessage and returns (resultRaw, handled, error)
+func (c *StdioClient) dispatchReverseRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, bool, error) {
+	switch req.Method {
+	case MethodSamplingCreateMessage:
+		if !c.samplingEnabled || c.samplingHandler == nil {
+			return nil, true, fmt.Errorf("sampling not enabled on client")
+		}
+		var params CreateMessageParams
+		if req.Params != nil {
+			b, _ := json.Marshal(req.Params)
+			if err := json.Unmarshal(b, &params); err != nil {
+				return nil, true, fmt.Errorf("invalid sampling params: %w", err)
+			}
+		}
+		res, err := c.samplingHandler.CreateMessage(ctx, &params)
+		if err != nil {
+			return nil, true, err
+		}
+		buf, err := json.Marshal(res)
+		if err != nil {
+			return nil, true, fmt.Errorf("marshal CreateMessageResult failed: %w", err)
+		}
+		raw := json.RawMessage(buf)
+		return &raw, true, nil
+	default:
+		return nil, false, nil
+	}
 }

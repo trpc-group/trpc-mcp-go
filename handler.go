@@ -42,6 +42,9 @@ type mcpHandler struct {
 
 	// Server reference for notification handling.
 	server serverNotificationDispatcher
+
+	// Whether server enables Sampling capability
+	serverSamplingEnabled bool
 }
 
 // serverNotificationDispatcher defines the interface for dispatching notifications to handlers.
@@ -92,6 +95,11 @@ func newMCPHandler(options ...func(*mcpHandler)) *mcpHandler {
 	h.lifecycleManager.withResourceManager(h.resourceManager)
 	h.lifecycleManager.withPromptManager(h.promptManager)
 
+	// Also pass sampling flag if already set by options
+	if h.serverSamplingEnabled {
+		h.lifecycleManager.withServerSamplingEnabled(true)
+	}
+
 	return h
 }
 
@@ -120,6 +128,16 @@ func withResourceManager(manager *resourceManager) func(*mcpHandler) {
 func withPromptManager(manager *promptManager) func(*mcpHandler) {
 	return func(h *mcpHandler) {
 		h.promptManager = manager
+	}
+}
+
+// withServerSamplingEnabled sets whether the server exposes Sampling capability
+func withServerSamplingEnabled(enabled bool) func(*mcpHandler) {
+	return func(h *mcpHandler) {
+		h.serverSamplingEnabled = enabled
+		if h.lifecycleManager != nil {
+			h.lifecycleManager.withServerSamplingEnabled(enabled)
+		}
 	}
 }
 
