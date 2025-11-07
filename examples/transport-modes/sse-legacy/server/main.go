@@ -19,13 +19,49 @@ import (
 	mcp "trpc.group/trpc-go/trpc-mcp-go"
 )
 
+// loggingMiddleware demonstrates SSEServer's middleware support.
+// Logs request method and execution time for all requests.
+func loggingMiddleware(next mcp.HandlerFunc) mcp.HandlerFunc {
+	return func(ctx context.Context, req *mcp.JSONRPCRequest) (mcp.JSONRPCMessage, error) {
+		// Get session info if available
+		var sessionID string
+		if session, ok := mcp.GetSessionFromContext(ctx); ok && session != nil {
+			sessionID = session.GetID()
+			if len(sessionID) > 8 {
+				sessionID = sessionID[:8] + "..."
+			}
+		} else {
+			sessionID = "no-session"
+		}
+
+		// Log request
+		log.Printf("[Middleware] → Session: %s, Method: %s", sessionID, req.Method)
+		start := time.Now()
+
+		// Call next handler
+		result, err := next(ctx, req)
+
+		// Log response
+		duration := time.Since(start)
+		if err != nil {
+			log.Printf("[Middleware] ← Method: %s, Duration: %v, Error: %v", req.Method, duration, err)
+		} else {
+			log.Printf("[Middleware] ← Method: %s, Duration: %v, Success", req.Method, duration)
+		}
+
+		return result, err
+	}
+}
+
 func main() {
-	// Create SSE server.
+	// Create SSE server with middleware.
+	// Middleware must be configured at server creation time using WithSSEMiddleware option.
 	server := mcp.NewSSEServer(
-		"SSE Compatibility Server",          // Server name.
-		"1.0.0",                             // Server version.
-		mcp.WithSSEEndpoint("/sse"),         // Explicitly set SSE endpoint.
-		mcp.WithMessageEndpoint("/message"), // Explicitly set message endpoint.
+		"SSE Compatibility Server",               // Server name.
+		"1.0.0",                                  // Server version.
+		mcp.WithSSEEndpoint("/sse"),              // Explicitly set SSE endpoint.
+		mcp.WithMessageEndpoint("/message"),      // Explicitly set message endpoint.
+		mcp.WithSSEMiddleware(loggingMiddleware), // Register middleware
 	)
 
 	// Register tools.
