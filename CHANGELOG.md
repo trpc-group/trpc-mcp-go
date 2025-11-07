@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.9 (2025-11-07)
+
+### Features
+- feat: add middleware support for request/response interception (#89)
+
+### Fixes
+- fix: close SSE response body before canceling context (#93)
+
 ## 0.0.8 (2025-10-29)
 
 ### Features
