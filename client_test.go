@@ -220,3 +220,126 @@ func TestClient_WithHTTPHeaders(t *testing.T) {
 		assert.Equal(t, "custom-value", streamableTransport.httpHeaders.Get("X-Custom-Header"))
 	}
 }
+
+// TestHTTPBeforeRequest tests the HTTPBeforeRequest functionality
+func TestHTTPBeforeRequest(t *testing.T) {
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check if custom header was added
+		if r.Header.Get("X-Custom-Header") != "test-value" {
+			t.Errorf("Expected X-Custom-Header to be 'test-value', got '%s'", r.Header.Get("X-Custom-Header"))
+		}
+		if r.Header.Get("X-Request-ID") != "12345" {
+			t.Errorf("Expected X-Request-ID to be '12345', got '%s'", r.Header.Get("X-Request-ID"))
+		}
+
+		// Return a valid MCP initialize response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"jsonrpc": "2.0",
+			"id": 1,
+			"result": {
+				"protocolVersion": "2024-11-05",
+				"capabilities": {},
+				"serverInfo": {
+					"name": "test-server",
+					"version": "1.0.0"
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	// User-defined composition function
+	compose := func(fns ...HTTPBeforeRequestFunc) HTTPBeforeRequestFunc {
+		return func(ctx context.Context, req *http.Request) error {
+			for _, fn := range fns {
+				if err := fn(ctx, req); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
+	// Create client with composed HTTPBeforeRequest functions
+	client, err := NewClient(
+		server.URL,
+		Implementation{
+			Name:    "test-client",
+			Version: "1.0.0",
+		},
+		WithHTTPBeforeRequest(
+			compose(
+				func(ctx context.Context, req *http.Request) error {
+					req.Header.Set("X-Custom-Header", "test-value")
+					return nil
+				},
+				func(ctx context.Context, req *http.Request) error {
+					req.Header.Set("X-Request-ID", "12345")
+					return nil
+				},
+			),
+		),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Initialize the client
+	ctx := context.Background()
+	_, err = client.Initialize(ctx, &InitializeRequest{
+		Params: InitializeParams{
+			ProtocolVersion: ProtocolVersion_2024_11_05,
+			Capabilities:    ClientCapabilities{},
+			ClientInfo: Implementation{
+				Name:    "test-client",
+				Version: "1.0.0",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to initialize client: %v", err)
+	}
+}
+
+// TestHTTPBeforeRequestError tests that errors from HTTPBeforeRequest functions are properly handled
+func TestHTTPBeforeRequestError(t *testing.T) {
+	// Create a test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("Server should not be called when HTTPBeforeRequest returns an error")
+	}))
+	defer server.Close()
+
+	// Create client with HTTPBeforeRequest that returns an error
+	client, err := NewClient(
+		server.URL,
+		Implementation{
+			Name:    "test-client",
+			Version: "1.0.0",
+		},
+		WithHTTPBeforeRequest(func(ctx context.Context, req *http.Request) error {
+			return http.ErrAbortHandler
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Initialize the client - should fail
+	ctx := context.Background()
+	_, err = client.Initialize(ctx, &InitializeRequest{
+		Params: InitializeParams{
+			ProtocolVersion: ProtocolVersion_2024_11_05,
+			Capabilities:    ClientCapabilities{},
+			ClientInfo: Implementation{
+				Name:    "test-client",
+				Version: "1.0.0",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Expected error from HTTPBeforeRequest, got nil")
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	icontext "trpc.group/trpc-go/trpc-mcp-go/internal/context"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
@@ -268,6 +269,13 @@ func (t *streamableHTTPClientTransport) send(
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
+		}
+	}
+
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(ctx, httpReq); err != nil {
+			return nil, fmt.Errorf("HTTP before-request failed: %w", err)
 		}
 	}
 
@@ -526,6 +534,13 @@ func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, no
 		}
 	}
 
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(ctx, httpReq); err != nil {
+			return fmt.Errorf("HTTP before-request failed: %w", err)
+		}
+	}
+
 	// Send HTTP request.
 	var httpResp *http.Response
 	if t.httpReqHandler != nil {
@@ -593,7 +608,7 @@ func (t *streamableHTTPClientTransport) setSessionID(sessionID string) {
 }
 
 // Establish GET SSE connection
-func (t *streamableHTTPClientTransport) establishGetSSE() {
+func (t *streamableHTTPClientTransport) establishGetSSE(parentCtx context.Context) {
 	// Get lock to ensure only one active connection
 	t.getSSEConn.mutex.Lock()
 	defer t.getSSEConn.mutex.Unlock()
@@ -603,8 +618,8 @@ func (t *streamableHTTPClientTransport) establishGetSSE() {
 		t.getSSEConn.cancel()
 	}
 
-	// Create new context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create new context that inherits values from parent but not cancellation.
+	ctx, cancel := context.WithCancel(icontext.WithoutCancel(parentCtx))
 	t.getSSEConn.ctx = ctx
 	t.getSSEConn.cancel = cancel
 
@@ -654,6 +669,13 @@ func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
 			req.Header.Add(key, value)
+		}
+	}
+
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(ctx, req); err != nil {
+			return fmt.Errorf("HTTP before-request failed: %w", err)
 		}
 	}
 
@@ -959,7 +981,7 @@ func (t *streamableHTTPClientTransport) sendRequestWithStream(
 }
 
 // establishGetSSEConnection attempts to establish a GET SSE connection if enabled
-func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
+func (t *streamableHTTPClientTransport) establishGetSSEConnection(ctx context.Context) {
 	if !t.enableGetSSE {
 		t.logger.Debug("GET SSE is not enabled, will not establish GET SSE connection")
 		return
@@ -970,5 +992,5 @@ func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
 		return
 	}
 
-	t.establishGetSSE()
+	t.establishGetSSE(ctx)
 }

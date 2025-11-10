@@ -165,6 +165,13 @@ func (t *sseClientTransport) start(ctx context.Context) error {
 		}
 	}
 
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(sseCtx, req); err != nil {
+			return fmt.Errorf("HTTP before-request failed: %w", err)
+		}
+	}
+
 	// Send the request.
 	resp, err := t.httpReqHandler.Handle(sseCtx, t.httpClient, req)
 	if err != nil {
@@ -584,6 +591,13 @@ func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONR
 		}
 	}
 
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(ctx, httpReq); err != nil {
+			return nil, fmt.Errorf("HTTP before-request failed: %w", err)
+		}
+	}
+
 	// Send the request.
 	resp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
@@ -670,6 +684,13 @@ func (t *sseClientTransport) sendNotification(ctx context.Context, notification 
 	for key, values := range t.httpHeaders {
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
+		}
+	}
+
+	// Apply HTTP before-request functions.
+	if t.client != nil {
+		if err := t.client.applyHTTPBeforeRequest(ctx, httpReq); err != nil {
+			return fmt.Errorf("HTTP before-request failed: %w", err)
 		}
 	}
 
