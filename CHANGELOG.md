@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.10 (2025-11-10)
+
+### Features
+- feat: add HTTPBeforeRequest support (#92)
+
 ## 0.0.9 (2025-11-07)
 
 ### Features
