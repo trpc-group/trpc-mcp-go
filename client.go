@@ -106,6 +106,11 @@ type TransportAware interface {
 	GetTransportInfo() TransportInfo
 }
 
+// HTTPBeforeRequestFunc is called before sending each HTTP request.
+// It can inspect and modify the request (e.g., add headers, modify URL).
+// Returning an error will abort the request.
+type HTTPBeforeRequestFunc func(ctx context.Context, req *http.Request) error
+
 // Client represents an MCP client.
 type Client struct {
 	transport        httpTransport          // transport layer.
@@ -128,6 +133,9 @@ type Client struct {
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
 	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
+
+	// HTTP before-request function.
+	httpBeforeRequestFunc HTTPBeforeRequestFunc
 }
 
 // ClientOption client option function
@@ -305,6 +313,22 @@ func WithHTTPReqHandlerOption(options ...HTTPReqHandlerOption) ClientOption {
 			c.transportOptions = append(c.transportOptions, withTransportHTTPReqHandlerOption(option))
 		}
 	}
+}
+
+// WithHTTPBeforeRequest sets a function to be called before each HTTP request.
+func WithHTTPBeforeRequest(fn HTTPBeforeRequestFunc) ClientOption {
+	return func(c *Client) {
+		c.httpBeforeRequestFunc = fn
+	}
+}
+
+// applyHTTPBeforeRequest calls the HTTP before-request function if set.
+// If the function returns an error, the error is returned.
+func (c *Client) applyHTTPBeforeRequest(ctx context.Context, req *http.Request) error {
+	if c.httpBeforeRequestFunc != nil {
+		return c.httpBeforeRequestFunc(ctx, req)
+	}
+	return nil
 }
 
 // GetState returns the current client state.
