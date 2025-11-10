@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	icontext "trpc.group/trpc-go/trpc-mcp-go/internal/context"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 	"trpc.group/trpc-go/trpc-mcp-go/internal/retry"
 )
@@ -607,7 +608,7 @@ func (t *streamableHTTPClientTransport) setSessionID(sessionID string) {
 }
 
 // Establish GET SSE connection
-func (t *streamableHTTPClientTransport) establishGetSSE() {
+func (t *streamableHTTPClientTransport) establishGetSSE(parentCtx context.Context) {
 	// Get lock to ensure only one active connection
 	t.getSSEConn.mutex.Lock()
 	defer t.getSSEConn.mutex.Unlock()
@@ -617,8 +618,8 @@ func (t *streamableHTTPClientTransport) establishGetSSE() {
 		t.getSSEConn.cancel()
 	}
 
-	// Create new context
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create new context that inherits values from parent but not cancellation.
+	ctx, cancel := context.WithCancel(icontext.WithoutCancel(parentCtx))
 	t.getSSEConn.ctx = ctx
 	t.getSSEConn.cancel = cancel
 
@@ -980,7 +981,7 @@ func (t *streamableHTTPClientTransport) sendRequestWithStream(
 }
 
 // establishGetSSEConnection attempts to establish a GET SSE connection if enabled
-func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
+func (t *streamableHTTPClientTransport) establishGetSSEConnection(ctx context.Context) {
 	if !t.enableGetSSE {
 		t.logger.Debug("GET SSE is not enabled, will not establish GET SSE connection")
 		return
@@ -991,5 +992,5 @@ func (t *streamableHTTPClientTransport) establishGetSSEConnection() {
 		return
 	}
 
-	t.establishGetSSE()
+	t.establishGetSSE(ctx)
 }

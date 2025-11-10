@@ -401,8 +401,9 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 
 	// Try to establish GET SSE connection if transport supports it
 	if t, ok := c.transport.(*streamableHTTPClientTransport); ok {
-		// Start GET SSE connection asynchronously to avoid blocking
-		go t.establishGetSSEConnection()
+		// Start GET SSE connection asynchronously to avoid blocking.
+		// Pass the context so GET SSE can inherit context values.
+		go t.establishGetSSEConnection(ctx)
 	}
 
 	return initResult, nil
