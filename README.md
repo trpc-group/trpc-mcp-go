@@ -892,57 +892,100 @@ func main() {
 
 #### Client Side: Sending Custom HTTP Headers
 
-Use `WithHTTPHeaders` to send custom HTTP headers with all requests:
+**Option 1: Static Headers with `WithHTTPHeaders`**
+
+Use `WithHTTPHeaders` for headers that don't change across requests:
 
 ```go
-package main
+// Create custom headers
+headers := make(http.Header)
+headers.Set("Authorization", "Bearer your-token-here")
+headers.Set("User-Agent", "MyMCPClient/1.0")
 
-import (
-	"context"
-	"log"
-	"net/http"
-	mcp "trpc.group/trpc-go/trpc-mcp-go"
+// Create client with static headers
+client, err := mcp.NewClient(
+	"http://localhost:3000/mcp",
+	mcp.Implementation{Name: "my-client", Version: "1.0.0"},
+	mcp.WithHTTPHeaders(headers), // Applied to all requests
+)
+```
+
+**Option 2: Dynamic Headers with `WithHTTPBeforeRequest`**
+
+Use `WithHTTPBeforeRequest` for headers that change per request (e.g., per-request auth tokens, request IDs, tracing):
+
+```go
+// Define context keys
+type contextKey string
+const (
+	requestIDKey contextKey = "request-id"
+	userIDKey    contextKey = "user-id"
 )
 
-func main() {
-	// Create custom headers
-	headers := make(http.Header)
-	headers.Set("Authorization", "Bearer your-token-here")
-	headers.Set("User-Agent", "MyMCPClient/1.0")
-	headers.Set("X-Custom-Header", "custom-value")
-	
-	// Create client with custom headers
-	client, err := mcp.NewClient(
-		"http://localhost:3000/mcp",
-		mcp.Implementation{
-			Name:    "my-client",
-			Version: "1.0.0",
-		},
-		mcp.WithHTTPHeaders(headers), // All requests will include these headers
-	)
-	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+// Create before-request function
+beforeRequest := func(ctx context.Context, req *http.Request) error {
+	// Extract values from context and set headers
+	if requestID, ok := ctx.Value(requestIDKey).(string); ok {
+		req.Header.Set("X-Request-ID", requestID)
 	}
-	defer client.Close()
-	
-	// Initialize and use client normally
-	// Headers will be automatically included in all HTTP requests
-	_, err = client.Initialize(context.Background(), &mcp.InitializeRequest{})
-	if err != nil {
-		log.Fatalf("Failed to initialize: %v", err)
+	if userID, ok := ctx.Value(userIDKey).(string); ok {
+		req.Header.Set("X-User-ID", userID)
 	}
-	
-	// Call tools - headers are automatically included
-	result, err := client.CallTool(context.Background(), &mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name: "my-tool",
-			Arguments: map[string]interface{}{
-				"message": "Hello with headers!",
-			},
-		},
-	})
-	// Handle result...
+	return nil // Return error to abort the request
 }
+
+// Create client with dynamic headers
+client, err := mcp.NewClient(
+	"http://localhost:3000/mcp",
+	mcp.Implementation{Name: "my-client", Version: "1.0.0"},
+	mcp.WithHTTPBeforeRequest(beforeRequest),
+)
+
+// Pass context with values for each request
+ctx := context.WithValue(context.Background(), requestIDKey, "req-12345")
+ctx = context.WithValue(ctx, userIDKey, "user-789")
+
+// Headers are dynamically set from context
+result, err := client.CallTool(ctx, &mcp.CallToolRequest{
+	Params: mcp.CallToolParams{
+		Name: "my-tool",
+		Arguments: map[string]interface{}{"message": "Hello!"},
+	},
+})
+```
+
+**Key Differences:**
+
+| Feature | `WithHTTPHeaders` | `WithHTTPBeforeRequest` |
+|---------|-------------------|-------------------------|
+| **Use Case** | Static headers (API keys, service name) | Dynamic headers (request ID, user context) |
+| **When Set** | Once at client creation | Before each HTTP request |
+| **Context Access** | ❌ No | ✅ Yes - read from `context.Context` |
+| **Applies To** | All requests | All requests (initialize, tools/list, tools/call, GET SSE) |
+| **Can Abort Request** | ❌ No | ✅ Yes - return error |
+
+**Combining Both:**
+
+```go
+// Static headers for service identification
+headers := make(http.Header)
+headers.Set("X-Service-Name", "my-service")
+
+// Dynamic headers for per-request data
+beforeRequest := func(ctx context.Context, req *http.Request) error {
+	if requestID, ok := ctx.Value(requestIDKey).(string); ok {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+	return nil
+}
+
+client, err := mcp.NewClient(
+	serverURL,
+	clientInfo,
+	mcp.WithHTTPHeaders(headers),           // Static headers
+	mcp.WithHTTPBeforeRequest(beforeRequest), // Dynamic headers
+)
+// Both are applied: static headers first, then dynamic headers
 ```
 
 #### Key Features
@@ -950,12 +993,14 @@ func main() {
 - **Transport Layer Independence**: Tool handlers access headers through context, not directly from HTTP requests
 - **Multiple Context Functions**: Use multiple `WithHTTPContextFunc` calls to extract different headers
 - **Type Safety**: Use strongly-typed context keys to avoid conflicts
-- **Automatic Application**: Client headers are applied to all HTTP requests (initialize, tool calls, notifications, etc.)
-- **Backward Compatibility**: Optional feature that doesn't break existing APIs
+- **Static + Dynamic Headers**: Combine `WithHTTPHeaders` and `WithHTTPBeforeRequest` for maximum flexibility
+- **Context Propagation**: `WithHTTPBeforeRequest` enables per-request headers via `context.Context`
+- **All Requests Covered**: Headers apply to initialize, tools/list, tools/call, and GET SSE connections
+- **Backward Compatibility**: Optional features that don't break existing APIs
 
 #### Complete Example
 
-See the examples in [`examples/quickstart/`](examples/quickstart/) for basic usage, or check the advanced examples in [`examples/transport-modes/`](examples/transport-modes/) for transport-specific header handling.
+See [`examples/quickstart/`](examples/quickstart/) for basic usage, or [`examples/transport-modes/`](examples/transport-modes/) for transport-specific header handling.
 
 ### 2. How to get server name and version in a tool handler?
 
