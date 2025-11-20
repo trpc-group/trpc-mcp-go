@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,6 +52,20 @@ type sseSession struct {
 	lastActivity        time.Time                 // Last activity time.
 	data                map[string]interface{}    // Session data.
 	dataMu              sync.RWMutex              // Data mutex.
+}
+
+// serializedRequest contains all necessary information to process an HTTP
+// request on a remote node when using a distributed SessionPubSub.
+// It intentionally mirrors the structure used in the internal mcp-go project
+// to maximize cross-project compatibility for multi-node deployments.
+type serializedRequest struct {
+	Method     string              `json:"method"`
+	URL        string              `json:"url"`
+	Headers    map[string][]string `json:"headers"`
+	Body       []byte              `json:"body"`
+	RemoteAddr string              `json:"remote_addr,omitempty"`
+	Query      url.Values          `json:"query"`
+	Deadline   *time.Time          `json:"deadline,omitempty"`
 }
 
 // SessionID returns the session ID.
@@ -143,6 +158,7 @@ type SSEServer struct {
 	httpServer           *http.Server                                               // HTTP server.
 	contextFunc          func(ctx context.Context, r *http.Request) context.Context // HTTP context function.
 	sessionIDGenerator   SessionIDGenerator                                         // Custom session ID generator.
+	sessionPubSub        SessionPubSub                                              // Optional session Pub/Sub for distributed sessions.
 	keepAlive            bool                                                       // Whether to keep the connection alive.
 	keepAliveInterval    time.Duration                                              // Keep-alive interval.
 	logger               Logger                                                     // Logger for this server.
@@ -155,6 +171,20 @@ type SSEServer struct {
 
 // SSEOption defines a function type for configuring the SSE server.
 type SSEOption func(*SSEServer)
+
+// SessionMessageHandler handles messages delivered via a SessionPubSub
+// implementation for a specific session ID.
+type SessionMessageHandler func(ctx context.Context, sessionID string, payload []byte) error
+
+// SessionPubSub defines an interface for distributed session messaging.
+// Implementations can be backed by Redis, message queues, or any other
+// Pub/Sub mechanism. The payload is transport-agnostic and typically a
+// JSON-encoded serializedRequest.
+type SessionPubSub interface {
+	Publish(ctx context.Context, sessionID string, payload []byte) error
+	Subscribe(ctx context.Context, sessionID string, handler SessionMessageHandler) error
+	Unsubscribe(ctx context.Context, sessionID string) error
+}
 
 // NewSSEServer creates a new SSE server for MCP communication.
 func NewSSEServer(name, version string, opts ...SSEOption) *SSEServer {
@@ -217,6 +247,14 @@ func WithBasePath(basePath string) SSEOption {
 			basePath = "/" + basePath
 		}
 		s.basePath = strings.TrimSuffix(basePath, "/")
+	}
+}
+
+// WithSessionPubSub sets a SessionPubSub implementation to enable distributed
+// session routing across multiple server nodes.
+func WithSessionPubSub(pubSub SessionPubSub) SSEOption {
+	return func(s *SSEServer) {
+		s.sessionPubSub = pubSub
 	}
 }
 
@@ -368,6 +406,32 @@ func (s *SSEServer) getMessageEndpointForClient(sessionID string) string {
 	return fullPath
 }
 
+// trySubscribe registers the current server instance as a subscriber for the
+// given session ID if a SessionPubSub implementation is configured.
+func (s *SSEServer) trySubscribe(ctx context.Context, sessionID string) {
+	if s.sessionPubSub == nil {
+		return
+	}
+	if err := s.sessionPubSub.Subscribe(ctx, sessionID, s.handleSessionMessage); err != nil {
+		if s.logger != nil {
+			s.logger.Errorf("Failed to subscribe to session %s: %v", sessionID, err)
+		}
+	}
+}
+
+// tryUnsubscribe removes the subscription for the given session ID if a
+// SessionPubSub implementation is configured.
+func (s *SSEServer) tryUnsubscribe(ctx context.Context, sessionID string) {
+	if s.sessionPubSub == nil {
+		return
+	}
+	if err := s.sessionPubSub.Unsubscribe(ctx, sessionID); err != nil {
+		if s.logger != nil {
+			s.logger.Errorf("Failed to unsubscribe from session %s: %v", sessionID, err)
+		}
+	}
+}
+
 // handleSSE handles SSE connection requests.
 func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -414,6 +478,19 @@ func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Set session information to context.
 	ctx = setSessionToContext(ctx, session)
+
+	// Subscribe to distributed SessionPubSub if configured.
+	if s.sessionPubSub != nil {
+		s.trySubscribe(ctx, sessionID)
+		defer func() {
+			// Use a detached context with timeout to ensure unsubscribe has a chance
+			// to complete even if the request context is already canceled.
+			detached := icontext.WithoutCancel(context.Background())
+			unsubCtx, cancel := context.WithTimeout(detached, 5*time.Second)
+			defer cancel()
+			s.tryUnsubscribe(unsubCtx, sessionID)
+		}()
+	}
 
 	// Send endpoint event.
 	endpointURL := s.getMessageEndpointForClient(sessionID)
@@ -541,9 +618,28 @@ func (s *SSEServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get session from request
+	// Get session from request.
 	session, err := s.getSessionFromRequest(r)
 	if err != nil {
+		// If the session is not found but a SessionPubSub is configured, try to
+		// publish the request to the node that owns the session.
+		if s.sessionPubSub != nil && strings.Contains(err.Error(), "session not found") {
+			sessionID := r.URL.Query().Get("sessionId")
+			if sessionID == "" {
+				s.handleSessionError(w, err)
+				return
+			}
+			if err := s.tryPublish(r.Context(), sessionID, r); err != nil {
+				if s.logger != nil {
+					s.logger.Errorf("Failed to publish message for remote session %s: %v", sessionID, err)
+				}
+				s.handleSessionError(w, err)
+				return
+			}
+			// Successfully handed off to another node.
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		s.handleSessionError(w, err)
 		return
 	}
@@ -756,6 +852,47 @@ func (s *SSEServer) handleSessionError(w http.ResponseWriter, err error) {
 	}
 }
 
+// tryPublish serializes and publishes an HTTP request to a remote node via the
+// configured SessionPubSub implementation. It is used when the local server
+// does not have the requested session but other nodes may.
+func (s *SSEServer) tryPublish(ctx context.Context, sessionID string, r *http.Request) error {
+	if s.sessionPubSub == nil {
+		return fmt.Errorf("session pubsub not configured")
+	}
+
+	// Read the request body.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read request body: %w", err)
+	}
+	defer r.Body.Close()
+
+	// Build serialized request compatible with mcp-go.
+	serialized := serializedRequest{
+		Method:     r.Method,
+		URL:        r.URL.String(),
+		Headers:    r.Header,
+		Body:       body,
+		RemoteAddr: r.RemoteAddr,
+		Query:      r.URL.Query(),
+	}
+
+	// Preserve deadline if present on context.
+	if deadline, ok := ctx.Deadline(); ok {
+		serialized.Deadline = &deadline
+	}
+
+	payload, err := json.Marshal(&serialized)
+	if err != nil {
+		return fmt.Errorf("failed to serialize request: %w", err)
+	}
+
+	if err := s.sessionPubSub.Publish(ctx, sessionID, payload); err != nil {
+		return fmt.Errorf("failed to publish message for session %s: %w", sessionID, err)
+	}
+	return nil
+}
+
 // parseJSONRPCRequest reads and parses the JSON-RPC request from the request body.
 func (s *SSEServer) parseJSONRPCRequest(r *http.Request) (*JSONRPCRequest, error) {
 	// Read request body content.
@@ -788,6 +925,108 @@ func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSessio
 	ctx = withClientSession(ctx, session)
 
 	return ctx
+}
+
+// handleSessionMessage is the SessionPubSub callback used to process messages
+// for a specific session ID on the node that owns the SSE connection.
+func (s *SSEServer) handleSessionMessage(ctx context.Context, sessionID string, payload []byte) error {
+	sessionValue, ok := s.sessions.Load(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session, ok := sessionValue.(*sseSession)
+	if !ok {
+		return fmt.Errorf("invalid session type for session ID: %s", sessionID)
+	}
+
+	// First, try to interpret the payload as a serializedRequest (cross-node HTTP
+	// request wrapper). This is compatible with the mcp-go implementation.
+	var serialized serializedRequest
+	if err := json.Unmarshal(payload, &serialized); err == nil &&
+		(serialized.URL != "" ||
+			serialized.Headers != nil ||
+			len(serialized.Body) != 0 ||
+			serialized.RemoteAddr != "" ||
+			serialized.Query != nil ||
+			serialized.Deadline != nil) {
+		return s.handleSerializedRequest(ctx, session, &serialized)
+	}
+
+	// Fallback: treat payload as a raw JSON-RPC message.
+	return s.handleRawRemoteMessage(ctx, session, payload)
+}
+
+// handleSerializedRequest processes a serializedRequest delivered via
+// SessionPubSub by extracting its JSON-RPC body and running it through the
+// standard JSON-RPC handlers.
+func (s *SSEServer) handleSerializedRequest(ctx context.Context, session *sseSession, req *serializedRequest) error {
+	// Respect remote deadline if provided.
+	if req.Deadline != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, *req.Deadline)
+		defer cancel()
+	}
+
+	// Optionally allow contextFunc to enrich context based on reconstructed
+	// http.Request semantics. The reconstructed request is not used for HTTP
+	// I/O, only for context decoration.
+	if s.contextFunc != nil {
+		httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewReader(req.Body))
+		if err == nil {
+			for key, values := range req.Headers {
+				for _, v := range values {
+					httpReq.Header.Add(key, v)
+				}
+			}
+			httpReq.RemoteAddr = req.RemoteAddr
+			ctx = s.contextFunc(ctx, httpReq)
+		}
+	}
+
+	return s.handleRawRemoteMessage(ctx, session, req.Body)
+}
+
+// handleRawRemoteMessage processes a raw JSON-RPC message for a given session
+// without going through the HTTP layer. It mirrors the logic in handleMessage
+// but skips HTTP-specific error handling and response writing.
+func (s *SSEServer) handleRawRemoteMessage(ctx context.Context, session *sseSession, body []byte) error {
+	// Parse message as raw JSON.
+	var rawMessage json.RawMessage
+	if err := json.Unmarshal(body, &rawMessage); err != nil {
+		if s.logger != nil {
+			s.logger.Errorf("Error parsing remote message: %v", err)
+		}
+		return fmt.Errorf("parse error: %w", err)
+	}
+
+	// Parse base message to determine type.
+	var base baseMessage
+	if err := json.Unmarshal(rawMessage, &base); err != nil {
+		if s.logger != nil {
+			s.logger.Errorf("Error parsing remote base message: %v", err)
+		}
+		return fmt.Errorf("parse error: %w", err)
+	}
+
+	// Create context with session.
+	ctx = s.createSessionContext(ctx, session)
+
+	// Handle different message types based on presence of ID and Method.
+	switch {
+	case base.ID != nil && base.Method != "":
+		s.handleRequestMessage(ctx, rawMessage, session)
+	case base.ID == nil && base.Method != "":
+		s.handleNotificationMessage(ctx, rawMessage, session)
+	case base.ID != nil && base.Method == "":
+		s.handleResponseMessage(ctx, rawMessage, session)
+	default:
+		if s.logger != nil {
+			s.logger.Errorf("Invalid JSON-RPC remote message: missing required fields")
+		}
+		return fmt.Errorf("invalid JSON-RPC message format")
+	}
+	return nil
 }
 
 // processRequestAsync processes the request asynchronously.
