@@ -479,25 +479,27 @@ func parseCallToolResult(rawMessage *json.RawMessage) (*CallToolResult, error) {
 		return nil, fmt.Errorf("content is missing")
 	}
 
-	contentArr, ok := contents.([]any)
-	if !ok {
-		return nil, fmt.Errorf("content is not an array")
-	}
-
-	for _, content := range contentArr {
-		// Extract content.
-		contentMap, ok := content.(map[string]any)
+	if contents != nil {
+		contentArr, ok := contents.([]any)
 		if !ok {
-			return nil, fmt.Errorf("content is not an object")
+			return nil, fmt.Errorf("content is not an array")
 		}
 
-		// Process content.
-		content, err := parseContent(contentMap)
-		if err != nil {
-			return nil, err
-		}
+		for _, content := range contentArr {
+			// Extract content.
+			contentMap, ok := content.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("content is not an object")
+			}
 
-		result.Content = append(result.Content, content)
+			// Process content.
+			content, err := parseContent(contentMap)
+			if err != nil {
+				return nil, err
+			}
+
+			result.Content = append(result.Content, content)
+		}
 	}
 
 	// Parse structuredContent if present
