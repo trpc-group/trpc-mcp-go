@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.11 (2025-12-09)
+
+### Fixes
+- fix: add nil check for tool result content (#97)
+- fix(sse): prevent panic when flushing closed SSE connections (#98)
+
 ## 0.0.10 (2025-11-10)
 
 ### Features

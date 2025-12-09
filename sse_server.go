@@ -53,6 +53,14 @@ type sseSession struct {
 	dataMu              sync.RWMutex              // Data mutex.
 }
 
+// sseStream wraps the components required to write SSE responses safely.
+type sseStream struct {
+	logger  Logger
+	writer  http.ResponseWriter
+	flusher http.Flusher
+	mu      *sync.Mutex
+}
+
 // SessionID returns the session ID.
 func (s *sseSession) SessionID() string {
 	return s.sessionID
@@ -330,7 +338,7 @@ func (s *SSEServer) Shutdown(ctx context.Context) error {
 		// Close all sessions.
 		s.sessions.Range(func(key, value interface{}) bool {
 			if session, ok := value.(*sseSession); ok {
-				close(session.done)
+				closeSessionDone(s.logger, session)
 			}
 			s.sessions.Delete(key)
 			return true
@@ -415,24 +423,31 @@ func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Set session information to context.
 	ctx = setSessionToContext(ctx, session)
 
+	stream := &sseStream{
+		logger:  s.logger,
+		writer:  w,
+		flusher: flusher,
+		mu:      &session.writeMu,
+	}
+
 	// Send endpoint event.
 	endpointURL := s.getMessageEndpointForClient(sessionID)
-	if !sendSSEEvent(w, flusher, &session.writeMu, "endpoint", endpointURL) {
+	if !stream.SendEvent("endpoint", endpointURL) {
 		return
 	}
 
 	// Send initial connection message.
-	sendSSEComment(w, flusher, &session.writeMu, "connection established")
+	stream.SendComment("connection established")
 
 	// Start notification handler.
-	go handleNotifications(s.logger, w, flusher, session)
+	go handleNotifications(ctx, s.logger, w, flusher, session)
 
 	// Start event queue handler.
-	go handleEventQueue(s.logger, w, flusher, session)
+	go handleEventQueue(ctx, s.logger, w, flusher, session)
 
 	// Start keep-alive handler.
 	if s.keepAlive {
-		go handleKeepAlive(s.logger, w, flusher, session, s.keepAliveInterval)
+		go handleKeepAlive(ctx, s.logger, w, flusher, session, s.keepAliveInterval)
 	}
 
 	// Wait for connection to close.
@@ -446,35 +461,68 @@ func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clean up resources.
-	close(session.done)
+	closeSessionDone(s.logger, session)
 	s.sessions.Delete(sessionID)
 	s.logger.Debugf("Cleaned up session %s", sessionID)
 }
 
-// sendSSEEvent sends SSE event and returns whether it is successful.
-func sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, mu *sync.Mutex, eventType, data string) bool {
-	mu.Lock()
-	defer mu.Unlock()
+// closeSessionDone safely closes the session done channel with panic protection.
+func closeSessionDone(logger Logger, session *sseSession) {
+	defer func() {
+		if r := recover(); r != nil && logger != nil {
+			logger.Errorf("Recovered from panic while closing session %s: %v", session.sessionID, r)
+		}
+	}()
+	if session != nil && session.done != nil {
+		close(session.done)
+	}
+}
+
+// safeFlush flushes the HTTP response writer with panic protection.
+func safeFlush(logger Logger, flusher http.Flusher) {
+	defer func() {
+		if r := recover(); r != nil && logger != nil {
+			logger.Errorf("Recovered from panic while flushing SSE response: %v", r)
+		}
+	}()
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
+// SendEvent sends an SSE event and returns whether it is successful.
+func (s *sseStream) SendEvent(eventType, data string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	event := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)
-	if _, err := fmt.Fprint(w, event); err != nil {
+	if _, err := fmt.Fprint(s.writer, event); err != nil {
+		if s.logger != nil {
+			s.logger.Errorf("Error writing SSE event %s: %v", eventType, err)
+		}
 		return false
 	}
-	flusher.Flush()
+	safeFlush(s.logger, s.flusher)
 	return true
 }
 
-// sendSSEComment sends SSE comment.
-func sendSSEComment(w http.ResponseWriter, flusher http.Flusher, mu *sync.Mutex, comment string) {
-	mu.Lock()
-	defer mu.Unlock()
+// SendComment sends an SSE comment frame.
+func (s *sseStream) SendComment(comment string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	fmt.Fprintf(w, ": %s\n\n", comment)
-	flusher.Flush()
+	fmt.Fprintf(s.writer, ": %s\n\n", comment)
+	safeFlush(s.logger, s.flusher)
 }
 
 // handleNotifications handles notification messages.
-func handleNotifications(logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession) {
+func handleNotifications(ctx context.Context, logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession) {
+	defer func() {
+		if r := recover(); r != nil && logger != nil {
+			logger.Errorf("Recovered from panic in SSE notification handler for session %s: %v", session.sessionID, r)
+		}
+	}()
+
 	for {
 		select {
 		case notification := <-session.notificationChannel:
@@ -486,47 +534,74 @@ func handleNotifications(logger Logger, w http.ResponseWriter, flusher http.Flus
 
 			session.writeMu.Lock()
 			fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
-			flusher.Flush()
+			safeFlush(logger, flusher)
 			session.writeMu.Unlock()
 
 		case <-session.done:
+			return
+		case <-ctx.Done():
+			if logger != nil {
+				logger.Debugf("Notification handler context done for session %s", session.sessionID)
+			}
 			return
 		}
 	}
 }
 
 // handleEventQueue handles event queue.
-func handleEventQueue(logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession) {
+func handleEventQueue(ctx context.Context, logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession) {
+	defer func() {
+		if r := recover(); r != nil && logger != nil {
+			logger.Errorf("Recovered from panic in SSE event queue handler for session %s: %v", session.sessionID, r)
+		}
+	}()
+
 	for {
 		select {
 		case event := <-session.eventQueue:
 			session.writeMu.Lock()
 			fmt.Fprint(w, event)
-			flusher.Flush()
+			safeFlush(logger, flusher)
 			session.writeMu.Unlock()
 
 		case <-session.done:
 			logger.Debugf("Event queue handler terminated for session %s", session.sessionID)
+			return
+		case <-ctx.Done():
+			if logger != nil {
+				logger.Debugf("Event queue handler context done for session %s", session.sessionID)
+			}
 			return
 		}
 	}
 }
 
 // handleKeepAlive handles keep-alive messages.
-func handleKeepAlive(logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession, interval time.Duration) {
+func handleKeepAlive(ctx context.Context, logger Logger, w http.ResponseWriter, flusher http.Flusher, session *sseSession, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	defer func() {
+		if r := recover(); r != nil && logger != nil {
+			logger.Errorf("Recovered from panic in SSE keepalive handler for session %s: %v", session.sessionID, r)
+		}
+	}()
 
 	for {
 		select {
 		case <-ticker.C:
 			session.writeMu.Lock()
 			fmt.Fprint(w, ": keepalive\n\n")
-			flusher.Flush()
+			safeFlush(logger, flusher)
 			session.writeMu.Unlock()
 
 		case <-session.done:
 			logger.Debugf("Keepalive handler terminated for session %s", session.sessionID)
+			return
+		case <-ctx.Done():
+			if logger != nil {
+				logger.Debugf("Keepalive handler context done for session %s", session.sessionID)
+			}
 			return
 		}
 	}
