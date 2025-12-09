@@ -8,6 +8,9 @@ package mcp
 
 import (
 	"context"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
+	"trpc.group/trpc-go/trpc-mcp-go/internal/utils"
 )
 
 const (
@@ -255,7 +258,18 @@ func (h *mcpHandler) handlePromptsGet(ctx context.Context, req *JSONRPCRequest, 
 }
 
 func (h *mcpHandler) handleCompletionComplete(ctx context.Context, req *JSONRPCRequest, session Session) (JSONRPCMessage, error) {
-	return h.promptManager.handleCompletionComplete(ctx, req)
+	ref := utils.ExtractMap(req.Params.(map[string]interface{}), "ref")
+	if ref == nil {
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+	}
+	switch utils.ExtractString(ref, "type") {
+	case "ref/prompt":
+		return h.promptManager.handleCompletionComplete(ctx, req)
+	case "ref/resource":
+		return h.resourceManager.handleCompletionComplete(ctx, req)
+	default:
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+	}
 }
 
 // handleNotification implements the handler interface's handleNotification method

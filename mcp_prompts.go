@@ -20,10 +20,17 @@ type promptHandler func(ctx context.Context, req *GetPromptRequest) (*GetPromptR
 // a filtered list of prompts that should be visible to the client.
 type PromptListFilter func(ctx context.Context, prompts []*Prompt) []*Prompt
 
+// completionCompleteHandler defines the function type for handling completion requests
+type completionCompleteHandler func(ctx context.Context, req *CompleteCompletionRequest) (*CompleteCompletionResult, error)
+
+// registerdPromptOption is a function that configures a registeredPrompt.
+type registerdPromptOption func(*registeredPrompt)
+
 // registeredPrompt combines a Prompt with its handler function
 type registeredPrompt struct {
-	Prompt  *Prompt
-	Handler promptHandler
+	Prompt                    *Prompt
+	Handler                   promptHandler
+	CompletionCompleteHandler completionCompleteHandler
 }
 
 // ListPromptsRequest describes a request to list prompts.
@@ -51,6 +58,60 @@ type GetPromptResult struct {
 	Result
 	Description string          `json:"description,omitempty"`
 	Messages    []PromptMessage `json:"messages"`
+}
+
+// CompleteCompletionRequest describes a request for completion.
+type CompleteCompletionRequest struct {
+	Request
+	Params struct {
+		// Name is the name of the prompt or prompt template
+		Ref struct {
+			// Name is intended for programmatic or logical use, but may be used as
+			// a display name in past specs or as a fallback if Title isn't present.
+			Name string `json:"name"`
+
+			// Title is an optional, user-friendly display name intended for UI and end-user contexts.
+			Title string `json:"title,omitempty"`
+
+			// Type is the type of the prompt or resource, "ref/prompt", "ref/resource".
+			Type string `json:"type"`
+
+			// URI is an optional URI for the type of "ref/resource"
+			URI string `json:"uri,omitempty"`
+		} `json:"ref"`
+
+		// Argument contains information about the argument for completion matching
+		Argument struct {
+			// Name is the name of the argument
+			Name string `json:"name"`
+
+			// Value is the value of the argument to use for completion matching
+			Value string `json:"value"`
+		} `json:"argument"`
+
+		// Context provides optional additional context for completions
+		Context struct {
+			// Arguments are previously-resolved variables in a URI template or prompt
+			Arguments map[string]string `json:"arguments,omitempty"`
+		} `json:"context,omitempty"`
+	} `json:"params"`
+}
+
+// CompleteCompletionResult describes the result of a completion.
+type CompleteCompletionResult struct {
+	Result
+	Completion struct {
+		// Values is an array of completion values. Must not exceed 100 items.
+		Values []string `json:"values"`
+
+		// Total is the total number of completion options available. This can exceed the
+		// number of values actually sent in the response.
+		Total int `json:"total,omitempty"`
+
+		// HasMore indicates whether there are additional completion options beyond those
+		// provided in the current response, even if the exact total is unknown.
+		HasMore bool `json:"hasMore,omitempty"`
+	} `json:"completion"`
 }
 
 // PromptListChangedNotification represents a notification that the prompt list has changed
@@ -133,6 +194,12 @@ func (pm *PromptMessage) UnmarshalJSON(data []byte) error {
 		pm.Content = nil
 	}
 	return nil
+}
+
+func WithPromptCompletion(handler completionCompleteHandler) registerdPromptOption {
+	return func(rp *registeredPrompt) {
+		rp.CompletionCompleteHandler = handler
+	}
 }
 
 // GetPromptResponse represents the response when getting a prompt
