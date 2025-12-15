@@ -24,19 +24,30 @@ type ResourceListFilter func(ctx context.Context, resources []*Resource) []*Reso
 // resourcesHandler defines the function type for handling resource reading with multiple contents.
 type resourcesHandler func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error)
 
+// registeredResourceOption is a function that configures a registeredResource.
+type registeredResourceOption func(*registeredResource)
+
 // resourceTemplateHandler defines the function type for handling resource template reading.
 type resourceTemplateHandler func(ctx context.Context, req *ReadResourceRequest) ([]ResourceContents, error)
 
+// registerResourceTemplateOption is a function that configures a registerResourceTemplate.
+type registerResourceTemplateOption func(*registerResourceTemplate)
+
+// templateCompletionCompleteHandler defines the function type for handling completion of resource template registration.
+type templateCompletionCompleteHandler func(ctx context.Context, req *CompleteCompletionRequest, params map[string]string) (*CompleteCompletionResult, error)
+
 // registeredResource combines a Resource with its handler function
 type registeredResource struct {
-	Resource *Resource
-	Handler  resourcesHandler
+	Resource                  *Resource
+	Handler                   resourcesHandler
+	CompletionCompleteHandler completionCompleteHandler
 }
 
 // registerResourceTemplate combines a ResourceTemplate with its handler function.
 type registerResourceTemplate struct {
-	resourceTemplate *ResourceTemplate
-	Handler          resourceTemplateHandler
+	resourceTemplate          *ResourceTemplate
+	Handler                   resourceTemplateHandler
+	CompletionCompleteHandler templateCompletionCompleteHandler
 }
 
 // Resource represents a known resource that the server can read.
@@ -213,6 +224,20 @@ func WithTemplateAnnotations(audience []Role, priority float64) ResourceTemplate
 		}
 		t.Annotations.Audience = audience
 		t.Annotations.Priority = priority
+	}
+}
+
+// WithResourceCompletion sets the completion handler for the registeredResource.
+func WithResourceCompletion(handler completionCompleteHandler) registeredResourceOption {
+	return func(r *registeredResource) {
+		r.CompletionCompleteHandler = handler
+	}
+}
+
+// WithTemplateCompletion sets the completion handler for the registerResourceTemplate.
+func WithTemplateCompletion(handler templateCompletionCompleteHandler) registerResourceTemplateOption {
+	return func(rt *registerResourceTemplate) {
+		rt.CompletionCompleteHandler = handler
 	}
 }
 

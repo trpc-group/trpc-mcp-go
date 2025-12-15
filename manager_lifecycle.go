@@ -127,12 +127,20 @@ func (m *lifecycleManager) updateCapabilities() {
 		capMap["resources"] = map[string]interface{}{
 			"listChanged": true,
 		}
+
+		if m.resourceManager.hasCompletionCompleteHandler() {
+			capMap["completions"] = map[string]interface{}{}
+		}
 	}
 
 	// If there is a prompt manager and prompts are registered, add prompt capabilities
 	if m.promptManager != nil && len(m.promptManager.getPrompts()) > 0 {
 		capMap["prompts"] = map[string]interface{}{
 			"listChanged": true,
+		}
+
+		if m.promptManager.hasCompletionCompleteHandler() {
+			capMap["completions"] = map[string]interface{}{}
 		}
 	}
 
