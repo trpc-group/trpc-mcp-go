@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -698,7 +699,7 @@ func (s *SSEServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// If the session is not found but a SessionPubSub is configured, try to
 		// publish the request to the node that owns the session.
-		if s.sessionPubSub != nil && strings.Contains(err.Error(), "session not found") {
+		if s.sessionPubSub != nil && errors.Is(err, ErrSessionNotFound) {
 			sessionID := r.URL.Query().Get("sessionId")
 			if sessionID == "" {
 				s.handleSessionError(w, err)
@@ -898,7 +899,7 @@ func (s *SSEServer) getSessionFromRequest(r *http.Request) (*sseSession, error) 
 	// Get session.
 	sessionValue, ok := s.sessions.Load(sessionID)
 	if !ok {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	// Type assertion.
@@ -918,11 +919,12 @@ func (s *SSEServer) handleSessionError(w http.ResponseWriter, err error) {
 	errMsg := err.Error()
 	s.logger.Errorf("%s", errMsg)
 
-	if strings.Contains(errMsg, "missing sessionId") {
+	switch {
+	case strings.Contains(errMsg, "missing sessionId"):
 		http.Error(w, "Missing sessionId parameter", http.StatusBadRequest)
-	} else if strings.Contains(errMsg, "session not found") {
+	case errors.Is(err, ErrSessionNotFound):
 		http.Error(w, "Session not found", http.StatusNotFound)
-	} else {
+	default:
 		http.Error(w, "Invalid session", http.StatusInternalServerError)
 	}
 }
@@ -1007,7 +1009,7 @@ func (s *SSEServer) createSessionContext(ctx context.Context, session *sseSessio
 func (s *SSEServer) handleSessionMessage(ctx context.Context, sessionID string, payload []byte) error {
 	sessionValue, ok := s.sessions.Load(sessionID)
 	if !ok {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	session, ok := sessionValue.(*sseSession)
@@ -1372,7 +1374,7 @@ func (s *SSEServer) sendNotificationToSession(sessionID string, notification *JS
 	// Get session
 	sessionValue, ok := s.sessions.Load(sessionID)
 	if !ok {
-		return fmt.Errorf("session not found: %s", sessionID)
+		return fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	session, ok := sessionValue.(*sseSession)
@@ -1545,7 +1547,7 @@ func (s *SSEServer) ListRoots(ctx context.Context) (*ListRootsResult, error) {
 	// Check if session exists in our sessions map.
 	_, exists := s.sessions.Load(sessionID)
 	if !exists {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	// Create standard JSON-RPC request.
@@ -1578,7 +1580,7 @@ func (s *SSEServer) SendRequest(ctx context.Context, sessionID string, request *
 	// Get session
 	sessionValue, ok := s.sessions.Load(sessionID)
 	if !ok {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 
 	session, ok := sessionValue.(*sseSession)
