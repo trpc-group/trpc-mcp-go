@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -355,4 +356,86 @@ func TestServer_UnregisterTools(t *testing.T) {
 
 	tools = server.toolManager.getTools()
 	assert.Len(t, tools, 0)
+}
+
+// TestServerDefaultKeepAliveConfig tests that server has correct default keepalive configuration
+func TestServerDefaultKeepAliveConfig(t *testing.T) {
+	server := NewServer("test-server", "1.0.0")
+
+	// Verify default keepalive config
+	assert.True(t, server.config.keepAliveEnabled)
+	assert.Equal(t, 30*time.Second, server.config.keepAliveInterval)
+	assert.False(t, server.config.pingEnabled)
+	assert.Equal(t, 30*time.Second, server.config.pingInterval)
+	assert.Equal(t, 15*time.Second, server.config.pingTimeout)
+}
+
+// TestServerPingKeepAliveOptions tests server ping keepalive configuration options
+func TestServerPingKeepAliveOptions(t *testing.T) {
+	server := NewServer("test-server", "1.0.0",
+		WithServerPingKeepAlive(true),
+		WithServerPingInterval(60*time.Second),
+		WithServerPingTimeout(30*time.Second),
+	)
+
+	// Verify ping configuration
+	assert.True(t, server.config.pingEnabled)
+	assert.Equal(t, 60*time.Second, server.config.pingInterval)
+	assert.Equal(t, 30*time.Second, server.config.pingTimeout)
+	// Verify comment keepalive is still enabled
+	assert.True(t, server.config.keepAliveEnabled)
+}
+
+// TestServerCommentKeepAliveOptions tests server comment keepalive configuration options
+func TestServerCommentKeepAliveOptions(t *testing.T) {
+	server := NewServer("test-server", "1.0.0",
+		WithServerKeepAlive(false),
+		WithServerKeepAliveInterval(45*time.Second),
+	)
+
+	// Verify comment keepalive configuration
+	assert.False(t, server.config.keepAliveEnabled)
+	assert.Equal(t, 45*time.Second, server.config.keepAliveInterval)
+	// Verify ping is still disabled
+	assert.False(t, server.config.pingEnabled)
+}
+
+// TestServerBackwardCompatibility tests that existing server config is not affected
+func TestServerBackwardCompatibility(t *testing.T) {
+	// Test 1: Server without any keepalive options
+	server1 := NewServer("test-server", "1.0.0")
+	assert.True(t, server1.config.keepAliveEnabled)
+	assert.False(t, server1.config.pingEnabled)
+
+	// Test 2: Server with only existing options
+	server2 := NewServer("test-server", "1.0.0",
+		WithServerAddress(":8080"),
+		WithServerPath("/api"),
+	)
+	assert.True(t, server2.config.keepAliveEnabled)
+	assert.False(t, server2.config.pingEnabled)
+	assert.Equal(t, ":8080", server2.config.addr)
+	assert.Equal(t, "/api", server2.config.path)
+}
+
+// TestServerPingOnlyMode tests using only ping keepalive
+func TestServerPingOnlyMode(t *testing.T) {
+	server := NewServer("test-server", "1.0.0",
+		WithServerKeepAlive(false),
+		WithServerPingKeepAlive(true),
+	)
+
+	assert.False(t, server.config.keepAliveEnabled)
+	assert.True(t, server.config.pingEnabled)
+}
+
+// TestServerBothKeepAliveModes tests using both comment and ping keepalive
+func TestServerBothKeepAliveModes(t *testing.T) {
+	server := NewServer("test-server", "1.0.0",
+		WithServerPingKeepAlive(true),
+	)
+
+	// Both should be enabled
+	assert.True(t, server.config.keepAliveEnabled) // Comment is default
+	assert.True(t, server.config.pingEnabled)      // Explicitly enabled
 }
