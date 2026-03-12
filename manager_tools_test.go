@@ -471,6 +471,82 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	assert.Equal(t, ErrCodeMethodNotFound, errorResp.Error.Code)
 }
 
+func TestToolManager_HandleCallTool_HandlerErrorBecomesErrorResult(t *testing.T) {
+	manager := newToolManager()
+
+	tool := NewMockTool("error-tool", "Always returns an error", map[string]interface{}{})
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return nil, fmt.Errorf("intentional failure")
+	})
+
+	req := newJSONRPCRequest("call-error", MethodToolsCall, map[string]interface{}{
+		"name":      "error-tool",
+		"arguments": map[string]interface{}{},
+	})
+
+	result, err := manager.handleCallTool(context.Background(), req, nil)
+	require.NoError(t, err)
+
+	callResult, ok := result.(*CallToolResult)
+	require.True(t, ok, "Expected *CallToolResult but got %T", result)
+	assert.True(t, callResult.IsError)
+	require.Len(t, callResult.Content, 1)
+
+	textContent, ok := callResult.Content[0].(TextContent)
+	require.True(t, ok, "Expected TextContent but got %T", callResult.Content[0])
+	assert.Equal(t, "intentional failure", textContent.Text)
+}
+
+func TestToolManager_HandleCallTool_HandlerErrorPreservesReturnedResult(t *testing.T) {
+	manager := newToolManager()
+
+	tool := NewMockTool("partial-tool", "Returns partial content before failing", map[string]interface{}{})
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return &CallToolResult{
+			Content: []Content{NewTextContent("partial output")},
+		}, fmt.Errorf("stream interrupted")
+	})
+
+	req := newJSONRPCRequest("call-partial", MethodToolsCall, map[string]interface{}{
+		"name":      "partial-tool",
+		"arguments": map[string]interface{}{},
+	})
+
+	result, err := manager.handleCallTool(context.Background(), req, nil)
+	require.NoError(t, err)
+
+	callResult, ok := result.(*CallToolResult)
+	require.True(t, ok, "Expected *CallToolResult but got %T", result)
+	assert.True(t, callResult.IsError)
+	require.Len(t, callResult.Content, 1)
+
+	textContent, ok := callResult.Content[0].(TextContent)
+	require.True(t, ok, "Expected TextContent but got %T", callResult.Content[0])
+	assert.Equal(t, "partial output", textContent.Text)
+}
+
+func TestToolManager_HandleCallTool_ContextErrorsRemainProtocolErrors(t *testing.T) {
+	manager := newToolManager()
+
+	tool := NewMockTool("timeout-tool", "Returns context timeout", map[string]interface{}{})
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		return nil, context.DeadlineExceeded
+	})
+
+	req := newJSONRPCRequest("call-timeout", MethodToolsCall, map[string]interface{}{
+		"name":      "timeout-tool",
+		"arguments": map[string]interface{}{},
+	})
+
+	result, err := manager.handleCallTool(context.Background(), req, nil)
+	require.NoError(t, err)
+
+	errorResp, ok := result.(*JSONRPCError)
+	require.True(t, ok, "Expected *JSONRPCError but got %T", result)
+	assert.Equal(t, ErrCodeInternal, errorResp.Error.Code)
+	assert.Contains(t, errorResp.Error.Message, "context deadline exceeded")
+}
+
 func TestToolManager_ServerInfoInContext(t *testing.T) {
 	// Create a tool manager
 	manager := newToolManager()

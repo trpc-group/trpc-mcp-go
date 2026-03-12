@@ -348,6 +348,9 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
+    if result.IsError {
+        log.Fatalf("tool failed: %v", result.Content)
+    }
     
     fmt.Printf("Result: %v\n", result.Content[0])
 }

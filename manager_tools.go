@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"sync"
 
-	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
+	stderrors "errors"
+
+	mcpErrors "trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 // serverProvider interface defines components that can provide server instances
@@ -192,13 +194,13 @@ func (m *toolManager) handleCallTool(
 ) (JSONRPCMessage, error) {
 	// Parse request parameters
 	if req.Params == nil {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, mcpErrors.ErrMissingParams.Error(), nil), nil
 	}
 
 	// Convert params to map for easier access
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), nil
+		return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, mcpErrors.ErrInvalidParams.Error(), nil), nil
 	}
 
 	// Get tool name
@@ -216,7 +218,7 @@ func (m *toolManager) handleCallTool(
 		return newJSONRPCErrorResponse(
 			req.ID,
 			ErrCodeMethodNotFound,
-			fmt.Sprintf("%v: %s", errors.ErrToolNotFound, toolName),
+			fmt.Sprintf("%v: %s", mcpErrors.ErrToolNotFound, toolName),
 			nil,
 		), nil
 	}
@@ -234,7 +236,7 @@ func (m *toolManager) handleCallTool(
 	if args, ok := paramsMap["arguments"]; ok && args != nil {
 		argsMap, ok := args.(map[string]interface{})
 		if !ok {
-			errMsg := fmt.Sprintf("%v: arguments must be an object, got %T", errors.ErrInvalidParams, args)
+			errMsg := fmt.Sprintf("%v: arguments must be an object, got %T", mcpErrors.ErrInvalidParams, args)
 			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errMsg, nil), nil
 		}
 		params.Arguments = argsMap
@@ -267,9 +269,28 @@ func (m *toolManager) handleCallTool(
 	// Execute tool
 	result, err := registeredTool.Handler(ctx, toolReq)
 	if err != nil {
-		errMsg := fmt.Sprintf("tool execution failed (tool: %s): %v", registeredTool.Tool.Name, err)
-		return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, errMsg, nil), nil
+		if isExceptionalToolError(err) {
+			errMsg := fmt.Sprintf("tool execution failed (tool: %s): %v", registeredTool.Tool.Name, err)
+			return newJSONRPCErrorResponse(req.ID, ErrCodeInternal, errMsg, nil), nil
+		}
+		return normalizeToolExecutionErrorResult(result, err), nil
 	}
 
 	return result, nil
+}
+
+func isExceptionalToolError(err error) bool {
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded)
+}
+
+func normalizeToolExecutionErrorResult(result *CallToolResult, err error) *CallToolResult {
+	if result == nil {
+		return NewErrorResult(err.Error())
+	}
+
+	result.IsError = true
+	if len(result.Content) == 0 {
+		result.Content = []Content{NewTextContent(err.Error())}
+	}
+	return result
 }

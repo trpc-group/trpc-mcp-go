@@ -119,6 +119,9 @@ func handleTools(ctx context.Context, client *mcp.Client) error {
 	if err != nil {
 		return fmt.Errorf("failed to call tool: %v", err)
 	}
+	if callToolResp.IsError {
+		return fmt.Errorf("tool returned error result: %v", callToolResp.Content)
+	}
 
 	log.Printf("Tool result:")
 	for _, item := range callToolResp.Content {

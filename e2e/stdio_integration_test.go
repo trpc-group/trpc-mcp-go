@@ -137,7 +137,7 @@ func TestStdioClientServer_EndToEndIntegration(t *testing.T) {
 		assert.Error(t, err, "Should error when calling non-existent tool")
 
 		// Test invalid parameters
-		_, err = client.CallTool(ctx, &mcp.CallToolRequest{
+		result, err := client.CallTool(ctx, &mcp.CallToolRequest{
 			Params: mcp.CallToolParams{
 				Name:      "echo",
 				Arguments: map[string]interface{}{
@@ -145,7 +145,14 @@ func TestStdioClientServer_EndToEndIntegration(t *testing.T) {
 				},
 			},
 		})
-		assert.Error(t, err, "Should error with missing required parameters")
+		require.NoError(t, err, "tool execution errors should stay in CallToolResult")
+		require.NotNil(t, result)
+		assert.True(t, result.IsError, "missing business parameters should be reported as tool errors")
+		require.Len(t, result.Content, 1)
+
+		textContent, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+		assert.Contains(t, textContent.Text, "missing 'text' parameter")
 	})
 
 	// === Test Client State ===

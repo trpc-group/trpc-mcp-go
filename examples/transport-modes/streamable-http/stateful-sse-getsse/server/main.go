@@ -304,11 +304,9 @@ func handleCounter(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallTool
 	// Get session from context
 	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
-			},
-		}, fmt.Errorf("unable to get session from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get session information. This tool requires a stateful session to work.",
+		), nil
 	}
 
 	// Get counter from session data
@@ -345,24 +343,18 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	// Get session from context
 	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
-			},
-		}, fmt.Errorf("unable to get session from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get session information. This tool requires a stateful session to work.",
+		), nil
 	}
 
 	// Get notification sender from context
 	notificationSender, ok := mcp.GetNotificationSender(ctx)
 	if !ok {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent(
-					"Error: Unable to get notification sender. " +
-						"This feature requires SSE streaming response support.",
-				),
-			},
-		}, fmt.Errorf("unable to get notification sender from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get notification sender. " +
+				"This feature requires SSE streaming response support.",
+		), nil
 	}
 
 	// Get steps and delay from parameters
@@ -393,11 +385,7 @@ func handleDelayedResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 		// Check if context is cancelled
 		select {
 		case <-ctx.Done():
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					mcp.NewTextContent(fmt.Sprintf("Processing cancelled at step %d", i)),
-				},
-			}, ctx.Err()
+			return nil, ctx.Err()
 		default:
 			// Continue execution
 		}
@@ -450,11 +438,9 @@ func handleNotification(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	// Get session from context
 	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
-			},
-		}, fmt.Errorf("unable to get session from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get session information. This tool requires a stateful session to work.",
+		), nil
 	}
 
 	// Get message and delay time from parameters
@@ -511,11 +497,9 @@ func handleChatJoin(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	// Get session from context
 	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
-			},
-		}, fmt.Errorf("unable to get session from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get session information. This tool requires a stateful session to work.",
+		), nil
 	}
 
 	// Get username from parameters
@@ -566,11 +550,9 @@ func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	// Get session from context
 	session, ok := mcp.GetSessionFromContext(ctx)
 	if !ok || session == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Unable to get session information. This tool requires a stateful session to work."),
-			},
-		}, fmt.Errorf("unable to get session from context")
+		return mcp.NewErrorResult(
+			"Error: Unable to get session information. This tool requires a stateful session to work.",
+		), nil
 	}
 
 	// Get username
@@ -589,11 +571,7 @@ func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 
 	// If still no username, please join the chat room first
 	if userName == "" {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Please use chatJoin tool to join the chat room first."),
-			},
-		}, nil
+		return mcp.NewErrorResult("Error: Please use chatJoin tool to join the chat room first."), nil
 	}
 
 	// Get message from parameters
@@ -606,11 +584,7 @@ func handleChatSend(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 
 	// Validate message is not empty
 	if message == "" {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.NewTextContent("Error: Message cannot be empty."),
-			},
-		}, nil
+		return mcp.NewErrorResult("Error: Message cannot be empty."), nil
 	}
 
 	// Add message to chat history

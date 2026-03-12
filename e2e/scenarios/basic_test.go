@@ -78,11 +78,17 @@ func TestErrorHandling(t *testing.T) {
 		callToolReq.Params.Arguments = map[string]interface{}{
 			"error_message": errorMsg,
 		}
-		_, err := client.CallTool(ctx, callToolReq)
+		result, err := client.CallTool(ctx, callToolReq)
 
-		// Verify error.
-		require.Error(t, err, "Should return error")
-		assert.Contains(t, err.Error(), errorMsg, "Error message should contain the provided error message")
+		// Verify tool execution error is returned in the tool result.
+		require.NoError(t, err, "tool execution errors should stay in CallToolResult")
+		require.NotNil(t, result)
+		assert.True(t, result.IsError, "tool result should be marked as error")
+		require.Len(t, result.Content, 1)
+
+		textContent, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok, "Content should be of type TextContent")
+		assert.Contains(t, textContent.Text, errorMsg, "Error content should contain the provided error message")
 	})
 }
 

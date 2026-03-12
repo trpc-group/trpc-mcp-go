@@ -124,10 +124,13 @@ func TestMiddlewareErrorHandling(t *testing.T) {
 	errorMiddleware := func(next HandlerFunc) HandlerFunc {
 		return func(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
 			result, err := next(ctx, req)
-			// Check if result is an error response
+			// Check both protocol errors and tool execution errors.
 			if errResp, ok := result.(*JSONRPCError); ok {
 				errorResponseCaptured = true
 				_ = errResp // Use errResp to avoid unused variable warning
+			}
+			if toolResp, ok := result.(*CallToolResult); ok && toolResp.IsError {
+				errorResponseCaptured = true
 			}
 			return result, err
 		}
@@ -165,11 +168,11 @@ func TestMiddlewareErrorHandling(t *testing.T) {
 	// Execute request
 	result, err := handler.handleRequest(ctx, req, session)
 
-	// Should not return error (errors are converted to JSON-RPC error responses)
+	// Should not return error (tool execution errors are converted to CallToolResult.IsError).
 	assert.NoError(t, err)
-	// Should return an error response
-	assert.IsType(t, &JSONRPCError{}, result)
-	// Middleware should have detected the error response
+	toolResult, ok := result.(*CallToolResult)
+	require.True(t, ok, "Expected *CallToolResult but got %T", result)
+	assert.True(t, toolResult.IsError)
 	assert.True(t, errorResponseCaptured)
 }
 
