@@ -403,12 +403,25 @@ func (t *sseClientTransport) handleIncomingRequest(data string) {
 
 	// Handle different types of requests.
 	switch request.Method {
+	case MethodPing:
+		t.handlePingRequest(&request)
 	case MethodRootsList:
 		t.handleRootsListRequest(&request)
 	default:
 		// Send method not found error.
 		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
 	}
+}
+
+// handlePingRequest handles ping requests from the server (MCP utilities/ping).
+// The receiver MUST respond promptly with an empty result object.
+func (t *sseClientTransport) handlePingRequest(request *JSONRPCRequest) {
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  struct{}{},
+	}
+	t.sendResponseMessage(response)
 }
 
 // handleRootsListRequest handles roots/list requests from the server.

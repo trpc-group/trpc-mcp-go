@@ -7,11 +7,15 @@
 package mcp
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestWithServiceName_SSETransport tests that WithServiceName option correctly configures
@@ -152,4 +156,38 @@ func TestWithHTTPHeaders_SSETransport(t *testing.T) {
 	// Verify headers are correctly set in SSE transport
 	assert.Equal(t, "Bearer test-token", sseTransport.httpHeaders.Get("Authorization"), "Authorization header should be set in SSE transport")
 	assert.Equal(t, "test-value", sseTransport.httpHeaders.Get("X-Custom"), "X-Custom header should be set in SSE transport")
+}
+
+// TestSSEClientTransport_handleIncomingRequest_Ping verifies that a server-initiated
+// ping receives an empty JSON-RPC result on the message POST endpoint (MCP ping spec).
+func TestSSEClientTransport_handleIncomingRequest_Ping(t *testing.T) {
+	var receivedBody []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		receivedBody = b
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer ts.Close()
+
+	endpoint, err := url.Parse(ts.URL)
+	require.NoError(t, err)
+
+	tr := &sseClientTransport{
+		endpoint:       endpoint,
+		httpClient:     ts.Client(),
+		httpReqHandler: NewDefaultHTTPReqHandler(),
+	}
+
+	pingData := `{"jsonrpc":"2.0","id":"ping-req-1","method":"ping"}`
+	tr.handleIncomingRequest(pingData)
+
+	require.NotEmpty(t, receivedBody)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(receivedBody, &resp))
+	assert.Equal(t, "2.0", resp["jsonrpc"])
+	assert.Equal(t, "ping-req-1", resp["id"])
+	result, ok := resp["result"].(map[string]interface{})
+	require.True(t, ok, "result should be a JSON object")
+	assert.Empty(t, result)
 }
