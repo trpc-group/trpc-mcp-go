@@ -1,10 +1,16 @@
 # Changelog
 
-## 0.0.12 (2026-03-27)
+## 0.0.13 (2026-03-27)
 
 ### Fixes
 
 - fix(sse-client): respond to server-initiated `ping` with empty JSON-RPC result (MCP utilities/ping; gateway keepalive compatibility)
+
+## 0.0.12 (2026-01-14)
+
+### Features
+
+- feat: add SessionPubSub interface for cross-node session routing (#96)
 
 ## 0.0.11 (2025-12-09)
 
