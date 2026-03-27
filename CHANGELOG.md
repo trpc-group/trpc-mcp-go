@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.12 (2026-03-27)
+
+### Fixes
+
+- fix(sse-client): respond to server-initiated `ping` with empty JSON-RPC result (MCP utilities/ping; gateway keepalive compatibility)
+
 ## 0.0.11 (2025-12-09)
 
 ### Fixes
