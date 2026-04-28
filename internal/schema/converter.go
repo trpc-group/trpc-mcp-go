@@ -988,8 +988,8 @@ func (g *NestedRefGenerator) generateStructSchema(t reflect.Type) *openapi3.Sche
 
 		schema.Properties[fieldName] = openapi3.NewSchemaRef("", fieldSchema)
 
-		// Handle required
-		if !omitempty {
+		// Keep required semantics consistent with inline and $defs modes.
+		if isRequiredField(field) {
 			schema.Required = append(schema.Required, fieldName)
 		}
 	}

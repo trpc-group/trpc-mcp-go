@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.15 (2026-04-27)
+
+### Fixes
+
+- fix(schema): respect `jsonschema` required semantics in nested ref output schemas
+
 ## 0.0.13 (2026-03-27)
 
 ### Fixes

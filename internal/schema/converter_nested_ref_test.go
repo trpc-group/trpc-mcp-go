@@ -36,7 +36,7 @@ func hasRef(schema *openapi3.Schema, refPath string) bool {
 // hasRefInAnyOf checks if the first element of anyOf contains the expected $ref
 // This is used for nullable fields which are wrapped in anyOf: [$ref, null]
 func hasRefInAnyOf(schema *openapi3.Schema, refPath string) bool {
-	if schema.AnyOf != nil && len(schema.AnyOf) > 0 {
+	if len(schema.AnyOf) > 0 {
 		firstSchema := schema.AnyOf[0].Value
 		if firstSchema != nil {
 			return hasRef(firstSchema, refPath)
@@ -901,4 +901,28 @@ func TestNestedRefMode_JSONSchemaTagsComprehensive(t *testing.T) {
 	nested2Schema := schema.Properties["nested2"].Value
 	assert.True(t, hasRef(nested2Schema, "#/properties/nested"),
 		"nested2 should reference nested (constraints are preserved in first occurrence)")
+}
+
+func TestNestedRefMode_RequiredFieldLogicMatchesOtherModes(t *testing.T) {
+	type Nested struct {
+		Required string `json:"required" jsonschema:"required;description=Required nested field"`
+		Optional string `json:"optional" jsonschema:";description=Optional nested field"`
+	}
+
+	type Output struct {
+		ExplicitRequired string `json:"explicit_required" jsonschema:"required;description=Explicitly required"`
+		ExplicitOptional string `json:"explicit_optional" jsonschema:";description=Explicitly optional"`
+		ImplicitRequired string `json:"implicit_required"`
+		OmitEmpty        string `json:"omit_empty,omitempty"`
+		Nested           Nested `json:"nested" jsonschema:";description=Optional nested object"`
+	}
+
+	schema := convertNestedRefMode[Output]()
+	require.NotNil(t, schema)
+
+	assert.ElementsMatch(t, []string{"explicit_required", "implicit_required"}, schema.Required)
+
+	nestedSchema := schema.Properties["nested"].Value
+	require.NotNil(t, nestedSchema)
+	assert.ElementsMatch(t, []string{"required"}, nestedSchema.Required)
 }
