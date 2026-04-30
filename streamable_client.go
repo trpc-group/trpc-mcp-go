@@ -60,8 +60,29 @@ type streamableHTTPClientTransport struct {
 		active bool
 		ctx    context.Context
 		cancel context.CancelFunc
+		// body is the response body of the currently active GET SSE HTTP
+		// response. It is set from inside connectGetSSE once the response is
+		// available and is closed by close() to unblock the blocking
+		// bufio.Scanner read in handleGetSSEEvents, rather than waiting for
+		// the context cancellation to propagate through the HTTP transport.
+		body io.Closer
+		// closed becomes true after close() has been called. It prevents a
+		// late establishGetSSE invocation (e.g. the goroutine spawned by
+		// Initialize via `go establishGetSSEConnection`) from starting a new
+		// SSE connection after the caller has already requested shutdown.
+		// Without this guard, Close()'s sseWg.Wait() could return before
+		// such a late spawn registers itself with the WaitGroup, leaking a
+		// goroutine past Close().
+		closed bool
 		mutex  sync.Mutex
 	}
+
+	// sseWg tracks the GET SSE goroutine spawned by establishGetSSE so that
+	// close() can synchronously wait for it to exit. Without this, close()
+	// returned while the goroutine (and the server-side handler it held
+	// open) was still alive, creating a time-window during which
+	// httptest.Server.Close() / real server shutdown could block.
+	sseWg sync.WaitGroup
 
 	// Notification handlers mutex
 	handlersMutex sync.RWMutex
@@ -579,17 +600,55 @@ func (t *streamableHTTPClientTransport) sendResponse(ctx context.Context, resp *
 	return fmt.Errorf("client transport does not support sending responses")
 }
 
-// Close closes the transport connection
+// Close closes the transport connection.
+//
+// This method is synchronous: when it returns, the GET SSE goroutine has
+// exited, the underlying HTTP response body has been closed, and no further
+// notification handlers will be invoked. Callers that shut down a server
+// immediately after Close() (e.g. httptest.Server.Close() in tests, or
+// graceful server shutdown in production) can rely on in-flight SSE
+// connections having been released by the client side.
 func (t *streamableHTTPClientTransport) close() error {
-	// close GET SSE connection
+	// Snapshot the body/cancel under the mutex, then release it *before*
+	// Wait()-ing. The spawned SSE goroutine's defer re-acquires the same
+	// mutex to flip `active = false`, so holding it across Wait() would
+	// dead-lock.
 	t.getSSEConn.mutex.Lock()
-	if t.getSSEConn.active && t.getSSEConn.cancel != nil {
-		t.getSSEConn.cancel()
+	// Set closed first so that any establishGetSSE call that wins the lock
+	// after us will refuse to spawn a new goroutine.
+	t.getSSEConn.closed = true
+	cancel := t.getSSEConn.cancel
+	body := t.getSSEConn.body
+	if t.getSSEConn.active {
 		t.getSSEConn.active = false
 	}
+	// Clear the body reference so we don't try to close it twice if close()
+	// is called again.
+	t.getSSEConn.body = nil
 	t.getSSEConn.mutex.Unlock()
 
-	// Clear notification handlers
+	// Cancel the SSE context first. On its own this is not sufficient: the
+	// goroutine is blocked in bufio.Scanner.Scan() -> resp.Body.Read(), and
+	// ctx cancellation only reaches the read via the http.Transport's
+	// connection-close path, which has an observable (and in CI sometimes
+	// unbounded) delay.
+	if cancel != nil {
+		cancel()
+	}
+
+	// Forcefully close the response body so the blocking Read returns
+	// immediately with an error, letting the goroutine exit without waiting
+	// for the transport-level cancellation traversal.
+	if body != nil {
+		_ = body.Close()
+	}
+
+	// Wait for the goroutine to actually finish. After this point the
+	// caller is guaranteed that no SSE work is still in flight on this
+	// transport.
+	t.sseWg.Wait()
+
+	// Clear notification handlers.
 	t.handlersMutex.Lock()
 	t.notificationHandlers = make(map[string]NotificationHandler)
 	t.handlersMutex.Unlock()
@@ -613,6 +672,16 @@ func (t *streamableHTTPClientTransport) establishGetSSE(parentCtx context.Contex
 	t.getSSEConn.mutex.Lock()
 	defer t.getSSEConn.mutex.Unlock()
 
+	// If the transport has already been closed, do not start a new GET SSE
+	// connection. This handles the race where Initialize's background
+	// `go establishGetSSEConnection(ctx)` reaches this point *after* the
+	// caller has already invoked Client.Close(): without this guard, we
+	// would spawn a goroutine that close()'s sseWg.Wait() could not have
+	// waited on.
+	if t.getSSEConn.closed {
+		return
+	}
+
 	// If there's already an active connection, cancel the old one
 	if t.getSSEConn.active && t.getSSEConn.cancel != nil {
 		t.getSSEConn.cancel()
@@ -622,16 +691,27 @@ func (t *streamableHTTPClientTransport) establishGetSSE(parentCtx context.Contex
 	ctx, cancel := context.WithCancel(icontext.WithoutCancel(parentCtx))
 	t.getSSEConn.ctx = ctx
 	t.getSSEConn.cancel = cancel
+	// A previous attempt's body (if any) must be cleared; close() already
+	// takes ownership of closing it if this is called during shutdown.
+	t.getSSEConn.body = nil
 
 	// Mark as active
 	t.getSSEConn.active = true
 
+	// Register with the WaitGroup *before* spawning so close() cannot race
+	// past sseWg.Wait() before this goroutine registers itself.
+	t.sseWg.Add(1)
+
 	// Release lock and establish connection in a separate goroutine
 	go func() {
+		defer t.sseWg.Done()
 		// Reset connection state when function exits
 		defer func() {
 			t.getSSEConn.mutex.Lock()
 			t.getSSEConn.active = false
+			// Clear the body reference; by the time we reach here,
+			// connectGetSSE's own defer has already closed the body.
+			t.getSSEConn.body = nil
 			t.getSSEConn.mutex.Unlock()
 		}()
 
@@ -687,6 +767,14 @@ func (t *streamableHTTPClientTransport) connectGetSSE(ctx context.Context) error
 		return fmt.Errorf("GET SSE connection request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Register the body so close() can forcefully close it to unblock
+	// handleGetSSEEvents' scanner.Scan(). Doing this *before* the status
+	// check means even a non-200 response path is cleanly shut down if
+	// close() races with it.
+	t.getSSEConn.mutex.Lock()
+	t.getSSEConn.body = resp.Body
+	t.getSSEConn.mutex.Unlock()
 
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
