@@ -136,6 +136,9 @@ type Client struct {
 
 	// HTTP before-request function.
 	httpBeforeRequestFunc HTTPBeforeRequestFunc
+
+	// Whether to include "arguments": {} for tool calls with no arguments.
+	sendEmptyToolArguments bool
 }
 
 // ClientOption client option function
@@ -322,6 +325,30 @@ func WithHTTPBeforeRequest(fn HTTPBeforeRequestFunc) ClientOption {
 	}
 }
 
+// WithSendEmptyToolArguments sets whether CallTool sends "arguments": {} when no
+// tool arguments are provided. This is disabled by default because the MCP
+// schema marks arguments as optional.
+func WithSendEmptyToolArguments(enabled bool) ClientOption {
+	return func(c *Client) {
+		c.sendEmptyToolArguments = enabled
+	}
+}
+
+func callToolParams(req *CallToolRequest, sendEmptyArguments bool) interface{} {
+	if !sendEmptyArguments || len(req.Params.Arguments) > 0 {
+		return req.Params
+	}
+
+	params := map[string]interface{}{
+		"name":      req.Params.Name,
+		"arguments": map[string]interface{}{},
+	}
+	if req.Params.Meta != nil {
+		params["_meta"] = req.Params.Meta
+	}
+	return params
+}
+
 // applyHTTPBeforeRequest calls the HTTP before-request function if set.
 // If the function returns an error, the error is returned.
 func (c *Client) applyHTTPBeforeRequest(ctx context.Context, req *http.Request) error {
@@ -467,7 +494,7 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 		Request: Request{
 			Method: MethodToolsCall,
 		},
-		Params: callToolReq.Params,
+		Params: callToolParams(callToolReq, c.sendEmptyToolArguments),
 	}
 
 	rawResp, err := c.transport.sendRequest(ctx, req)

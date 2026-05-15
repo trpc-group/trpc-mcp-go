@@ -46,6 +46,9 @@ type StdioClient struct {
 	// Roots support.
 	rootsProvider RootsProvider // Provider for roots information.
 	rootsMu       sync.RWMutex  // Mutex for protecting the rootsProvider.
+
+	// Whether to include "arguments": {} for tool calls with no arguments.
+	sendEmptyToolArguments bool
 }
 
 // StdioClientOption defines configuration options for StdioClient.
@@ -112,6 +115,14 @@ func WithStdioCapabilities(capabilities map[string]interface{}) StdioClientOptio
 		for k, v := range capabilities {
 			c.capabilities[k] = v
 		}
+	}
+}
+
+// WithStdioSendEmptyToolArguments sets whether CallTool sends "arguments": {}
+// when no tool arguments are provided.
+func WithStdioSendEmptyToolArguments(enabled bool) StdioClientOption {
+	return func(c *StdioClient) {
+		c.sendEmptyToolArguments = enabled
 	}
 }
 
@@ -246,10 +257,14 @@ func (c *StdioClient) CallTool(ctx context.Context, req *CallToolRequest) (*Call
 	}
 
 	requestID := c.requestID.Add(1)
-	jsonReq := newJSONRPCRequest(requestID, MethodToolsCall, map[string]interface{}{
+	params := map[string]interface{}{
 		"name":      req.Params.Name,
 		"arguments": req.Params.Arguments,
-	})
+	}
+	if c.sendEmptyToolArguments && len(req.Params.Arguments) == 0 {
+		params["arguments"] = map[string]interface{}{}
+	}
+	jsonReq := newJSONRPCRequest(requestID, MethodToolsCall, params)
 
 	rawResp, err := c.transport.sendRequest(ctx, jsonReq)
 	if err != nil {
