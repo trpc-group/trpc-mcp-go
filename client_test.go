@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -101,6 +102,19 @@ func TestClient_WithProtocolVersion(t *testing.T) {
 	// Verify protocol version
 	assert.NoError(t, err)
 	assert.Equal(t, ProtocolVersion_2024_11_05, client.protocolVersion)
+}
+
+func TestClient_CallToolParams_SendEmptyToolArguments(t *testing.T) {
+	req := &CallToolRequest{}
+	req.Params.Name = "get_me"
+
+	defaultParams, err := json.Marshal(callToolParams(req, false))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"get_me"}`, string(defaultParams))
+
+	compatParams, err := json.Marshal(callToolParams(req, true))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"get_me","arguments":{}}`, string(compatParams))
 }
 
 func TestClient_Initialize(t *testing.T) {

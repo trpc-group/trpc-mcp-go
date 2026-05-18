@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.16 (2026-05-15)
+
+### Fixes
+
+- fix: add client option to send empty tool call arguments for server compatibility
+
 ## 0.0.15 (2026-04-27)
 
 ### Fixes
