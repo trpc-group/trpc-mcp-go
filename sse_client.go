@@ -407,6 +407,8 @@ func (t *sseClientTransport) handleIncomingRequest(data string) {
 		t.handlePingRequest(&request)
 	case MethodRootsList:
 		t.handleRootsListRequest(&request)
+	case MethodPing:
+		t.handlePingRequest(&request)
 	default:
 		// Send method not found error.
 		t.sendErrorResponse(&request, ErrCodeMethodNotFound, fmt.Sprintf("Method not found: %s", request.Method))
@@ -454,6 +456,28 @@ func (t *sseClientTransport) handleRootsListRequest(request *JSONRPCRequest) {
 
 	// Send response.
 	t.sendResponseMessage(response)
+}
+
+// handlePingRequest handles ping requests from the server.
+// It responds with an empty result to indicate the client is alive.
+func (t *sseClientTransport) handlePingRequest(request *JSONRPCRequest) {
+	if t.logger != nil {
+		t.logger.Debugf("Received ping request, ID: %v", request.ID)
+	}
+
+	// Create empty response
+	response := &JSONRPCResponse{
+		JSONRPC: JSONRPCVersion,
+		ID:      request.ID,
+		Result:  map[string]interface{}{}, // Empty object
+	}
+
+	// Send response
+	t.sendResponseMessage(response)
+
+	if t.logger != nil {
+		t.logger.Debugf("Responded to ping request, ID: %v", request.ID)
+	}
 }
 
 // sendErrorResponse sends an error response to the server.

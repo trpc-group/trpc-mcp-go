@@ -387,6 +387,11 @@ server := mcp.NewServer(
 | `WithGetSSEEnabled` | Allow GET for SSE connections | `true` |
 | `WithNotificationBufferSize` | Size of notification buffer | `10` |
 | `WithStatelessMode` | Run in stateless mode | `false` |
+| `WithServerKeepAlive` | Enable SSE comment keepalive | `true` |
+| `WithServerKeepAliveInterval` | Interval for SSE comment keepalive | `30s` |
+| `WithServerPingKeepAlive` | Enable JSON-RPC ping keepalive | `false` |
+| `WithServerPingInterval` | Interval for ping requests | `30s` |
+| `WithServerPingTimeout` | Timeout for ping requests | `15s` |
 
 ### Client Configuration
 
@@ -730,6 +735,89 @@ basicPromptHandler := func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp
 // Register the basic prompt
 server.RegisterPrompt(basicPrompt, basicPromptHandler)
 ```
+
+### Connection Keepalive
+
+The framework provides two keepalive mechanisms for SSE connections to prevent timeouts:
+
+#### 1. SSE Comment Keepalive (Default)
+
+Sends SSE comment lines (`: keepalive`) at regular intervals. This is lightweight and enabled by default.
+
+```go
+server := mcp.NewServer(
+    "My-Server",
+    "1.0.0",
+    // Comment keepalive is enabled by default
+    // Optionally customize:
+    mcp.WithServerKeepAlive(true),
+    mcp.WithServerKeepAliveInterval(30*time.Second),
+)
+```
+
+#### 2. JSON-RPC Ping Keepalive (Optional)
+
+Sends JSON-RPC ping requests to clients, allowing health detection. Enable this for production systems.
+
+```go
+server := mcp.NewServer(
+    "My-Server",
+    "1.0.0",
+    // Enable ping keepalive (comment keepalive remains enabled by default)
+    mcp.WithServerPingKeepAlive(true),
+    mcp.WithServerPingInterval(30*time.Second),
+    mcp.WithServerPingTimeout(15*time.Second),
+)
+```
+
+#### Comparison
+
+| Feature | SSE Comment | JSON-RPC Ping |
+|---------|-------------|---------------|
+| Overhead | Small (~15 bytes) | Large (~100 bytes) |
+| Health Check | ❌ No | ✅ Yes |
+| Client Response | Not required | Required |
+| Default | ✅ Enabled | ❌ Disabled |
+
+#### Configuration Examples
+
+**Default (Comment only)**:
+```go
+server := mcp.NewServer("My-Server", "1.0.0")
+// ✅ SSE comment keepalive enabled (30s interval)
+// ❌ Ping keepalive disabled
+```
+
+**Both modes (Recommended for production)**:
+```go
+server := mcp.NewServer("My-Server", "1.0.0",
+    mcp.WithServerPingKeepAlive(true),
+)
+// ✅ SSE comment keepalive enabled (30s interval)
+// ✅ Ping keepalive enabled (30s interval, 15s timeout)
+```
+
+**Ping only**:
+```go
+server := mcp.NewServer("My-Server", "1.0.0",
+    mcp.WithServerKeepAlive(false),
+    mcp.WithServerPingKeepAlive(true),
+)
+// ❌ SSE comment keepalive disabled
+// ✅ Ping keepalive enabled (30s interval, 15s timeout)
+```
+
+**Custom intervals**:
+```go
+server := mcp.NewServer("My-Server", "1.0.0",
+    mcp.WithServerKeepAliveInterval(60*time.Second),
+    mcp.WithServerPingKeepAlive(true),
+    mcp.WithServerPingInterval(45*time.Second),
+    mcp.WithServerPingTimeout(20*time.Second),
+)
+```
+
+For a complete example, see [`examples/ping-keepalive/`](examples/ping-keepalive/).
 
 ## Struct-First API (Recommended)
 
