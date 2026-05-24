@@ -204,10 +204,12 @@ const (
 const (
 	ProtocolVersion_2024_11_05 = "2024-11-05"
 	ProtocolVersion_2025_03_26 = "2025-03-26"
+	ProtocolVersion_2025_06_18 = "2025-06-18"
 )
 
 // List of supported protocol versions, ordered by priority
 var SupportedProtocolVersions = []string{
+	ProtocolVersion_2025_06_18, // Latest: Added _meta AdditionalFields support
 	ProtocolVersion_2025_03_26,
 	ProtocolVersion_2024_11_05,
 }

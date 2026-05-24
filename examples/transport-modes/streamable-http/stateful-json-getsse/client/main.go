@@ -102,9 +102,7 @@ func main() {
 			Arguments: map[string]interface{}{
 				"increment": 1,
 			},
-			Meta: &struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			}{
+			Meta: &mcp.Meta{
 				ProgressToken: 123,
 			},
 		},
