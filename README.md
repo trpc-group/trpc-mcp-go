@@ -314,6 +314,36 @@ func main() {
 }
 ```
 
+### Tool Argument Runtime Types
+
+When a handler reads raw values from `req.Params.Arguments`, the runtime Go type is derived from the
+registered tool schema:
+
+| Tool option | Schema type | Handler value type |
+|-------------|-------------|--------------------|
+| `WithString` | `string` | `string` |
+| `WithNumber` | `number` | `float64` |
+| `WithInteger` | `integer` | `int` |
+| `WithBoolean` | `boolean` | `bool` |
+| `WithObject` | `object` | `map[string]interface{}` |
+| `WithArray` | `array` | `[]interface{}` |
+
+JSON-RPC params are decoded into `map[string]interface{}`, so JSON numbers initially arrive as
+`float64`. trpc-mcp-go normalizes fields declared as `integer` in the tool input schema to Go `int`
+before invoking the handler, including integer fields inside schema-defined objects and arrays.
+Fields declared as `number` remain `float64`.
+
+Handlers that need to support older trpc-mcp-go versions can temporarily accept both forms:
+
+```go
+switch v := req.Params.Arguments["page"].(type) {
+case int:
+	page = v
+case float64:
+	page = int(v)
+}
+```
+
 **Client:**
 ```go
 func main() {
