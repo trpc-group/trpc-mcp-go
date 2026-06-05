@@ -239,7 +239,7 @@ func (m *toolManager) handleCallTool(
 			errMsg := fmt.Sprintf("%v: arguments must be an object, got %T", mcpErrors.ErrInvalidParams, args)
 			return newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errMsg, nil), nil
 		}
-		params.Arguments = argsMap
+		params.Arguments = normalizeToolArguments(argsMap, registeredTool.Tool.InputSchema)
 	}
 
 	toolReq.Params = params
