@@ -430,7 +430,7 @@ server, proxy, err := mcp.NewStreamableServerWithStdioParams(
 )
 ```
 
-This proxy follows the same wrapper pattern as the legacy stdio-to-SSE adapter: `tools/list`, `resources/list`, and `prompts/list` are discovered at startup, then `tools/call`, `resources/read`, and `prompts/get` are forwarded to the stdio process at call time. It is not a fully transparent JSON-RPC tunnel; unsupported custom methods and advanced server-to-client flows should be implemented explicitly.
+This proxy follows the same wrapper pattern as the legacy stdio-to-SSE adapter: `tools/list`, `resources/list`, and `prompts/list` are discovered at startup, including paginated results, then `tools/call`, `resources/read`, and `prompts/get` are forwarded to the stdio process at call time. A proxy instance owns one stdio child process that is shared by all Streamable HTTP sessions. It is not a fully transparent JSON-RPC tunnel; unsupported custom methods and advanced server-to-client flows should be implemented explicitly.
 
 ## Configuration
 

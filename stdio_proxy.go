@@ -176,7 +176,7 @@ func registerStdioProxyCapabilities(
 }
 
 func registerStdioProxyTools(ctx context.Context, server *Server, proxy *StreamableStdioProxy) error {
-	result, err := proxy.client.ListTools(ctx, &ListToolsRequest{})
+	result, err := listAllStdioProxyTools(ctx, proxy.client)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func registerStdioProxyTools(ctx context.Context, server *Server, proxy *Streama
 }
 
 func registerStdioProxyResources(ctx context.Context, server *Server, proxy *StreamableStdioProxy) error {
-	result, err := proxy.client.ListResources(ctx, &ListResourcesRequest{})
+	result, err := listAllStdioProxyResources(ctx, proxy.client)
 	if err != nil {
 		return err
 	}
@@ -208,7 +208,7 @@ func registerStdioProxyResources(ctx context.Context, server *Server, proxy *Str
 }
 
 func registerStdioProxyPrompts(ctx context.Context, server *Server, proxy *StreamableStdioProxy) error {
-	result, err := proxy.client.ListPrompts(ctx, &ListPromptsRequest{})
+	result, err := listAllStdioProxyPrompts(ctx, proxy.client)
 	if err != nil {
 		return err
 	}
@@ -219,4 +219,52 @@ func registerStdioProxyPrompts(ctx context.Context, server *Server, proxy *Strea
 		})
 	}
 	return nil
+}
+
+func listAllStdioProxyTools(ctx context.Context, client *StdioClient) (*ListToolsResult, error) {
+	result := &ListToolsResult{}
+	req := &ListToolsRequest{}
+	for {
+		page, err := client.ListTools(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		result.Tools = append(result.Tools, page.Tools...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		req.Params.Cursor = page.NextCursor
+	}
+}
+
+func listAllStdioProxyResources(ctx context.Context, client *StdioClient) (*ListResourcesResult, error) {
+	result := &ListResourcesResult{}
+	req := &ListResourcesRequest{}
+	for {
+		page, err := client.ListResources(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		result.Resources = append(result.Resources, page.Resources...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		req.Params.Cursor = page.NextCursor
+	}
+}
+
+func listAllStdioProxyPrompts(ctx context.Context, client *StdioClient) (*ListPromptsResult, error) {
+	result := &ListPromptsResult{}
+	req := &ListPromptsRequest{}
+	for {
+		page, err := client.ListPrompts(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		result.Prompts = append(result.Prompts, page.Prompts...)
+		if page.NextCursor == "" {
+			return result, nil
+		}
+		req.Params.Cursor = page.NextCursor
+	}
 }
