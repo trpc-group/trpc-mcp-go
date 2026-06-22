@@ -67,6 +67,7 @@ Pick the transport that best fits your use case:
 |-----------|-------------|---------|
 | **STDIO** | Local tools, CLI integration, cross-language compatibility | [`examples/transport-modes/stdio/`](examples/transport-modes/stdio/) |
 | **Streamable HTTP** | Web services, multi-client servers, production apps | [`examples/quickstart/`](examples/quickstart/) |
+| **STDIO to Streamable Proxy** | Expose an existing stdio MCP server as a remote Streamable HTTP MCP server | `NewStreamableServerWithStdio` |
 | **SSE (Legacy)** | Compatibility with older MCP clients | [`examples/transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) |
 
 ### Streamable HTTP Server Example (Recommended)
@@ -355,6 +356,81 @@ func main() {
     fmt.Printf("Result: %v\n", result.Content[0])
 }
 ```
+
+### STDIO to Streamable HTTP Proxy
+
+Use `NewStreamableServerWithStdio` when you need to expose an existing stdio MCP server as a remote Streamable HTTP MCP server. The proxy starts the stdio process as an MCP client, initializes it, discovers its tools/resources/prompts, registers local forwarding handlers, and serves them through the normal Streamable HTTP `Server`.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	mcp "trpc.group/trpc-go/trpc-mcp-go"
+)
+
+func main() {
+	ctx := context.Background()
+
+	server, proxy, err := mcp.NewStreamableServerWithStdio(ctx, mcp.StreamableStdioProxyConfig{
+		ServerName:    "filesystem-proxy",
+		ServerVersion: "1.0.0",
+		Stdio: mcp.StdioTransportConfig{
+			ServerParams: mcp.StdioServerParameters{
+				Command: "npx",
+				Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+			},
+			Timeout: 30 * time.Second,
+		},
+		ServerOptions: []mcp.ServerOption{
+			mcp.WithServerAddress(":3000"),
+			mcp.WithServerPath("/mcp"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("failed to create stdio proxy: %v", err)
+	}
+	defer proxy.Close()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("stdio MCP server is available as Streamable HTTP at http://localhost:3000/mcp")
+		if err := server.Start(); err != nil {
+			log.Fatalf("server failed: %v", err)
+		}
+	}()
+
+	<-stop
+}
+```
+
+For simple cases, use the shorter helper:
+
+```go
+server, proxy, err := mcp.NewStreamableServerWithStdioParams(
+	ctx,
+	"stdio-proxy",
+	"1.0.0",
+	mcp.StdioTransportConfig{
+		ServerParams: mcp.StdioServerParameters{
+			Command: "go",
+			Args:    []string{"run", "./server/main.go"},
+		},
+	},
+	mcp.WithServerAddress(":3000"),
+	mcp.WithServerPath("/mcp"),
+)
+```
+
+This proxy follows the same wrapper pattern as the legacy stdio-to-SSE adapter: `tools/list`, `resources/list`, and `prompts/list` are discovered at startup, including paginated results, then `tools/call`, `resources/read`, and `prompts/get` are forwarded to the stdio process at call time. A proxy instance owns one stdio child process that is shared by all Streamable HTTP sessions. It is not a fully transparent JSON-RPC tunnel; unsupported custom methods and advanced server-to-client flows should be implemented explicitly.
 
 ## Configuration
 
@@ -799,6 +875,7 @@ The project includes several example patterns organized by category:
 | Pattern | Description |
 |---------|-------------|
 | [`transport-modes/stdio/`](examples/transport-modes/stdio/) | **STDIO Transport** - Cross-language compatibility with stdio |
+| [`stdio-to-streamable-proxy/`](examples/stdio-to-streamable-proxy/) | **STDIO to Streamable Proxy** - Expose an existing stdio MCP server as Streamable HTTP |
 | [`transport-modes/sse-legacy/`](examples/transport-modes/sse-legacy/) | **SSE Transport** - Server-Sent Events (legacy, for compatibility) |
 | [`transport-modes/streamable-http/`](examples/transport-modes/streamable-http/) | **Streamable HTTP** - Various configuration options |
 
