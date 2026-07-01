@@ -47,6 +47,8 @@ type stdioClientTransport struct {
 	stdin   io.WriteCloser
 	stdout  io.ReadCloser
 	stderr  io.ReadCloser
+	done    chan error
+	pgid    int
 
 	encoder   *json.Encoder
 	decoder   *json.Decoder
@@ -124,6 +126,7 @@ func (t *stdioClientTransport) startProcess() error {
 
 	// Create command.
 	cmd := exec.CommandContext(t.ctx, t.serverParams.Command, t.serverParams.Args...)
+	configureStdioProcess(cmd)
 
 	// Set working directory if specified.
 	if t.serverParams.WorkingDir != "" {
@@ -170,6 +173,8 @@ func (t *stdioClientTransport) startProcess() error {
 	t.stdin = stdin
 	t.stdout = stdout
 	t.stderr = stderr
+	t.done = make(chan error, 1)
+	t.pgid = stdioProcessGroupID(cmd)
 
 	// Create JSON encoder/decoder.
 	t.encoder = json.NewEncoder(stdin)
@@ -563,6 +568,10 @@ func (t *stdioClientTransport) processWatcher() {
 	}
 
 	err := t.process.Wait()
+	if t.done != nil {
+		t.done <- err
+		close(t.done)
+	}
 	if !t.closed.Load() {
 		if err != nil {
 			t.logger.Debugf("Process exited with error: %v", err)
@@ -596,6 +605,11 @@ func (t *stdioClientTransport) close() error {
 
 	var errs []error
 
+	var childPGIDs []int
+	if t.process != nil && t.process.Process != nil {
+		childPGIDs = stdioDescendantProcessGroupIDs(t.process)
+	}
+
 	// Cancel context first.
 	t.cancel()
 
@@ -620,27 +634,34 @@ func (t *stdioClientTransport) close() error {
 
 	// Terminate process gracefully.
 	if t.process != nil && t.process.Process != nil {
-		// First try SIGTERM
-		if err := t.process.Process.Signal(os.Interrupt); err != nil {
-			t.logger.Debugf("Failed to send SIGTERM: %v", err)
+		if err := signalStdioProcess(t.process, t.pgid, os.Interrupt); err != nil {
+			t.logger.Debugf("Failed to interrupt stdio process: %v", err)
 		}
 
 		// Wait a bit for graceful shutdown.
-		done := make(chan struct{})
-		go func() {
-			t.process.Wait()
-			close(done)
-		}()
-
 		select {
-		case <-done:
+		case <-t.done:
 			t.logger.Debugf("Process terminated gracefully")
+			if err := killStdioProcessGroups(childPGIDs); err != nil {
+				errs = append(errs, fmt.Errorf("failed to clean child groups: %w", err))
+			}
+			if err := killStdioProcess(t.process, t.pgid); err != nil {
+				errs = append(errs, fmt.Errorf("failed to clean process group: %w", err))
+			}
 		case <-time.After(5 * time.Second):
 			// Force kill.
-			if err := t.process.Process.Kill(); err != nil {
+			if err := killStdioProcessGroups(childPGIDs); err != nil {
+				errs = append(errs, fmt.Errorf("failed to kill child groups: %w", err))
+			}
+			if err := killStdioProcess(t.process, t.pgid); err != nil {
 				errs = append(errs, fmt.Errorf("failed to kill process: %w", err))
 			} else {
 				t.logger.Debugf("Process force-killed")
+			}
+			select {
+			case <-t.done:
+			case <-time.After(time.Second):
+				errs = append(errs, fmt.Errorf("process did not exit after kill"))
 			}
 		}
 	}
