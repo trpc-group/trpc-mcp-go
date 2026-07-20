@@ -383,6 +383,52 @@ func Enum(values ...string) PropertyOption {
 	}
 }
 
+// MinLength sets the minimum length of a string property.
+func MinLength(min int) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.MinLength = uint64(min)
+	}
+}
+
+// MaxLength sets the maximum length of a string property.
+func MaxLength(max int) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := uint64(max)
+		s.MaxLength = &val
+	}
+}
+
+// Pattern sets the regular expression constraint of a string property.
+func Pattern(pattern string) PropertyOption {
+	return func(s *openapi3.Schema) {
+		s.Pattern = pattern
+	}
+}
+
+// Min sets the minimum value of a numeric property.
+func Min(min float64) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := min
+		s.Min = &val
+	}
+}
+
+// Max sets the maximum value of a numeric property.
+func Max(max float64) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := max
+		s.Max = &val
+	}
+}
+
+// MultipleOf sets the multiple-of constraint of a numeric property.
+func MultipleOf(multiple float64) PropertyOption {
+	return func(s *openapi3.Schema) {
+		val := multiple
+		s.MultipleOf = &val
+	}
+}
+
 // Properties adds properties to the tool's input schema.
 func Properties(props openapi3.Schemas) PropertyOption {
 	return func(s *openapi3.Schema) {
