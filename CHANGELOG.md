@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.17 (2026-07-20)
+
+### Features
+
+- feat: add stdio to streamable proxy
+- feat: add JSON Schema property constraint options
+
+### Fixes
+
+- fix(stdio): clean up process groups on close
+
 ## 0.0.16 (2026-05-15)
 
 ### Fixes

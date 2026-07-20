@@ -178,6 +178,51 @@ func TestMockTool(t *testing.T) {
 	assert.Equal(t, customResult, result)
 }
 
+func TestPropertyConstraints(t *testing.T) {
+	tool := NewTool("constrained",
+		WithString("name",
+			MinLength(2),
+			MaxLength(20),
+			Pattern(`^[a-z]+$`),
+		),
+		WithNumber("ratio",
+			Min(0.5),
+			Max(9.5),
+			MultipleOf(0.5),
+		),
+		WithInteger("count",
+			Min(1),
+			Max(10),
+		),
+		WithNumber("zero",
+			Min(0),
+			Max(0),
+		),
+	)
+
+	name := tool.InputSchema.Properties["name"].Value
+	assert.Equal(t, uint64(2), name.MinLength)
+	assert.Equal(t, uint64(20), *name.MaxLength)
+	assert.Equal(t, `^[a-z]+$`, name.Pattern)
+
+	ratio := tool.InputSchema.Properties["ratio"].Value
+	assert.Equal(t, 0.5, *ratio.Min)
+	assert.Equal(t, 9.5, *ratio.Max)
+	assert.Equal(t, 0.5, *ratio.MultipleOf)
+
+	count := tool.InputSchema.Properties["count"].Value
+	assert.Equal(t, float64(1), *count.Min)
+	assert.Equal(t, float64(10), *count.Max)
+
+	zero := tool.InputSchema.Properties["zero"].Value
+	assert.Equal(t, float64(0), *zero.Min)
+	assert.Equal(t, float64(0), *zero.Max)
+	data, err := json.Marshal(zero)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"minimum":0`)
+	assert.Contains(t, string(data), `"maximum":0`)
+}
+
 func TestParseCallToolResult(t *testing.T) {
 	testCases := []struct {
 		name                 string
