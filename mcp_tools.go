@@ -194,10 +194,61 @@ func NewTool(
 	return tool
 }
 
+// ensureInputSchemaProperties makes property-building options safe to apply
+// after options that replace the complete input schema. It intentionally does
+// not change the schema type; callers are responsible for supplying the object
+// root required by MCP.
+func ensureInputSchemaProperties(t *Tool) {
+	if t.InputSchema == nil {
+		t.InputSchema = openapi3.NewObjectSchema()
+	}
+	if t.InputSchema.Properties == nil {
+		t.InputSchema.Properties = make(openapi3.Schemas)
+	}
+}
+
 // WithDescription common option function
 func WithDescription(description string) ToolOption {
 	return func(t *Tool) {
 		t.Description = description
+	}
+}
+
+// WithInputSchema sets a custom input schema for the tool.
+// It replaces the default input schema. A nil schema is ignored so the tool
+// keeps its existing input schema.
+//
+// MCP requires the root input schema to have type "object"; this option does
+// not validate or coerce the supplied schema. Options are applied in order, so
+// later property-building options augment the supplied schema, while a later
+// WithInputSchema replaces earlier schema changes.
+//
+// The tool retains the supplied pointer. Treat the schema as immutable after
+// NewTool returns to avoid cross-tool mutation and concurrent access races.
+//
+// The schema describes the arguments exposed to MCP clients. Tool handlers
+// must still parse and validate those arguments consistently with the schema.
+func WithInputSchema(inputSchema *openapi3.Schema) ToolOption {
+	return func(t *Tool) {
+		if inputSchema != nil {
+			t.InputSchema = inputSchema
+		}
+	}
+}
+
+// WithOutputSchema sets a custom output schema for the tool.
+// It replaces the existing output schema. A nil schema is ignored.
+//
+// The tool retains the supplied pointer. Treat the schema as immutable after
+// NewTool returns to avoid cross-tool mutation and concurrent access races.
+//
+// The schema describes the structured content exposed to MCP clients. Tool
+// handlers must still return structured content that conforms to the schema.
+func WithOutputSchema(outputSchema *openapi3.Schema) ToolOption {
+	return func(t *Tool) {
+		if outputSchema != nil {
+			t.OutputSchema = outputSchema
+		}
 	}
 }
 
@@ -261,6 +312,7 @@ func WithToolAnnotations(annotations *ToolAnnotations) ToolOption {
 // WithString adds a string parameter to the tool's input schema
 func WithString(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeString},
 		}
@@ -278,6 +330,7 @@ func WithString(name string, opts ...PropertyOption) ToolOption {
 // WithNumber adds a number parameter to the tool's input schema
 func WithNumber(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeNumber},
 		}
@@ -295,6 +348,7 @@ func WithNumber(name string, opts ...PropertyOption) ToolOption {
 // WithInteger adds an integer parameter to the tool's input schema
 func WithInteger(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeInteger},
 		}
@@ -312,6 +366,7 @@ func WithInteger(name string, opts ...PropertyOption) ToolOption {
 // WithBoolean adds a boolean parameter to the tool's input schema
 func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeBoolean},
 		}
@@ -329,6 +384,7 @@ func WithBoolean(name string, opts ...PropertyOption) ToolOption {
 // WithObject adds an object parameter to the tool's input schema.
 func WithObject(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type:       &openapi3.Types{openapi3.TypeObject},
 			Properties: make(openapi3.Schemas),
@@ -439,6 +495,7 @@ func Properties(props openapi3.Schemas) PropertyOption {
 // WithArray adds an array to the tool's input schema.
 func WithArray(name string, opts ...PropertyOption) ToolOption {
 	return func(t *Tool) {
+		ensureInputSchemaProperties(t)
 		schema := &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeArray},
 		}

@@ -852,6 +852,36 @@ mcp.WithInputStruct[Input](mcp.WithRefStyle())
 mcp.WithOutputStruct[Output](mcp.WithInlineStyle())
 ```
 
+**Custom Schemas:**
+
+When a schema comes from configuration or another schema source, pass the
+complete OpenAPI schema directly instead of rebuilding it property by property:
+
+```go
+var inputSchema openapi3.Schema
+if err := json.Unmarshal(schemaJSON, &inputSchema); err != nil {
+    return err
+}
+
+configuredTool := mcp.NewTool(
+    "configured_tool",
+    mcp.WithDescription("Tool whose input schema comes from configuration"),
+    mcp.WithInputSchema(&inputSchema),
+)
+```
+
+`WithInputSchema` replaces the default input schema, while `WithOutputSchema`
+sets the structured output schema. These options change the schema advertised
+to MCP clients; the handler must still parse, validate, and process compatible
+arguments and results.
+
+The root input schema must have `type: "object"`, as required by MCP. Tool
+options are applied in order: property options such as `WithString` can extend
+a custom input schema, while a later `WithInputSchema` replaces earlier input
+schema changes. The tool retains the provided schema pointer, so treat it as
+immutable after `NewTool` returns; sharing the pointer is safe only while it
+remains immutable.
+
 **Benefits:**
 - 🛡️ **Type Safety**: Compile-time type checking and automatic validation
 - 📋 **Rich Schemas**: Auto-generated OpenAPI schemas with descriptions, enums, defaults
