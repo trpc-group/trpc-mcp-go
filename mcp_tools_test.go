@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockTool is a mock tool implementation for testing
@@ -769,6 +771,116 @@ type TestSchemaStruct struct {
 	Name  string `json:"name"`
 	Age   int    `json:"age"`
 	Email string `json:"email,omitempty"`
+}
+
+func TestWithInputSchema(t *testing.T) {
+	customSchema := openapi3.NewObjectSchema().
+		WithProperty("query", openapi3.NewStringSchema().WithPattern(`^[a-z]+$`)).
+		WithRequired([]string{"query"})
+
+	tool := NewTool("test-tool",
+		WithString("replaced"),
+		WithInputSchema(customSchema),
+	)
+
+	assert.Same(t, customSchema, tool.InputSchema)
+	assert.Contains(t, tool.InputSchema.Properties, "query")
+	assert.NotContains(t, tool.InputSchema.Properties, "replaced")
+
+	t.Run("nil keeps existing schema", func(t *testing.T) {
+		tool := NewTool("test-tool",
+			WithInputSchema(customSchema),
+			WithInputSchema(nil),
+		)
+
+		assert.Same(t, customSchema, tool.InputSchema)
+	})
+
+	t.Run("property option augments configuration schema without properties", func(t *testing.T) {
+		var configuredSchema openapi3.Schema
+		require.NoError(t, json.Unmarshal([]byte(`{"type":"object"}`), &configuredSchema))
+
+		tool := NewTool("test-tool",
+			WithInputSchema(&configuredSchema),
+			WithString("extra", Required()),
+			WithNumber("ratio"),
+			WithInteger("count"),
+			WithBoolean("enabled"),
+			WithObject("metadata"),
+			WithArray("items"),
+		)
+
+		assert.Same(t, &configuredSchema, tool.InputSchema)
+		assert.Len(t, tool.InputSchema.Properties, 6)
+		for _, name := range []string{"extra", "ratio", "count", "enabled", "metadata", "items"} {
+			assert.Contains(t, tool.InputSchema.Properties, name)
+		}
+		assert.Contains(t, tool.InputSchema.Required, "extra")
+	})
+}
+
+func TestWithOutputSchema(t *testing.T) {
+	customSchema := openapi3.NewObjectSchema().
+		WithProperty("result", openapi3.NewStringSchema()).
+		WithRequired([]string{"result"})
+
+	tool := NewTool("test-tool", WithOutputSchema(customSchema))
+
+	assert.Same(t, customSchema, tool.OutputSchema)
+	assert.Contains(t, tool.OutputSchema.Properties, "result")
+
+	t.Run("nil keeps existing schema", func(t *testing.T) {
+		tool := NewTool("test-tool",
+			WithOutputSchema(customSchema),
+			WithOutputSchema(nil),
+		)
+
+		assert.Same(t, customSchema, tool.OutputSchema)
+	})
+}
+
+func TestCustomSchemasMarshal(t *testing.T) {
+	inputSchema := openapi3.NewObjectSchema().WithRequired([]string{"query"})
+	inputSchema.Extensions = map[string]any{
+		"$defs": map[string]any{
+			"Query": map[string]any{
+				"type":    "string",
+				"pattern": `^[a-z]+$`,
+			},
+		},
+	}
+	inputSchema.Properties["query"] = openapi3.NewSchemaRef("#/$defs/Query", nil)
+	outputSchema := openapi3.NewObjectSchema().
+		WithProperty("result", openapi3.NewStringSchema()).
+		WithRequired([]string{"result"})
+
+	tool := NewTool("test-tool",
+		WithInputSchema(inputSchema),
+		WithOutputSchema(outputSchema),
+	)
+	encoded, err := json.Marshal(tool)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"name": "test-tool",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"query": {"$ref": "#/$defs/Query"}
+			},
+			"required": ["query"],
+			"$defs": {
+				"Query": {"type": "string", "pattern": "^[a-z]+$"}
+			}
+		},
+		"outputSchema": {
+			"type": "object",
+			"properties": {
+				"result": {"type": "string"}
+			},
+			"required": ["result"]
+		}
+	}`, string(encoded))
 }
 
 // TestWithInputStruct tests WithInputStruct function
