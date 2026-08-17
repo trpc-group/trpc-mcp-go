@@ -58,7 +58,7 @@ func (m *promptManager) withPromptListFilter(filter PromptListFilter) *promptMan
 }
 
 // registerPrompt registers a prompt
-func (m *promptManager) registerPrompt(prompt *Prompt, handler promptHandler) {
+func (m *promptManager) registerPrompt(prompt *Prompt, handler promptHandler, options ...registerdPromptOption) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -74,6 +74,11 @@ func (m *promptManager) registerPrompt(prompt *Prompt, handler promptHandler) {
 	m.prompts[prompt.Name] = &registeredPrompt{
 		Prompt:  prompt,
 		Handler: handler,
+	}
+
+	// Apply options to the registered prompt
+	for _, opt := range options {
+		opt(m.prompts[prompt.Name])
 	}
 }
 
@@ -99,6 +104,18 @@ func (m *promptManager) getPrompts() []*Prompt {
 		prompts = append(prompts, registeredPrompt.Prompt)
 	}
 	return prompts
+}
+
+func (m *promptManager) hasCompletionCompleteHandler() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, registeredPrompt := range m.prompts {
+		if registeredPrompt.CompletionCompleteHandler != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // handleListPrompts handles listing prompts requests
@@ -227,38 +244,122 @@ func (m *promptManager) handleGetPrompt(ctx context.Context, req *JSONRPCRequest
 }
 
 // Helper: Parse and validate parameters for CompletionComplete
-func parseCompletionCompleteParams(req *JSONRPCRequest) (promptName string, errResp JSONRPCMessage, ok bool) {
+func parseCompletionCompleteParams(req *JSONRPCRequest) (promptName, promptTitle, resourceURI, argName, argValue string, ctxArguments map[string]interface{}, errResp JSONRPCMessage, ok bool) {
 	paramsMap, ok := req.Params.(map[string]interface{})
 	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
 	}
+
 	ref, ok := paramsMap["ref"].(map[string]interface{})
 	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
 	}
 	refType, ok := ref["type"].(string)
-	if !ok || refType != "ref/prompt" {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
+	if !ok || (refType != "ref/prompt" && refType != "ref/resource") {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
 	}
+
 	promptName, ok = ref["name"].(string)
-	if !ok {
-		return "", newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+	// For ref/prompt, name is required
+	if refType == "ref/prompt" && !ok {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
 	}
-	return promptName, nil, true
+	promptTitle, _ = ref["title"].(string)
+	resourceURI, ok = ref["uri"].(string)
+	// For ref/resource, uri is required
+	if refType == "ref/resource" && !ok {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+	}
+
+	argument, ok := paramsMap["argument"].(map[string]interface{})
+	if !ok {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrInvalidParams.Error(), nil), false
+	}
+	if argument == nil {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+	}
+	// Check that argument has "name" and "value" as string parameters
+	argName, ok = argument["name"].(string)
+	if !ok {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+	}
+	argValue, ok = argument["value"].(string)
+	if !ok {
+		return "", "", "", "", "", nil, newJSONRPCErrorResponse(req.ID, ErrCodeInvalidParams, errors.ErrMissingParams.Error(), nil), false
+	}
+
+	context, ok := paramsMap["context"].(map[string]interface{})
+	if ok && context != nil {
+		ctxArguments, _ = context["arguments"].(map[string]interface{})
+	}
+	return promptName, promptTitle, resourceURI, argName, argValue, ctxArguments, nil, true
 }
 
 // Refactored: handleCompletionComplete with logic unchanged, now using helpers
 func (m *promptManager) handleCompletionComplete(ctx context.Context, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	promptName, errResp, ok := parseCompletionCompleteParams(req)
+	promptName, promptTitle, _, argName, argValue, ctxArguments, errResp, ok := parseCompletionCompleteParams(req)
 	if !ok {
 		return errResp, nil
 	}
+
+	// create a new request for completion
+	completionReq := &CompleteCompletionRequest{}
+	completionReq.Params.Ref.Name = promptName
+	completionReq.Params.Ref.Title = promptTitle
+	completionReq.Params.Ref.Type = "ref/prompt"
+	completionReq.Params.Argument.Name = argName
+	completionReq.Params.Argument.Value = argValue
+
+	// Convert ctxArguments to map[string]string if needed
+	if len(ctxArguments) > 0 {
+		completionReq.Params.Context = struct {
+			Arguments map[string]string `json:"arguments,omitempty"`
+		}{
+			Arguments: make(map[string]string),
+		}
+		// Convert arguments to string map
+		for k, v := range ctxArguments {
+			if str, ok := v.(string); ok {
+				completionReq.Params.Context.Arguments[k] = str
+			}
+		}
+	}
+
 	// Business logic remains unchanged, can be further split if needed
-	return m.handlePromptCompletion(ctx, promptName, req)
+	return m.handlePromptCompletion(ctx, completionReq, req)
 }
 
 // Helper: Handle prompt completion business logic (can be further split if needed)
-func (m *promptManager) handlePromptCompletion(ctx context.Context, promptName string, req *JSONRPCRequest) (JSONRPCMessage, error) {
-	// Original handleCompletionComplete business logic placeholder
-	return newJSONRPCErrorResponse(req.ID, ErrCodeMethodNotFound, "not implemented", nil), nil
+func (m *promptManager) handlePromptCompletion(ctx context.Context, completionReq *CompleteCompletionRequest, req *JSONRPCRequest) (JSONRPCMessage, error) {
+	registeredPrompt, exists := m.prompts[completionReq.Params.Ref.Name]
+	if !exists {
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeMethodNotFound,
+			fmt.Sprintf("%v: %s", errors.ErrPromptNotFound, completionReq.Params.Ref.Name),
+			nil,
+		), nil
+	}
+
+	// Check if completionCompleteHandler is available
+	if registeredPrompt.CompletionCompleteHandler == nil {
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeMethodNotFound,
+			fmt.Sprintf("%v: %s", errors.ErrMethodNotFound, completionReq.Params.Ref.Name),
+			nil,
+		), nil
+	}
+
+	result, err := registeredPrompt.CompletionCompleteHandler(ctx, completionReq)
+	if err != nil {
+		return newJSONRPCErrorResponse(
+			req.ID,
+			ErrCodeInternal,
+			err.Error(),
+			nil,
+		), nil
+	}
+
+	return result, nil
 }

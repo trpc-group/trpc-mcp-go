@@ -16,6 +16,7 @@ var (
 	ErrInvalidToolFormat     = errors.New("invalid tool format")
 	ErrToolNotFound          = errors.New("tool not found")
 	ErrInvalidToolParams     = errors.New("invalid tool parameters")
+	ErrMethodNotFound        = errors.New("method not found")
 
 	// JSON-RPC related errors
 	ErrParseJSONRPC           = errors.New("failed to parse JSON-RPC message")
