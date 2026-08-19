@@ -73,6 +73,17 @@ type httpServerHandler struct {
 
 	// Response manager for server-to-client requests.
 	responseManager *responseManager
+
+	// Keepalive configuration
+	keepAliveEnabled  bool          // Whether SSE comment keepalive is enabled
+	keepAliveInterval time.Duration // Interval for SSE comment keepalive
+	pingEnabled       bool          // Whether JSON-RPC ping keepalive is enabled
+	pingInterval      time.Duration // Interval for ping requests
+	pingTimeout       time.Duration // Timeout for ping requests
+	pingStarted       bool          // Whether ping loop has been started
+	pingStartMu       sync.Mutex    // Mutex to ensure ping loop starts only once
+	stop              chan struct{} // Channel to signal shutdown
+	stopOnce          sync.Once     // Ensures stop channel is closed only once
 }
 
 // getSSEConnection represents a GET SSE connection
@@ -103,6 +114,12 @@ func newHTTPServerHandler(handler requestHandler, serverPath string, options ...
 		getSSEConnections:      make(map[string]*getSSEConnection),
 		serverPath:             serverPath,
 		responseManager:        newResponseManager(),
+		keepAliveEnabled:       true,                // Default: SSE comment keepalive enabled
+		keepAliveInterval:      30 * time.Second,    // Default: 30 seconds
+		pingEnabled:            false,               // Default: ping keepalive disabled
+		pingInterval:           30 * time.Second,    // Default: 30 seconds
+		pingTimeout:            15 * time.Second,    // Default: 15 seconds
+		stop:                   make(chan struct{}), // Stop channel for graceful shutdown
 	}
 
 	// Apply options
@@ -169,6 +186,23 @@ func withTransportGetSSEEnabled(enabled bool) func(*httpServerHandler) {
 func withTransportNotificationBufferSize(size int) func(*httpServerHandler) {
 	return func(h *httpServerHandler) {
 		h.notificationBufferSize = size
+	}
+}
+
+// withKeepAliveConfig sets the SSE comment keepalive configuration
+func withKeepAliveConfig(enabled bool, interval time.Duration) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.keepAliveEnabled = enabled
+		h.keepAliveInterval = interval
+	}
+}
+
+// withPingConfig sets the JSON-RPC ping keepalive configuration
+func withPingConfig(enabled bool, interval, timeout time.Duration) func(*httpServerHandler) {
+	return func(h *httpServerHandler) {
+		h.pingEnabled = enabled
+		h.pingInterval = interval
+		h.pingTimeout = timeout
 	}
 }
 
@@ -589,6 +623,18 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// Start ping loop if enabled (only once, on first GET SSE connection)
+	if h.pingEnabled {
+		h.pingStartMu.Lock()
+		if !h.pingStarted {
+			h.pingStarted = true
+			h.pingStartMu.Unlock()
+			h.startPingLoop()
+		} else {
+			h.pingStartMu.Unlock()
+		}
+	}
+
 	// Create context, for canceling connection
 	connCtx, cancelConn := context.WithCancel(ctx)
 	localCancelFunc = cancelConn // Assign to the variable captured by defer
@@ -617,6 +663,11 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	// Record connection information
 	h.logger.Infof("Established GET SSE connection, session ID: %s", session.GetID())
 
+	// Start comment keepalive if enabled
+	if h.keepAliveEnabled {
+		go h.handleGetSSECommentKeepAlive(connCtx, conn, session.GetID())
+	}
+
 	// If there's Last-Event-ID, try to resume stream
 	if lastEventID != "" {
 		h.handleStreamResumption(connCtx, conn, session.GetID())
@@ -630,6 +681,38 @@ func (h *httpServerHandler) handleGet(ctx context.Context, w http.ResponseWriter
 	delete(h.getSSEConnections, session.GetID())
 	h.getSSEConnectionsLock.Unlock()
 	h.logger.Infof("GET SSE connection closed, session ID: %s", session.GetID())
+}
+
+// handleGetSSECommentKeepAlive handles SSE comment keepalive for GET SSE connections.
+// It sends SSE comment lines at the configured interval to keep the connection alive.
+func (h *httpServerHandler) handleGetSSECommentKeepAlive(ctx context.Context, conn *getSSEConnection, sessionID string) {
+	if h.keepAliveInterval <= 0 {
+		return
+	}
+
+	ticker := time.NewTicker(h.keepAliveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			conn.writeLock.Lock()
+			// Send SSE comment
+			fmt.Fprintf(conn.writer, ": keepalive\n\n")
+			conn.flusher.Flush()
+			conn.writeLock.Unlock()
+
+			if h.logger != nil {
+				h.logger.Debugf("Sent keepalive comment to GET SSE session: %s", sessionID)
+			}
+
+		case <-ctx.Done():
+			if h.logger != nil {
+				h.logger.Debugf("GET SSE keepalive stopped for session: %s", sessionID)
+			}
+			return
+		}
+	}
 }
 
 // Send notification through GET SSE
@@ -788,6 +871,134 @@ func (h *httpServerHandler) cleanupSession(sessionID string) {
 		delete(h.getSSEConnections, sessionID)
 	}
 	h.getSSEConnectionsLock.Unlock()
+}
+
+// PingSession sends a ping request to the specified session via GET SSE connection.
+// Returns an error if the session has no GET SSE connection or the ping fails.
+func (h *httpServerHandler) PingSession(ctx context.Context, sessionID string) error {
+	// Create ping request
+	requestID := h.responseManager.GenerateRequestID()
+	request := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodPing,
+		},
+	}
+
+	// Send request and wait for response
+	result, err := h.SendRequest(ctx, sessionID, request)
+	if err != nil {
+		return fmt.Errorf("ping request failed: %w", err)
+	}
+
+	// Verify response
+	if result == nil {
+		return fmt.Errorf("ping response is nil")
+	}
+
+	return nil
+}
+
+// PingAllSessions sends ping requests to all sessions that have GET SSE connections.
+// Ping failures are logged but do not cause sessions to be disconnected.
+func (h *httpServerHandler) PingAllSessions(ctx context.Context) {
+	var sessionIDs []string
+
+	// Collect all session IDs with GET SSE connections
+	h.getSSEConnectionsLock.RLock()
+	for sessionID := range h.getSSEConnections {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	h.getSSEConnectionsLock.RUnlock()
+
+	if len(sessionIDs) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	for _, sessionID := range sessionIDs {
+		wg.Add(1)
+		go func(sid string) {
+			defer wg.Done()
+
+			// Create independent timeout context for each ping
+			pingCtx, cancel := context.WithTimeout(ctx, h.pingTimeout)
+			defer cancel()
+
+			if err := h.PingSession(pingCtx, sid); err != nil {
+				// Log failure but do not disconnect session
+				if h.logger != nil {
+					h.logger.Warnf("Ping Streamable HTTP session %s failed: %v", sid, err)
+				}
+			} else {
+				if h.logger != nil {
+					h.logger.Debugf("Ping Streamable HTTP session %s succeeded", sid)
+				}
+			}
+		}(sessionID)
+	}
+
+	// Wait for all pings to complete
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All pings completed
+	case <-ctx.Done():
+		if h.logger != nil {
+			h.logger.Warnf("PingAllSessions context cancelled")
+		}
+	}
+}
+
+// startPingLoop starts the ping keepalive loop for Streamable HTTP.
+// It sends ping requests to all sessions with GET SSE connections at the configured interval.
+func (h *httpServerHandler) startPingLoop() {
+	if h.pingInterval <= 0 {
+		if h.logger != nil {
+			h.logger.Warnf("Invalid ping interval: %v, ping keepalive disabled", h.pingInterval)
+		}
+		return
+	}
+
+	go func() {
+		if h.logger != nil {
+			h.logger.Infof("Streamable HTTP ping keepalive started, interval: %v, timeout: %v", h.pingInterval, h.pingTimeout)
+		}
+
+		ticker := time.NewTicker(h.pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Create context with timeout for entire ping cycle
+				ctx, cancel := context.WithTimeout(context.Background(), h.pingInterval)
+				h.PingAllSessions(ctx)
+				cancel()
+
+			case <-h.stop:
+				if h.logger != nil {
+					h.logger.Infof("Streamable HTTP ping keepalive stopped")
+				}
+				return
+			}
+		}
+	}()
+}
+
+// Close gracefully closes the Streamable HTTP handler.
+// It stops the ping keepalive loop and performs cleanup.
+func (h *httpServerHandler) Close() error {
+	h.stopOnce.Do(func() {
+		close(h.stop)
+	})
+	return nil
 }
 
 // isValidPath validates if the request path matches the configured server path.

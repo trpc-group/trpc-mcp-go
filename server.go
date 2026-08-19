@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Common errors
@@ -71,6 +72,13 @@ type serverConfig struct {
 	getSSEEnabled          bool
 	notificationBufferSize int
 
+	// Keepalive configuration
+	keepAliveEnabled  bool
+	keepAliveInterval time.Duration
+	pingEnabled       bool
+	pingInterval      time.Duration
+	pingTimeout       time.Duration
+
 	// HTTP context functions for extracting information from HTTP requests
 	httpContextFuncs []HTTPContextFunc
 
@@ -120,6 +128,11 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 		postSSEEnabled:         true,
 		getSSEEnabled:          true,
 		notificationBufferSize: defaultNotificationBufferSize,
+		keepAliveEnabled:       true,             // Default: SSE comment keepalive enabled
+		keepAliveInterval:      30 * time.Second, // Default: 30 seconds
+		pingEnabled:            false,            // Default: ping keepalive disabled
+		pingInterval:           30 * time.Second, // Default: 30 seconds
+		pingTimeout:            15 * time.Second, // Default: 15 seconds
 	}
 
 	// Create server with provided serverInfo
@@ -220,6 +233,12 @@ func (s *Server) initComponents() {
 		withTransportNotificationBufferSize(s.config.notificationBufferSize),
 	)
 
+	// Keepalive configuration.
+	httpOptions = append(httpOptions,
+		withKeepAliveConfig(s.config.keepAliveEnabled, s.config.keepAliveInterval),
+		withPingConfig(s.config.pingEnabled, s.config.pingInterval, s.config.pingTimeout),
+	)
+
 	// HTTP context functions configuration.
 	if len(s.config.httpContextFuncs) > 0 {
 		httpOptions = append(httpOptions, withTransportHTTPContextFuncs(s.config.httpContextFuncs))
@@ -297,6 +316,53 @@ func WithHTTPContextFunc(fn HTTPContextFunc) ServerOption {
 func WithStatelessMode(enabled bool) ServerOption {
 	return func(s *Server) {
 		s.config.isStateless = enabled
+	}
+}
+
+// WithServerKeepAlive enables or disables SSE comment keepalive for all SSE connections.
+// When enabled, the server will send SSE comment lines (": keepalive") at regular intervals
+// to prevent connection timeouts. This is enabled by default.
+func WithServerKeepAlive(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.config.keepAliveEnabled = enabled
+	}
+}
+
+// WithServerKeepAliveInterval sets the interval for SSE comment keepalive messages.
+// This option does not automatically enable keepalive; use WithServerKeepAlive(true) to enable it.
+// Default is 30 seconds.
+func WithServerKeepAliveInterval(interval time.Duration) ServerOption {
+	return func(s *Server) {
+		s.config.keepAliveInterval = interval
+	}
+}
+
+// WithServerPingKeepAlive enables or disables JSON-RPC ping keepalive.
+// When enabled, the server will periodically send ping requests to all connected clients.
+// This provides application-layer health checking in addition to (or instead of) SSE comment keepalive.
+// Disabled by default.
+func WithServerPingKeepAlive(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.config.pingEnabled = enabled
+	}
+}
+
+// WithServerPingInterval sets the interval for sending ping requests.
+// This option does not automatically enable ping keepalive; use WithServerPingKeepAlive(true) to enable it.
+// Default is 30 seconds.
+func WithServerPingInterval(interval time.Duration) ServerOption {
+	return func(s *Server) {
+		s.config.pingInterval = interval
+	}
+}
+
+// WithServerPingTimeout sets the timeout for ping requests.
+// If a ping request does not receive a response within this timeout,
+// it will be logged as failed but the connection will remain open.
+// Default is 15 seconds.
+func WithServerPingTimeout(timeout time.Duration) ServerOption {
+	return func(s *Server) {
+		s.config.pingTimeout = timeout
 	}
 }
 

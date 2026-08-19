@@ -168,8 +168,15 @@ type SSEServer struct {
 	contextFunc          func(ctx context.Context, r *http.Request) context.Context // HTTP context function.
 	sessionIDGenerator   SessionIDGenerator                                         // Custom session ID generator.
 	sessionPubSub        SessionPubSub                                              // Optional session Pub/Sub for distributed sessions.
-	keepAlive            bool                                                       // Whether to keep the connection alive.
-	keepAliveInterval    time.Duration                                              // Keep-alive interval.
+	keepAlive            bool                                                       // Whether to keep the connection alive with SSE comments.
+	keepAliveInterval    time.Duration                                              // Keep-alive interval for SSE comments.
+	pingEnabled          bool                                                       // Whether to enable JSON-RPC ping keepalive.
+	pingInterval         time.Duration                                              // Interval for sending ping requests.
+	pingTimeout          time.Duration                                              // Timeout for ping requests.
+	pingStarted          bool                                                       // Whether ping loop has been started.
+	pingStartMu          sync.Mutex                                                 // Mutex to ensure ping loop starts only once.
+	stop                 chan struct{}                                              // Channel to signal server shutdown.
+	stopOnce             sync.Once                                                  // Ensures stop channel is closed only once.
 	logger               Logger                                                     // Logger for this server.
 	requestID            atomic.Int64                                               // Request ID counter for generating unique request IDs.
 	responses            map[uint64]interface{}                                     // Map for storing response channels.
@@ -233,6 +240,10 @@ func NewSSEServer(name, version string, opts ...SSEOption) *SSEServer {
 		sessionIDGenerator:   &defaultSessionIDGenerator{}, // Default session ID generator
 		keepAlive:            true,
 		keepAliveInterval:    30 * time.Second,
+		pingEnabled:          false,               // Ping keepalive disabled by default
+		pingInterval:         30 * time.Second,    // Default ping interval
+		pingTimeout:          15 * time.Second,    // Default ping timeout
+		stop:                 make(chan struct{}), // Stop channel for graceful shutdown
 		logger:               GetDefaultLogger(),
 		responses:            make(map[uint64]interface{}),
 		notificationHandlers: make(map[string]ServerNotificationHandler),
@@ -300,6 +311,32 @@ func WithKeepAliveInterval(interval time.Duration) SSEOption {
 	return func(s *SSEServer) {
 		s.keepAliveInterval = interval
 		s.keepAlive = true
+	}
+}
+
+// WithPingKeepAlive enables or disables JSON-RPC ping keepalive.
+// When enabled, the server will periodically send ping requests to all connected clients.
+// This provides application-layer health checking in addition to (or instead of) SSE comment keepalive.
+func WithPingKeepAlive(enabled bool) SSEOption {
+	return func(s *SSEServer) {
+		s.pingEnabled = enabled
+	}
+}
+
+// WithPingInterval sets the interval for sending ping requests.
+// This option does not automatically enable ping keepalive; use WithPingKeepAlive(true) to enable it.
+func WithPingInterval(interval time.Duration) SSEOption {
+	return func(s *SSEServer) {
+		s.pingInterval = interval
+	}
+}
+
+// WithPingTimeout sets the timeout for ping requests.
+// If a ping request does not receive a response within this timeout,
+// it will be considered failed (logged but connection remains open).
+func WithPingTimeout(timeout time.Duration) SSEOption {
+	return func(s *SSEServer) {
+		s.pingTimeout = timeout
 	}
 }
 
@@ -454,6 +491,18 @@ func (s *SSEServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		s.logger.Errorf("Streaming not supported by client")
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
+	}
+
+	// Start ping loop if enabled (only once, on first connection)
+	if s.pingEnabled {
+		s.pingStartMu.Lock()
+		if !s.pingStarted {
+			s.pingStarted = true
+			s.pingStartMu.Unlock()
+			s.startPingLoop()
+		} else {
+			s.pingStartMu.Unlock()
+		}
 	}
 
 	// Set SSE headers and immediately flush.
@@ -1639,6 +1688,119 @@ func (s *SSEServer) SendRequest(ctx context.Context, sessionID string, request *
 	case <-time.After(30 * time.Second):
 		return nil, fmt.Errorf("request timeout")
 	}
+}
+
+// PingSession sends a ping request to the specified session.
+// Returns an error if the ping request fails or times out.
+// Note: Ping failures are logged but do not cause the session to be disconnected.
+func (s *SSEServer) PingSession(ctx context.Context, sessionID string) error {
+	// Create ping request
+	requestID := s.requestID.Add(1)
+	request := &JSONRPCRequest{
+		JSONRPC: JSONRPCVersion,
+		ID:      requestID,
+		Request: Request{
+			Method: MethodPing,
+		},
+	}
+
+	// Send request and wait for response
+	result, err := s.SendRequest(ctx, sessionID, request)
+	if err != nil {
+		return fmt.Errorf("ping request failed: %w", err)
+	}
+
+	// Verify response
+	if result == nil {
+		return fmt.Errorf("ping response is nil")
+	}
+
+	return nil
+}
+
+// PingAllSessions sends ping requests to all connected sessions.
+// Ping failures are logged but do not cause sessions to be disconnected.
+func (s *SSEServer) PingAllSessions(ctx context.Context) {
+	var wg sync.WaitGroup
+
+	s.sessions.Range(func(key, value interface{}) bool {
+		sessionID, ok := key.(string)
+		if !ok {
+			s.logger.Warnf("Invalid session key type: %T", key)
+			return true
+		}
+
+		wg.Add(1)
+		go func(sid string) {
+			defer wg.Done()
+
+			// Create independent timeout context for each ping
+			pingCtx, cancel := context.WithTimeout(ctx, s.pingTimeout)
+			defer cancel()
+
+			if err := s.PingSession(pingCtx, sid); err != nil {
+				// Log failure but do not disconnect session
+				s.logger.Warnf("Ping session %s failed: %v", sid, err)
+			} else {
+				s.logger.Debugf("Ping session %s succeeded", sid)
+			}
+		}(sessionID)
+
+		return true
+	})
+
+	// Wait for all pings to complete (with overall timeout)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All pings completed
+	case <-ctx.Done():
+		s.logger.Warnf("PingAllSessions context cancelled")
+	}
+}
+
+// startPingLoop starts the ping keepalive loop.
+// It sends ping requests to all sessions at the configured interval.
+func (s *SSEServer) startPingLoop() {
+	if s.pingInterval <= 0 {
+		s.logger.Warnf("Invalid ping interval: %v, ping keepalive disabled", s.pingInterval)
+		return
+	}
+
+	go func() {
+		s.logger.Infof("Ping keepalive started, interval: %v, timeout: %v", s.pingInterval, s.pingTimeout)
+
+		ticker := time.NewTicker(s.pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Create context with timeout for entire ping cycle
+				ctx, cancel := context.WithTimeout(context.Background(), s.pingInterval)
+				s.PingAllSessions(ctx)
+				cancel()
+
+			case <-s.stop:
+				s.logger.Infof("Ping keepalive stopped")
+				return
+			}
+		}
+	}()
+}
+
+// Close gracefully closes the SSE server.
+// It stops the ping keepalive loop and performs cleanup.
+func (s *SSEServer) Close() error {
+	s.stopOnce.Do(func() {
+		close(s.stop)
+	})
+	return nil
 }
 
 // formatSSEEvent formats SSE event.

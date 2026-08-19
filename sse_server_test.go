@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSSEServer_UnregisterTools(t *testing.T) {
@@ -346,14 +347,14 @@ func (g *testSessionIDGenerator) GenerateSessionID(r *http.Request) string {
 
 // mockSessionPubSub is a mock implementation of SessionPubSub for testing.
 type mockSessionPubSub struct {
-	subscriptions map[string]SessionMessageHandler
-	published     []mockPublishedMessage
-	subscribeCalls int
+	subscriptions    map[string]SessionMessageHandler
+	published        []mockPublishedMessage
+	subscribeCalls   int
 	unsubscribeCalls int
-	publishCalls int
-	subscribeErr error
-	unsubscribeErr error
-	publishErr error
+	publishCalls     int
+	subscribeErr     error
+	unsubscribeErr   error
+	publishErr       error
 }
 
 type mockPublishedMessage struct {
@@ -795,5 +796,134 @@ func TestSerializedRequestWithContextFunc(t *testing.T) {
 
 	if capturedRemoteAddr != "10.0.0.1:54321" {
 		t.Errorf("Expected remote addr '10.0.0.1:54321', got '%s'", capturedRemoteAddr)
+	}
+}
+
+// TestDefaultPingConfiguration tests that ping keepalive is disabled by default
+func TestDefaultPingConfiguration(t *testing.T) {
+	server := NewSSEServer("test-server", "1.0.0")
+
+	// Verify default configuration
+	if server.keepAlive != true {
+		t.Errorf("Expected keepAlive to be true by default, got %v", server.keepAlive)
+	}
+	if server.keepAliveInterval != 30*time.Second {
+		t.Errorf("Expected keepAliveInterval to be 30s, got %v", server.keepAliveInterval)
+	}
+	if server.pingEnabled != false {
+		t.Errorf("Expected pingEnabled to be false by default, got %v", server.pingEnabled)
+	}
+	if server.pingInterval != 30*time.Second {
+		t.Errorf("Expected pingInterval to be 30s, got %v", server.pingInterval)
+	}
+	if server.pingTimeout != 15*time.Second {
+		t.Errorf("Expected pingTimeout to be 15s, got %v", server.pingTimeout)
+	}
+}
+
+// TestPingKeepAliveEnabled tests enabling ping keepalive
+func TestPingKeepAliveEnabled(t *testing.T) {
+	server := NewSSEServer("test-server", "1.0.0",
+		WithPingKeepAlive(true),
+	)
+
+	// Verify ping is enabled
+	if !server.pingEnabled {
+		t.Error("Expected pingEnabled to be true")
+	}
+	// Verify comment keepalive is still enabled (default)
+	if !server.keepAlive {
+		t.Error("Expected keepAlive to still be true")
+	}
+}
+
+// TestPingOnlyMode tests using only ping keepalive (disabling comment)
+func TestPingOnlyMode(t *testing.T) {
+	server := NewSSEServer("test-server", "1.0.0",
+		WithKeepAlive(false),
+		WithPingKeepAlive(true),
+	)
+
+	// Verify only ping is enabled
+	if server.keepAlive {
+		t.Error("Expected keepAlive to be false")
+	}
+	if !server.pingEnabled {
+		t.Error("Expected pingEnabled to be true")
+	}
+}
+
+// TestCustomPingConfiguration tests custom ping configuration
+func TestCustomPingConfiguration(t *testing.T) {
+	server := NewSSEServer("test-server", "1.0.0",
+		WithPingKeepAlive(true),
+		WithPingInterval(60*time.Second),
+		WithPingTimeout(30*time.Second),
+	)
+
+	// Verify custom configuration
+	if !server.pingEnabled {
+		t.Error("Expected pingEnabled to be true")
+	}
+	if server.pingInterval != 60*time.Second {
+		t.Errorf("Expected pingInterval to be 60s, got %v", server.pingInterval)
+	}
+	if server.pingTimeout != 30*time.Second {
+		t.Errorf("Expected pingTimeout to be 30s, got %v", server.pingTimeout)
+	}
+}
+
+// TestExistingConfigNotAffected tests that existing keepalive config is not affected by new ping options
+func TestExistingConfigNotAffected(t *testing.T) {
+	// Test with explicit keepalive disabled
+	server1 := NewSSEServer("test-server", "1.0.0",
+		WithKeepAlive(false),
+	)
+	if server1.keepAlive {
+		t.Error("Expected keepAlive to be false")
+	}
+	if server1.pingEnabled {
+		t.Error("Expected pingEnabled to be false (default)")
+	}
+
+	// Test with keepalive interval (which auto-enables keepalive - existing behavior)
+	server2 := NewSSEServer("test-server", "1.0.0",
+		WithKeepAliveInterval(60*time.Second),
+	)
+	if !server2.keepAlive {
+		t.Error("Expected keepAlive to be true (auto-enabled by WithKeepAliveInterval)")
+	}
+	if server2.keepAliveInterval != 60*time.Second {
+		t.Errorf("Expected keepAliveInterval to be 60s, got %v", server2.keepAliveInterval)
+	}
+	if server2.pingEnabled {
+		t.Error("Expected pingEnabled to be false (default)")
+	}
+}
+
+// TestSSEServerBackwardCompatibility tests that existing SSE server code works without modification
+func TestSSEServerBackwardCompatibility(t *testing.T) {
+	// Scenario 1: Server created with no options
+	server1 := NewSSEServer("test-server", "1.0.0")
+	if !server1.keepAlive {
+		t.Error("Expected keepAlive to be true (default)")
+	}
+	if server1.pingEnabled {
+		t.Error("Expected pingEnabled to be false (default)")
+	}
+
+	// Scenario 2: Server with existing keepalive options
+	server2 := NewSSEServer("test-server", "1.0.0",
+		WithKeepAlive(true),
+		WithKeepAliveInterval(60*time.Second),
+	)
+	if !server2.keepAlive {
+		t.Error("Expected keepAlive to be true")
+	}
+	if server2.keepAliveInterval != 60*time.Second {
+		t.Errorf("Expected keepAliveInterval to be 60s, got %v", server2.keepAliveInterval)
+	}
+	if server2.pingEnabled {
+		t.Error("Expected pingEnabled to be false (default, not affected by keepAlive options)")
 	}
 }
