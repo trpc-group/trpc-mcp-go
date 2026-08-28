@@ -74,9 +74,7 @@ type CallToolRequest struct {
 type CallToolParams struct {
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
-	Meta      *struct {
-		ProgressToken ProgressToken `json:"progressToken,omitempty"`
-	} `json:"_meta,omitempty"`
+	Meta      *Meta                  `json:"_meta,omitempty"`
 }
 
 // RequestMeta represents request metadata

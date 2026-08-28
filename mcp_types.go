@@ -25,13 +25,89 @@ const (
 
 // MCP protcol Layer
 
+// Meta represents metadata attached to a request's parameters.
+// This can include fields formally defined by the protocol (like ProgressToken)
+// or other arbitrary data for custom use cases.
+// Based on mcp-go implementation for MCP 2025-06-18 protocol support.
+type Meta struct {
+	// ProgressToken is used to request out-of-band progress notifications.
+	// If specified, the caller is requesting progress notifications for this
+	// request (as represented by notifications/progress). The value is an
+	// opaque token that will be attached to any subsequent notifications.
+	// The receiver is not obligated to provide these notifications.
+	ProgressToken ProgressToken `json:"-"`
+
+	// AdditionalFields are any fields present in the Meta that are not
+	// otherwise defined in the protocol. This allows for custom metadata
+	// to be passed between clients and servers.
+	AdditionalFields map[string]interface{} `json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling for Meta.
+// It flattens ProgressToken and AdditionalFields into a single JSON object.
+func (m *Meta) MarshalJSON() ([]byte, error) {
+	if m == nil {
+		return []byte("null"), nil
+	}
+
+	raw := make(map[string]interface{})
+
+	// Add progressToken if present
+	if m.ProgressToken != nil {
+		raw["progressToken"] = m.ProgressToken
+	}
+
+	// Add all additional fields
+	for k, v := range m.AdditionalFields {
+		raw[k] = v
+	}
+
+	return json.Marshal(raw)
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for Meta.
+// It extracts progressToken and puts all other fields into AdditionalFields.
+func (m *Meta) UnmarshalJSON(data []byte) error {
+	raw := make(map[string]interface{})
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Extract progressToken
+	if pt, ok := raw["progressToken"]; ok {
+		m.ProgressToken = pt
+		delete(raw, "progressToken")
+	}
+
+	// Store remaining fields as additional fields
+	m.AdditionalFields = raw
+
+	return nil
+}
+
+// Get retrieves a value from AdditionalFields by key.
+// Returns nil if the key doesn't exist or AdditionalFields is nil.
+func (m *Meta) Get(key string) interface{} {
+	if m == nil || m.AdditionalFields == nil {
+		return nil
+	}
+	return m.AdditionalFields[key]
+}
+
+// Set sets a value in AdditionalFields.
+// Initializes AdditionalFields if it's nil.
+func (m *Meta) Set(key string, value interface{}) {
+	if m.AdditionalFields == nil {
+		m.AdditionalFields = make(map[string]interface{})
+	}
+	m.AdditionalFields[key] = value
+}
+
 // Request is the base request struct for all MCP requests.
 type Request struct {
 	Method string `json:"method"`
 	Params struct {
-		Meta *struct {
-			ProgressToken ProgressToken `json:"progressToken,omitempty"`
-		} `json:"_meta,omitempty"`
+		Meta *Meta `json:"_meta,omitempty"`
 	} `json:"params,omitempty"`
 }
 
@@ -46,10 +122,6 @@ type NotificationParams struct {
 	Meta             map[string]interface{} `json:"_meta,omitempty"`
 	AdditionalFields map[string]interface{} `json:"-"` // Additional fields that are not part of the MCP protocol.
 }
-
-// Meta represents the _meta field in MCP objects.
-// Using map[string]interface{} for flexibility as in mcp-go.
-type Meta map[string]interface{}
 
 // MarshalJSON implements custom JSON marshaling for NotificationParams.
 // It flattens the AdditionalFields into the main JSON object.
@@ -91,7 +163,7 @@ func (p *NotificationParams) UnmarshalJSON(data []byte) error {
 	if sData == "null" || sData == "{}" {
 		// If params is null or an empty object, initialize and return
 		p.AdditionalFields = make(map[string]interface{})
-		p.Meta = make(Meta) // Initialize Meta as well
+		p.Meta = make(map[string]interface{}) // Initialize Meta as well
 		return nil
 	}
 
@@ -103,18 +175,13 @@ func (p *NotificationParams) UnmarshalJSON(data []byte) error {
 	if p.AdditionalFields == nil {
 		p.AdditionalFields = make(map[string]interface{})
 	}
-	// Ensure Meta is initialized if it's going to be populated or checked
-	// p.Meta might be nil initially.
-	// if p.Meta == nil { // Not strictly needed here as we assign directly or check m["_meta"]
-	// 	p.Meta = make(Meta)
-	// }
 
 	for k, v := range m {
 		if k == "_meta" {
 			if metaMap, ok := v.(map[string]interface{}); ok {
 				// Initialize p.Meta only if it's nil and metaMap is not nil and not empty
 				if p.Meta == nil && metaMap != nil && len(metaMap) > 0 {
-					p.Meta = make(Meta)
+					p.Meta = make(map[string]interface{})
 				}
 				// Populate p.Meta. This handles case where p.Meta was nil or already existed.
 				if p.Meta != nil { // ensure p.Meta is not nil before assigning to it
@@ -123,8 +190,6 @@ func (p *NotificationParams) UnmarshalJSON(data []byte) error {
 					}
 				}
 			}
-			// else: you might want to handle cases where _meta is not a map[string]interface{}
-			// or log a warning, depending on strictness.
 		} else {
 			p.AdditionalFields[k] = v
 		}
