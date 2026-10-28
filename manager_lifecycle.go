@@ -13,12 +13,20 @@ import (
 	"trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
+// defaultServerInstructions is returned by initialize when WithInstructions is not set.
+// This is the only definition of that default text.
+const defaultServerInstructions = "MCP server is ready"
+
 // lifecycleManager is responsible for managing the MCP protocol lifecycle
 type lifecycleManager struct {
 	// Logger for this lifecycle manager.
 	logger Logger
 	// Server information
 	serverInfo Implementation
+
+	// instructions is included in initialize responses.
+	// Empty omits the JSON field.
+	instructions string
 
 	// Default protocol version
 	defaultProtocolVersion string
@@ -53,6 +61,7 @@ func newLifecycleManager(serverInfo Implementation) *lifecycleManager {
 	return &lifecycleManager{
 		logger:                 GetDefaultLogger(), // Use default logger if not set.
 		serverInfo:             serverInfo,
+		instructions:           defaultServerInstructions,
 		defaultProtocolVersion: ProtocolVersion_2025_03_26,
 		supportedVersions:      []string{ProtocolVersion_2024_11_05, ProtocolVersion_2025_03_26},
 		capabilities: map[string]interface{}{
@@ -109,6 +118,13 @@ func (m *lifecycleManager) withLogger(logger Logger) *lifecycleManager {
 // withStatelessMode sets the stateless mode flag for lifecycleManager.
 func (m *lifecycleManager) withStatelessMode(isStateless bool) *lifecycleManager {
 	m.isStateless = isStateless
+	return m
+}
+
+// withInstructions sets the instructions returned by initialize.
+// An empty string clears the default so the JSON field is omitted.
+func (m *lifecycleManager) withInstructions(instructions string) *lifecycleManager {
+	m.instructions = instructions
 	return m
 }
 
@@ -215,7 +231,7 @@ func (m *lifecycleManager) buildInitializeResponse(protocolVersion string) Initi
 			Version: m.serverInfo.Version,
 		},
 		Capabilities: convertToServerCapabilities(m.capabilities),
-		Instructions: "MCP server is ready",
+		Instructions: m.instructions,
 	}
 }
 

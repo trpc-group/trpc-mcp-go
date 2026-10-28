@@ -102,6 +102,7 @@ func TestHandleInitialize(t *testing.T) {
 
 				assert.Equal(t, serverInfo.Name, initResp.ServerInfo.Name)
 				assert.Equal(t, serverInfo.Version, initResp.ServerInfo.Version)
+				assert.Equal(t, "MCP server is ready", initResp.Instructions)
 				assert.NotNil(t, initResp.Capabilities)
 
 				// Verify protocol version stored in session

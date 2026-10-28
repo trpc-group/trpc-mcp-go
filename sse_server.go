@@ -317,6 +317,15 @@ func WithSSEServerLogger(logger Logger) SSEOption {
 	}
 }
 
+// WithSSEInstructions sets server-wide guidance returned in InitializeResult.instructions.
+// Omitting it keeps "MCP server is ready". An empty string omits the JSON field.
+// Whether a host adds the text to the model context is host-dependent.
+func WithSSEInstructions(instructions string) SSEOption {
+	return func(s *SSEServer) {
+		s.mcpHandler.lifecycleManager.withInstructions(instructions)
+	}
+}
+
 // WithSSEToolListFilter sets a tool list filter for the SSE server.
 func WithSSEToolListFilter(filter ToolListFilter) SSEOption {
 	return func(s *SSEServer) {

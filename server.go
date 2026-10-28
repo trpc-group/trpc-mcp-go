@@ -85,6 +85,10 @@ type serverConfig struct {
 
 	// Method name modifier for external customization.
 	methodNameModifier MethodNameModifier
+
+	// instructions is returned in initialize responses.
+	// Defaults to defaultServerInstructions. An explicit empty string omits the JSON field.
+	instructions string
 }
 
 // ServerNotificationHandler defines a function that handles notifications on the server side.
@@ -120,6 +124,7 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 		postSSEEnabled:         true,
 		getSSEEnabled:          true,
 		notificationBufferSize: defaultNotificationBufferSize,
+		instructions:           defaultServerInstructions,
 	}
 
 	// Create server with provided serverInfo
@@ -145,8 +150,8 @@ func NewServer(name, version string, options ...ServerOption) *Server {
 
 // initComponents initializes server components based on configuration.
 func (s *Server) initComponents() {
-	// Create lifecycle manager with logger if provided.
-	lifecycleManager := newLifecycleManager(s.serverInfo)
+	// Instructions are applied once here and returned for every transport on this server.
+	lifecycleManager := newLifecycleManager(s.serverInfo).withInstructions(s.config.instructions)
 	if s.logger != nil {
 		lifecycleManager = lifecycleManager.withLogger(s.logger)
 	}
@@ -243,6 +248,21 @@ type ServerOption func(*Server)
 func WithServerLogger(logger Logger) ServerOption {
 	return func(s *Server) {
 		s.logger = logger
+	}
+}
+
+// WithInstructions sets server-wide guidance returned in InitializeResult.instructions.
+// Omitting this option keeps "MCP server is ready". WithInstructions("") omits the JSON field.
+// Whether a host adds the text to the model context is host-dependent.
+//
+// Example:
+//
+//	server := mcp.NewServer("Knowledge-Server", "1.0.0",
+//	    mcp.WithInstructions("Data model: Team -> Space -> Entry."),
+//	)
+func WithInstructions(instructions string) ServerOption {
+	return func(s *Server) {
+		s.config.instructions = instructions
 	}
 }
 
