@@ -1432,7 +1432,7 @@ tool := mcp.NewTool("weather_api",
         Title:           "Weather Information",    // Human-readable title
         ReadOnlyHint:    mcp.BoolPtr(true),      // Safe, no side effects
         DestructiveHint: mcp.BoolPtr(false),     // Non-destructive operation
-        IdempotentHint:  mcp.BoolPtr(true),      // Same input → same output
+        IdempotentHint:  mcp.BoolPtr(true),      // Repeated calls have no additional effect
         OpenWorldHint:   mcp.BoolPtr(true),      // Interacts with external APIs
     }),
 )
