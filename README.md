@@ -463,6 +463,23 @@ server := mcp.NewServer(
 | `WithGetSSEEnabled` | Allow GET for SSE connections | `true` |
 | `WithNotificationBufferSize` | Size of notification buffer | `10` |
 | `WithStatelessMode` | Run in stateless mode | `false` |
+| `WithInstructions` | Initialize instructions for `NewServer` | `MCP server is ready` |
+
+### Server Instructions
+
+`WithInstructions`, `WithSSEInstructions`, and `WithStdioInstructions` set server-wide guidance returned in `InitializeResult.instructions` for `NewServer`, `NewSSEServer`, and `NewStdioServer`. When the option is omitted, initialize returns `MCP server is ready`. An empty string omits `instructions` from the JSON response. Whether a host puts that text in the model context is host-dependent.
+
+```go
+mcp.NewServer("Knowledge-Server", "1.0.0",
+    mcp.WithInstructions("Data model: Team -> Space -> Entry.\nURL rules: /teams/{team}."),
+)
+mcp.NewSSEServer("Knowledge-Server", "1.0.0",
+    mcp.WithSSEInstructions("Data model: Team -> Space -> Entry."),
+)
+mcp.NewStdioServer("Knowledge-Server", "1.0.0",
+    mcp.WithStdioInstructions("Data model: Team -> Space -> Entry."),
+)
+```
 
 ### Client Configuration
 

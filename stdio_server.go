@@ -53,8 +53,9 @@ type messageHandler interface {
 
 // stdioServerConfig contains configuration for the STDIO server.
 type stdioServerConfig struct {
-	logger      Logger
-	contextFunc StdioContextFunc
+	logger       Logger
+	contextFunc  StdioContextFunc
+	instructions string
 }
 
 // StdioServerOption defines an option function for configuring StdioServer.
@@ -74,14 +75,24 @@ func WithStdioContext(fn StdioContextFunc) StdioServerOption {
 	}
 }
 
+// WithStdioInstructions sets server-wide guidance returned in InitializeResult.instructions.
+// Omitting it keeps "MCP server is ready". An empty string omits the JSON field.
+// Whether a host adds the text to the model context is host-dependent.
+func WithStdioInstructions(instructions string) StdioServerOption {
+	return func(config *stdioServerConfig) {
+		config.instructions = instructions
+	}
+}
+
 // StdioContextFunc defines a function that can modify the context for stdio requests.
 type StdioContextFunc func(ctx context.Context) context.Context
 
 // NewStdioServer creates a new high-level STDIO server that reuses existing managers.
 func NewStdioServer(name, version string, options ...StdioServerOption) *StdioServer {
 	config := &stdioServerConfig{
-		logger:      GetDefaultLogger(),
-		contextFunc: nil,
+		logger:       GetDefaultLogger(),
+		contextFunc:  nil,
+		instructions: defaultServerInstructions,
 	}
 
 	for _, option := range options {
@@ -102,6 +113,7 @@ func NewStdioServer(name, version string, options ...StdioServerOption) *StdioSe
 	lifecycleManager.withResourceManager(resourceManager)
 	lifecycleManager.withPromptManager(promptManager)
 	lifecycleManager.withLogger(config.logger)
+	lifecycleManager.withInstructions(config.instructions)
 
 	server := &StdioServer{
 		serverInfo: Implementation{

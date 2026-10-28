@@ -157,8 +157,9 @@ type InitializeResult struct {
 	// Corresponds to schema: "capabilities": {"$ref": "#/definitions/ServerCapabilities"}
 	Capabilities ServerCapabilities `json:"capabilities"`
 
-	// Instructions describe how to use the server and its features
-	// Instructions describing how to use the server and its features.
+	// Instructions is optional server-wide guidance describing how to use the server
+	// and its features. An empty value is omitted from JSON. Whether a host adds it
+	// to the model context is host-dependent.
 	Instructions string `json:"instructions,omitempty"`
 }
 
