@@ -35,6 +35,8 @@ func NewMockTool(name, description string, toolSchema map[string]interface{}) *T
 							opts = append(opts, WithString(paramName))
 						case "number":
 							opts = append(opts, WithNumber(paramName))
+						case "integer":
+							opts = append(opts, WithInteger(paramName))
 						case "boolean":
 							opts = append(opts, WithBoolean(paramName))
 						}
@@ -469,6 +471,59 @@ func TestToolManager_HandleCallTool(t *testing.T) {
 	errorResp, ok := result.(*JSONRPCError)
 	assert.True(t, ok, "Expected *JSONRPCError but got %T", result)
 	assert.Equal(t, ErrCodeMethodNotFound, errorResp.Error.Code)
+}
+
+func TestToolManager_HandleCallTool_NormalizesIntegerArguments(t *testing.T) {
+	manager := newToolManager()
+
+	tool := NewTool(
+		"pagination-tool",
+		WithInteger("page"),
+		WithNumber("score"),
+		WithObject("pager", Properties(openapi3.Schemas{
+			"page_size": openapi3.NewSchemaRef("", openapi3.NewIntegerSchema()),
+		})),
+		WithArray("ids", Items(openapi3.NewIntegerSchema())),
+	)
+
+	var captured map[string]interface{}
+	manager.registerTool(tool, func(ctx context.Context, req *CallToolRequest) (*CallToolResult, error) {
+		captured = req.Params.Arguments
+		return NewTextResult("ok"), nil
+	})
+
+	req := newJSONRPCRequest("call-integer", MethodToolsCall, map[string]interface{}{
+		"name": "pagination-tool",
+		"arguments": map[string]interface{}{
+			"page":    float64(2),
+			"score":   float64(1.5),
+			"pager":   map[string]interface{}{"page_size": float64(20)},
+			"ids":     []interface{}{float64(1), float64(2)},
+			"unknown": float64(3),
+		},
+	})
+
+	result, err := manager.handleCallTool(context.Background(), req, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, captured)
+
+	assert.Equal(t, 2, captured["page"])
+	assert.IsType(t, 0, captured["page"])
+	assert.Equal(t, float64(1.5), captured["score"])
+
+	pager, ok := captured["pager"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, 20, pager["page_size"])
+	assert.IsType(t, 0, pager["page_size"])
+
+	ids, ok := captured["ids"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, ids, 2)
+	assert.Equal(t, 1, ids[0])
+	assert.Equal(t, 2, ids[1])
+
+	assert.Equal(t, float64(3), captured["unknown"])
 }
 
 func TestToolManager_HandleCallTool_HandlerErrorBecomesErrorResult(t *testing.T) {
