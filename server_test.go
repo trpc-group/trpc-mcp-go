@@ -360,7 +360,7 @@ func TestServer_UnregisterTools(t *testing.T) {
 }
 
 func TestServerInstructions(t *testing.T) {
-	custom := "数据模型：Team -> Space -> Entry。\nURL：\"/teams/{team}\""
+	custom := "Data model: Team -> Space -> Entry.\nURL: \"/teams/{team}\""
 
 	testCases := []struct {
 		name     string
@@ -432,7 +432,7 @@ func TestServerInstructions(t *testing.T) {
 }
 
 func TestServerInstructionsHTTP(t *testing.T) {
-	custom := "数据模型：Team -> Space -> Entry。\nURL：\"/teams/{team}\""
+	custom := "Data model: Team -> Space -> Entry.\nURL: \"/teams/{team}\""
 	testCases := []struct {
 		name    string
 		options []ServerOption
@@ -477,7 +477,7 @@ func TestServerInstructionsHTTP(t *testing.T) {
 }
 
 func TestSSEAndStdioInstructions(t *testing.T) {
-	custom := "数据模型：Team -> Space -> Entry。\nURL：\"/teams/{team}\""
+	custom := "Data model: Team -> Space -> Entry.\nURL: \"/teams/{team}\""
 
 	t.Run("sse", func(t *testing.T) {
 		cases := []struct {
