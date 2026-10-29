@@ -53,7 +53,7 @@ trpc-mcp-go supports three transport mechanisms for different deployment scenari
 
 ## Experimental Tasks client
 
-See [Tasks client scope, usage and validation](TASKS.md) for the opt-in SEP-2663 compatibility prototype.
+See [Tasks client scope, usage and validation](TASKS.md) for the opt-in SEP-2663 client and explicit stateless HTTP discovery.
 
 ## Installation
 

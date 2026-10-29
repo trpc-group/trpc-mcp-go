@@ -236,6 +236,14 @@ func (t *streamableHTTPClientTransport) send(
 	req *JSONRPCRequest,
 	options *streamOptions,
 ) (*json.RawMessage, error) {
+	modern := t.client != nil && t.client.usesStatelessProtocol()
+	if modern {
+		var err error
+		req, err = t.client.statelessRequest(req)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Serialize request to JSON
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
@@ -286,17 +294,26 @@ func (t *streamableHTTPClientTransport) send(
 		}
 	}
 
+	if modern {
+		statelessHeaders(httpReq.Header, req)
+		if err := t.client.applyToolHeaders(httpReq.Header, req); err != nil {
+			return nil, err
+		}
+	}
+
 	// Send request using the handler
 	httpResp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
 	}
 
-	// Handle session ID
-	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); sessionID != "" {
+	defer httpResp.Body.Close()
+
+	// Handle session ID only for legacy requests.
+	if sessionID := httpResp.Header.Get(httputil.SessionIDHeader); !modern && sessionID != "" {
 		t.setSessionID(sessionID)
 		t.isStateless = false
-	} else if req.Method == MethodInitialize && !t.isStateless {
+	} else if !modern && req.Method == MethodInitialize && !t.isStateless {
 		// If this is an initialize request and no session ID was received, auto-detect as stateless mode
 		t.isStateless = true
 		t.enableGetSSE = false // Disable GET SSE in stateless mode
@@ -304,13 +321,32 @@ func (t *streamableHTTPClientTransport) send(
 
 	// Check content type
 	contentType := httpResp.Header.Get(httputil.ContentTypeHeader)
-	if strings.Contains(contentType, httputil.ContentTypeSSE) {
+	if strings.Contains(contentType, httputil.ContentTypeSSE) && (!modern || httpResp.StatusCode == http.StatusOK) {
 		// Handle response as SSE
-		return t.handleSSEResponse(ctx, httpResp, req.ID, options)
+		raw, err := t.handleSSEResponse(ctx, httpResp, req.ID, options)
+		if modern && err == nil {
+			return validateStatelessResult(raw, req.Method, t.client.tasksEnabled)
+		}
+		return raw, err
+	}
+
+	// Modern servers carry protocol errors in non-2xx JSON responses too.
+	if modern {
+		body, err := io.ReadAll(httpResp.Body)
+		if err != nil {
+			return nil, err
+		}
+		raw, parseErr := statelessResponse(body, req.ID)
+		if parseErr != nil {
+			return nil, fmt.Errorf("stateless HTTP status %d: %w", httpResp.StatusCode, parseErr)
+		}
+		if httpResp.StatusCode != http.StatusOK && !isErrorResponse(raw) {
+			return nil, fmt.Errorf("unexpected stateless HTTP status %d", httpResp.StatusCode)
+		}
+		return validateStatelessResult(raw, req.Method, t.client.tasksEnabled)
 	}
 
 	// If not SSE, handle as JSON
-	defer httpResp.Body.Close()
 
 	// Check status code
 	if httpResp.StatusCode != http.StatusOK {
@@ -360,6 +396,17 @@ func (t *streamableHTTPClientTransport) processEventData(
 ) (*json.RawMessage, error) {
 	// Create a raw message from the data
 	rawMessage := json.RawMessage(data)
+
+	if t.client != nil && t.client.usesStatelessProtocol() {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(rawMessage, &envelope); err != nil {
+			return nil, err
+		}
+		if _, hasID := envelope["id"]; hasID {
+			return statelessResponse([]byte(data), reqID)
+		}
+		return t.handleNotificationMessage(rawMessage, handlers)
+	}
 
 	// First, check if it's a response to our request by looking at the ID
 	var jsonResp map[string]interface{}
@@ -429,6 +476,8 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 	reader := bufio.NewReader(httpResp.Body)
 	var rawResult *json.RawMessage
 	var resultReceived bool
+	var eventData []string
+	modern := t.client != nil && t.client.usesStatelessProtocol()
 
 	// Merge notification handlers
 	handlers := make(map[string]NotificationHandler)
@@ -464,6 +513,23 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 				return nil, fmt.Errorf("failed to read SSE event: %w", err)
 			}
 
+			if modern {
+				// SSE data fields form one JSON message at the blank-line
+				// boundary; parsing each field separately breaks multiline JSON.
+				line = strings.TrimRight(line, "\r\n")
+				if strings.HasPrefix(line, "data:") {
+					value := strings.TrimPrefix(line, "data:")
+					eventData = append(eventData, strings.TrimPrefix(value, " "))
+				} else if line == "" && len(eventData) > 0 {
+					result, err := t.processEventData(strings.Join(eventData, "\n"), reqID, handlers)
+					eventData = nil
+					if err != nil || result != nil {
+						return result, err
+					}
+				}
+				// Stateless streams have no resumable event IDs.
+				continue
+			}
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue // Empty line is event delimiter
@@ -512,6 +578,9 @@ func (t *streamableHTTPClientTransport) unregisterNotificationHandler(method str
 
 // sendNotification sends a notification (no response expected)
 func (t *streamableHTTPClientTransport) sendNotification(ctx context.Context, notification *JSONRPCNotification) error {
+	if t.client != nil && t.client.usesStatelessProtocol() {
+		return fmt.Errorf("client notifications are not supported on stateless HTTP")
+	}
 	// Serialize notification to JSON
 	notifBytes, err := json.Marshal(notification)
 	if err != nil {
@@ -975,7 +1044,7 @@ func (t *streamableHTTPClientTransport) terminateSession(ctx context.Context) er
 // If it returns true, the client is currently running in stateless mode and will not include
 // a session ID in requests or attempt to establish GET SSE connections.
 func (t *streamableHTTPClientTransport) isStatelessMode() bool {
-	return t.isStateless
+	return t.isStateless || (t.client != nil && t.client.usesStatelessProtocol())
 }
 
 // sendRequestWithStream sends a request with streaming options

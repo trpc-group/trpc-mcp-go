@@ -20,8 +20,8 @@ type taskRequestKey struct{}
 
 // WithTasks enables experimental SEP-2663 task polling for CallTool. It preserves
 // the Connector interface and is disabled by default. The endpoint must support
-// both the SDK's existing initialization protocol and the Tasks extension; this
-// option does not implement the 2026-07-28 stateless protocol. Calls should have a
+// the selected protocol and the Tasks extension. For stateless Streamable HTTP,
+// also select WithProtocolVersion(ProtocolVersion_2026_07_28). Calls should have a
 // context deadline. Cancellation stops waiting, not remote execution.
 func WithTasks(enabled bool) ClientOption {
 	return func(c *Client) { c.tasksEnabled = enabled }

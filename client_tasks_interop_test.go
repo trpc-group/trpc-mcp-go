@@ -10,6 +10,8 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -27,9 +29,14 @@ func TestTasksMCPKitInterop(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	modern := os.Getenv("MCP_TASKS_INTEROP_PROTOCOL") == mcp.ProtocolVersion_2026_07_28
 	connect := func() *mcp.Client {
+		options := []mcp.ClientOption{mcp.WithTasks(true), mcp.WithSendEmptyToolArguments(true), mcp.WithClientGetSSEEnabled(false)}
+		if modern {
+			options = append(options, mcp.WithProtocolVersion(mcp.ProtocolVersion_2026_07_28))
+		}
 		client, err := mcp.NewClient(endpoint, mcp.Implementation{Name: "trpc-interop", Version: "1"},
-			mcp.WithTasks(true), mcp.WithSendEmptyToolArguments(true), mcp.WithClientGetSSEEnabled(false))
+			options...)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = client.Close() })
 		_, err = client.Initialize(ctx, nil)
@@ -59,6 +66,26 @@ func TestTasksMCPKitInterop(t *testing.T) {
 	require.NotEmpty(t, taskErr.TaskID())
 	require.ErrorAs(t, err, &rpcErr)
 
+	// The example simulates deletion; explicitly decline the synthetic request.
+	_, err = call(ctx, "confirm_delete", map[string]interface{}{"filename": "interop-example.txt"})
+	require.ErrorAs(t, err, &taskErr)
+	require.Equal(t, "input_required", taskErr.Status)
+	require.NotEmpty(t, taskErr.InputRequests)
+	responses := make(map[string]interface{})
+	for id, raw := range taskErr.InputRequests {
+		var request struct {
+			Method string `json:"method"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &request))
+		require.Equal(t, "elicitation/create", request.Method)
+		responses[id] = map[string]interface{}{"result": map[string]interface{}{"action": "decline"}}
+	}
+	inputTaskID := taskErr.TaskID()
+	require.NoError(t, client.UpdateTask(ctx, inputTaskID, responses))
+	result, err = client.ResumeToolTask(ctx, inputTaskID)
+	require.NoError(t, err)
+	require.Contains(t, fmt.Sprint(result.Content), "kept")
+
 	waitCtx, stop := context.WithTimeout(ctx, 150*time.Millisecond)
 	_, err = call(waitCtx, "slow_compute", map[string]interface{}{"seconds": 3})
 	stop()
@@ -69,8 +96,12 @@ func TestTasksMCPKitInterop(t *testing.T) {
 	// This legacy server binds tasks to the session. A new session cannot resume
 	// them, even on the same endpoint; failed recovery must not recreate work.
 	_, err = connect().ResumeToolTask(ctx, id)
-	require.ErrorAs(t, err, &rpcErr)
-	require.Equal(t, -32602, rpcErr.Code)
+	if modern {
+		require.NoError(t, err)
+	} else {
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -32602, rpcErr.Code)
+	}
 	result, err = client.ResumeToolTask(ctx, id)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Content)
