@@ -527,7 +527,7 @@ func (t *sseClientTransport) setRetryConfig(config *retry.Config) {
 // sendRequest sends a request and waits for a response with retry support.
 func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	// If no retry config, use original implementation
-	if t.retryConfig == nil {
+	if t.retryConfig == nil || ctx.Value(taskRequestKey{}) == true {
 		return t.sendRequestInternal(ctx, req)
 	}
 

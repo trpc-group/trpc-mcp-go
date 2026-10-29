@@ -139,6 +139,7 @@ type Client struct {
 
 	// Whether to include "arguments": {} for tool calls with no arguments.
 	sendEmptyToolArguments bool
+	tasksEnabled           bool
 }
 
 // ClientOption client option function
@@ -484,6 +485,10 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 	// Check if initialized.
 	if !c.initialized {
 		return nil, errors.ErrNotInitialized
+	}
+
+	if c.tasksEnabled {
+		return c.callToolTask(ctx, callToolReq)
 	}
 
 	// Create request

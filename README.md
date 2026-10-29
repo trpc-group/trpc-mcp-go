@@ -51,6 +51,10 @@ trpc-mcp-go supports three transport mechanisms for different deployment scenari
 **STDIO Transport** uses process-based communication (no HTTP sessions).
 
 
+## Experimental Tasks client
+
+See [Tasks client scope, usage and validation](TASKS.md) for the opt-in SEP-2663 compatibility prototype.
+
 ## Installation
 
 ```bash

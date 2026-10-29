@@ -208,7 +208,7 @@ func (t *streamableHTTPClientTransport) sendRequest(
 	req *JSONRPCRequest,
 ) (*json.RawMessage, error) {
 	// If no retry config, use original implementation
-	if t.retryConfig == nil {
+	if t.retryConfig == nil || ctx.Value(taskRequestKey{}) == true {
 		return t.send(ctx, req, nil)
 	}
 
@@ -276,6 +276,13 @@ func (t *streamableHTTPClientTransport) send(
 	if t.client != nil {
 		if err := t.client.applyHTTPBeforeRequest(ctx, httpReq); err != nil {
 			return nil, fmt.Errorf("HTTP before-request failed: %w", err)
+		}
+	}
+
+	if params, ok := req.Params.(map[string]interface{}); ok {
+		if id, ok := params["taskId"].(string); ok && (req.Method == "tasks/get" || req.Method == "tasks/update" || req.Method == "tasks/cancel") {
+			httpReq.Header.Set("Mcp-Name", id)
+			httpReq.Header.Set("Mcp-Method", req.Method)
 		}
 	}
 
