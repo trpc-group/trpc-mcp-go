@@ -21,7 +21,10 @@ import (
 func readStdioProcEntries() []stdioProcEntry {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,ppid=,pgid=").Output()
+	cmd := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,ppid=,pgid=")
+	// Bound pipe draining if a ps wrapper leaves a descendant holding its output.
+	cmd.WaitDelay = 100 * time.Millisecond
+	output, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
