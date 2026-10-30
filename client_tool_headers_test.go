@@ -29,6 +29,8 @@ func TestStatelessHeaderSchemas(t *testing.T) {
 		{"items", `{"properties":{"a":{"type":"array","items":{"properties":{"b":{"type":"string","x-mcp-header":"X"}}}}}}`, false, 0},
 		{"composition", `{"oneOf":[{"properties":{"b":{"type":"string","x-mcp-header":"X"}}}]}`, false, 0},
 		{"ref", `{"properties":{"x":{"$ref":"#/defs/x","type":"string","x-mcp-header":"X"}}}`, false, 0},
+		{"dependency-schema", `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","dependencies":{"a":{"properties":{"b":{"type":"string","x-mcp-header":"B"}}}}}`, false, 0},
+		{"dependency-properties", `{"dependencies":{"a":["b"]},"properties":{"b":{"type":"string","x-mcp-header":"B"}}}`, true, 1},
 		{"example-data", `{"examples":[{"x-mcp-header":"user data"}]}`, true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,13 +81,12 @@ func TestStatelessHeaderValues(t *testing.T) {
 }
 
 func TestStatelessInvalidToolDefinitionIsExcluded(t *testing.T) {
-	c := &Client{}
 	result := &ListToolsResult{Tools: []Tool{
 		{Name: "valid", RawInputSchema: json.RawMessage(`{"type":"object"}`)},
 		{Name: "invalid", RawInputSchema: json.RawMessage(`{"properties":{"x":{"type":"object","x-mcp-header":"X"}}}`)},
+		{Name: "invalid-dependency", RawInputSchema: json.RawMessage(`{"dependencies":{"a":{"properties":{"b":{"type":"string","x-mcp-header":"B"}}}}}`)},
 	}}
-	c.rememberToolHeaders(result)
+	filterToolHeaders(result)
 	require.Len(t, result.Tools, 1)
 	require.Equal(t, "valid", result.Tools[0].Name)
-	require.NotContains(t, c.toolHeaders, "invalid")
 }

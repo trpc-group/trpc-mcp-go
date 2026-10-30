@@ -296,9 +296,15 @@ func (t *streamableHTTPClientTransport) send(
 
 	if modern {
 		statelessHeaders(httpReq.Header, req)
-		if err := t.client.applyToolHeaders(httpReq.Header, req); err != nil {
+		if err := t.client.applyToolHeaders(httpReq.Context(), httpReq.Header, req); err != nil {
 			return nil, err
 		}
+	}
+
+	if ctx.Value(taskRequestKey{}) == true {
+		// A replayable body also enables net/http redirects and transparent
+		// retries, independently of this transport's retry configuration.
+		httpReq.GetBody = nil
 	}
 
 	// Send request using the handler
@@ -478,6 +484,7 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 	var resultReceived bool
 	var eventData []string
 	modern := t.client != nil && t.client.usesStatelessProtocol()
+	firstLine, skipLF := true, false
 
 	// Merge notification handlers
 	handlers := make(map[string]NotificationHandler)
@@ -502,7 +509,17 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 			return rawResult, ctx.Err()
 		default:
 			// Read SSE event
-			line, err := reader.ReadString('\n')
+			var line string
+			var err error
+			if modern {
+				line, err = readStatelessSSELine(reader, &skipLF)
+				if firstLine {
+					line = strings.TrimPrefix(line, "\ufeff")
+					firstLine = false
+				}
+			} else {
+				line, err = reader.ReadString('\n')
+			}
 			if err != nil {
 				if err == io.EOF {
 					if resultReceived {
@@ -516,7 +533,6 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 			if modern {
 				// SSE data fields form one JSON message at the blank-line
 				// boundary; parsing each field separately breaks multiline JSON.
-				line = strings.TrimRight(line, "\r\n")
 				if strings.HasPrefix(line, "data:") {
 					value := strings.TrimPrefix(line, "data:")
 					eventData = append(eventData, strings.TrimPrefix(value, " "))
@@ -556,6 +572,33 @@ func (t *streamableHTTPClientTransport) handleSSEResponse(
 					}
 				}
 			}
+		}
+	}
+}
+
+// readStatelessSSELine recognizes LF, CRLF and CR without waiting for another
+// byte after CR. A following LF is consumed on the next call, even across reads.
+func readStatelessSSELine(reader *bufio.Reader, skipLF *bool) (string, error) {
+	var line strings.Builder
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return line.String(), err
+		}
+		if *skipLF {
+			*skipLF = false
+			if b == '\n' {
+				continue
+			}
+		}
+		switch b {
+		case '\r':
+			*skipLF = true
+			return line.String(), nil
+		case '\n':
+			return line.String(), nil
+		default:
+			line.WriteByte(b)
 		}
 	}
 }

@@ -140,8 +140,6 @@ type Client struct {
 	// Whether to include "arguments": {} for tool calls with no arguments.
 	sendEmptyToolArguments bool
 	tasksEnabled           bool
-	toolHeadersMu          sync.RWMutex
-	toolHeaders            map[string][]toolHeaderField
 }
 
 // ClientOption client option function
@@ -491,13 +489,14 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 	// Parse response using specialized parser
 	result, err := parseListToolsResultFromJSON(rawResp)
 	if err == nil && c.usesStatelessProtocol() {
-		c.rememberToolHeaders(result)
+		filterToolHeaders(result)
 	}
 	return result, err
 }
 
-// CallTool calls a tool. In stateless mode it discovers an unknown tool schema
-// before submission to derive parameter headers. WithTasks enables task polling.
+// CallTool calls a tool. In stateless mode it discovers the tool schema in the
+// current authorization context before submission to derive parameter headers.
+// WithTasks enables task polling.
 func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*CallToolResult, error) {
 	// Check if initialized.
 	if !c.initialized {
@@ -508,9 +507,13 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 		if callToolReq == nil {
 			return nil, fmt.Errorf("nil tool request")
 		}
-		if err := c.ensureToolHeaders(ctx, callToolReq.Params.Name); err != nil {
+		fields, err := c.toolHeadersForCall(ctx, callToolReq.Params.Name)
+		if err != nil {
 			return nil, err
 		}
+		ctx = context.WithValue(ctx, toolHeaderContextKey{}, toolCallHeaders{
+			name: callToolReq.Params.Name, fields: fields,
+		})
 	}
 	if c.tasksEnabled {
 		return c.callToolTask(ctx, callToolReq)

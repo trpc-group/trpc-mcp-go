@@ -30,12 +30,16 @@ this mode. Protocol rejection never silently falls back to legacy initialization
 Omit the version option only for an explicitly compatible legacy server.
 
 Each stateless request carries protocol/client metadata and routing headers.
-Tool schemas are cached when listed; `CallTool` lists an unknown tool before
-submission to obtain its `x-mcp-header` annotations. Invalid annotations exclude
-the definition, and invalid argument/header values fail before tool submission.
-Call `ListTools` again to refresh definitions when the server changes them.
+Each stateless `CallTool` lists tools in the current authorization context before
+submission to obtain its `x-mcp-header` annotations, following pagination when
+necessary. The definition belongs only to that invocation; it is not shared
+across calls or identities. This adds discovery requests to each tool call but
+avoids reusing private or stale schemas. Invalid annotations exclude the
+definition, and invalid argument/header values fail before tool submission.
 The HTTP request hook can still supply authorization; protocol/header values are
 computed after that hook to keep them consistent with the request parameters.
+The authorization identity must remain stable for the duration of an invocation,
+including its schema discovery and task continuation requests.
 
 `Connector.CallTool` keeps its signature. Tasks are disabled by default. When
 enabled, a tool request advertises the extension in per-request metadata. An
@@ -45,6 +49,10 @@ Polling honors the server interval, uses a one-second fallback, clamps zero to
 result retains content, structured content, metadata and `isError`.
 
 Transport retries are suppressed for the initial tool call and task mutations.
+Their HTTP bodies are also made non-replayable after request hooks, preventing
+the default Go HTTP client's 307/308 redirects and body replay on a reused
+connection. Custom `HTTPReqHandler` implementations must honor a nil `GetBody`
+and must not reconstruct/retry those requests themselves.
 If submission fails without a handle, the SDK returns a `TaskError` with an empty
 `TaskID()`: **do not replay the original call**. The remote operation may already
 have executed. This is an unknown outcome, not exactly-once delivery.
@@ -80,6 +88,9 @@ input-required, failed/cancelled/malformed tasks, deadline and explicit actions.
 Stateless tests also cover discovery errors, version rejection, envelope IDs,
 parameter-header schemas and integer precision, pagination, metadata concurrency,
 non-2xx RPC errors, and closing an SSE response after the final result.
+Regressions also exercise HTTP redirects and transparent retries, request-scoped
+schemas across concurrent identities, draft-07 conditional definitions, and SSE
+CR/BOM framing with chunked delivery.
 The companion Agent branch tests legacy session expiry and stateless connection
 loss, asserting two initialization/discovery requests, two polls and one tool
 invocation.

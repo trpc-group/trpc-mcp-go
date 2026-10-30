@@ -23,6 +23,15 @@ type toolHeaderField struct {
 	kind string
 }
 
+type toolHeaderContextKey struct{}
+
+// toolCallHeaders belongs to one CallTool invocation. Definitions from a private
+// tools/list response must not be shared across authorization contexts.
+type toolCallHeaders struct {
+	name   string
+	fields []toolHeaderField
+}
+
 // toolHeaderFields validates annotations along statically reachable property
 // paths. Annotations under refs, arrays or schema alternatives are rejected.
 func toolHeaderFields(raw json.RawMessage) ([]toolHeaderField, error) {
@@ -56,7 +65,7 @@ func toolHeaderFields(raw json.RawMessage) ([]toolHeaderField, error) {
 		}
 		for key, child := range node {
 			switch key {
-			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
+			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies":
 				children, _ := child.(map[string]interface{})
 				for name, next := range children {
 					nextPath := append(append([]string(nil), path...), name)
@@ -95,59 +104,47 @@ func validHeaderToken(s string) bool {
 	return true
 }
 
-func (c *Client) rememberToolHeaders(result *ListToolsResult) {
-	c.toolHeadersMu.Lock()
-	defer c.toolHeadersMu.Unlock()
-	if c.toolHeaders == nil {
-		c.toolHeaders = make(map[string][]toolHeaderField)
-	}
+func filterToolHeaders(result *ListToolsResult) {
 	valid := result.Tools[:0]
 	for _, tool := range result.Tools {
-		fields, err := toolHeaderFields(tool.RawInputSchema)
+		_, err := toolHeaderFields(tool.RawInputSchema)
 		if err != nil {
-			delete(c.toolHeaders, tool.Name)
 			GetDefaultLogger().Warnf("Ignoring tool %q: %v", tool.Name, err)
 			continue
 		}
-		c.toolHeaders[tool.Name] = fields
 		valid = append(valid, tool)
 	}
 	result.Tools = valid
 }
 
-// ensureToolHeaders discovers schemas before submission when the caller has not
-// listed the tool. Header errors are never fixed by replaying tools/call.
-func (c *Client) ensureToolHeaders(ctx context.Context, name string) error {
-	c.toolHeadersMu.RLock()
-	_, known := c.toolHeaders[name]
-	c.toolHeadersMu.RUnlock()
-	if known {
-		return nil
-	}
+// toolHeadersForCall discovers a definition for this invocation only. Reusing a
+// definition across calls could leak private schemas or miss changed headers.
+// Header errors are never fixed by replaying tools/call.
+func (c *Client) toolHeadersForCall(ctx context.Context, name string) ([]toolHeaderField, error) {
 	request := &ListToolsRequest{}
 	seen := make(map[Cursor]bool)
 	for {
 		result, err := c.ListTools(ctx, request)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, tool := range result.Tools {
 			if tool.Name == name {
-				return nil
+				return toolHeaderFields(tool.RawInputSchema)
 			}
 		}
 		if result.NextCursor == "" {
-			return fmt.Errorf("tool %q has no usable definition", name)
+			return nil, fmt.Errorf("tool %q has no usable definition", name)
 		}
 		if seen[result.NextCursor] {
-			return fmt.Errorf("repeated tool-list cursor")
+			return nil, fmt.Errorf("repeated tool-list cursor")
 		}
 		seen[result.NextCursor] = true
 		request.Params.Cursor = result.NextCursor
 	}
 }
 
-func (c *Client) applyToolHeaders(header http.Header, req *JSONRPCRequest) error {
+func (c *Client) applyToolHeaders(ctx context.Context, header http.Header, req *JSONRPCRequest) error {
 	if req.Method != MethodToolsCall {
 		return nil
 	}
@@ -158,10 +155,11 @@ func (c *Client) applyToolHeaders(header http.Header, req *JSONRPCRequest) error
 	}
 	params, _ := req.Params.(map[string]interface{})
 	name, _ := params["name"].(string)
-	c.toolHeadersMu.RLock()
-	fields := c.toolHeaders[name]
-	c.toolHeadersMu.RUnlock()
-	for _, field := range fields {
+	definition, ok := ctx.Value(toolHeaderContextKey{}).(toolCallHeaders)
+	if !ok || definition.name != name {
+		return fmt.Errorf("tool %q has no request-scoped header definition", name)
+	}
+	for _, field := range definition.fields {
 		value := params["arguments"]
 		for _, key := range field.path {
 			obj, _ := value.(map[string]interface{})
