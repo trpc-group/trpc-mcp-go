@@ -67,6 +67,12 @@ func startStdioProcessTree(
 	require.NoError(t, transport.startProcess())
 
 	var childPID int
+	t.Cleanup(func() {
+		_ = transport.close()
+		if t.Failed() && childPID > 0 {
+			_ = syscall.Kill(childPID, syscall.SIGKILL)
+		}
+	})
 	require.Eventually(t, func() bool {
 		raw, readErr := os.ReadFile(pidFile)
 		if readErr != nil {

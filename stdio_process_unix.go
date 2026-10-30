@@ -42,15 +42,18 @@ func stdioDescendantProcessGroupIDs(cmd *exec.Cmd) []int {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	entries := readStdioProcEntries()
+	return stdioDescendantGroupIDs(cmd.Process.Pid, readStdioProcEntries())
+}
+
+func stdioDescendantGroupIDs(rootPID int, entries []stdioProcEntry) []int {
 	children := make(map[int][]stdioProcEntry)
 	for _, entry := range entries {
 		children[entry.ppid] = append(children[entry.ppid], entry)
 	}
 
-	seenPID := map[int]bool{cmd.Process.Pid: true}
+	seenPID := map[int]bool{rootPID: true}
 	seenPGID := make(map[int]bool)
-	queue := []int{cmd.Process.Pid}
+	queue := []int{rootPID}
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
@@ -60,7 +63,8 @@ func stdioDescendantProcessGroupIDs(cmd *exec.Cmd) []int {
 			}
 			seenPID[child.pid] = true
 			queue = append(queue, child.pid)
-			if child.pgid > 0 {
+			// The root group is terminated separately by close.
+			if child.pgid > 0 && child.pgid != rootPID {
 				seenPGID[child.pgid] = true
 			}
 		}
@@ -122,31 +126,6 @@ func killProcessGroup(pgid int, sig syscall.Signal) error {
 		return nil
 	}
 	return err
-}
-
-func readStdioProcEntries() []stdioProcEntry {
-	files, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil
-	}
-	entries := make([]stdioProcEntry, 0, len(files))
-	for _, file := range files {
-		if !file.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(file.Name())
-		if err != nil {
-			continue
-		}
-		data, err := os.ReadFile("/proc/" + file.Name() + "/stat")
-		if err != nil {
-			continue
-		}
-		if entry, ok := parseStdioProcStat(pid, string(data)); ok {
-			entries = append(entries, entry)
-		}
-	}
-	return entries
 }
 
 func parseStdioProcStat(pid int, stat string) (stdioProcEntry, bool) {
