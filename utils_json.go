@@ -50,6 +50,15 @@ func parseListResourcesResultFromJSON(rawMessage *json.RawMessage) (*ListResourc
 	return &result, nil
 }
 
+// parseCompleteCompletionResultFromJSON parses a raw JSON message into a CompleteCompletionResult
+func parseCompleteCompletionResultFromJSON(rawMessage *json.RawMessage) (*CompleteCompletionResult, error) {
+	var result CompleteCompletionResult
+	if err := json.Unmarshal(*rawMessage, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal GetPromptResult: %v", err)
+	}
+	return &result, nil
+}
+
 // parseReadResourceResultFromJSON parses a raw JSON message into a ReadResourceResult
 func parseReadResourceResultFromJSON(rawMessage *json.RawMessage) (*ReadResourceResult, error) {
 	// Parse JSON object using internal utility function.
