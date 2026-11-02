@@ -79,6 +79,7 @@ func (c *Client) discover(ctx context.Context, initReq *InitializeRequest) (*Ini
 	}
 	c.initialized = true
 	c.setState(StateInitialized)
+	c.openTaskCalls()
 	return &InitializeResult{Result: result.Result, ProtocolVersion: c.protocolVersion,
 		ServerInfo: info, Capabilities: result.Capabilities, Instructions: result.Instructions}, nil
 }
@@ -159,10 +160,15 @@ func encodeMCPHeader(value string) string {
 	return value
 }
 
-// statelessResponse validates the envelope before unwrapping it, including on
-// non-2xx HTTP responses. A protocol rejection must not trigger legacy fallback
-// or lose its JSON-RPC code/data. Task failures are inside successful results.
+// statelessResponse validates a response whose ID must match the request,
+// including responses received over SSE.
 func statelessResponse(data []byte, id interface{}) (*json.RawMessage, error) {
+	return statelessHTTPResponse(data, id, http.StatusOK)
+}
+
+// statelessHTTPResponse preserves valid JSON-RPC errors with an unknown ID only
+// on non-2xx HTTP rejections, such as an Origin rejection before body processing.
+func statelessHTTPResponse(data []byte, id interface{}, status int) (*json.RawMessage, error) {
 	var envelope struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
@@ -176,15 +182,30 @@ func statelessResponse(data []byte, id interface{}) (*json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if envelope.JSONRPC != "2.0" || !bytes.Equal(envelope.ID, wantID) {
+	if envelope.JSONRPC != "2.0" {
 		return nil, errors.New("invalid stateless response version or request id")
 	}
-	if len(envelope.Error) != 0 && string(envelope.Error) != "null" {
+	if len(envelope.Error) != 0 {
 		if len(envelope.Result) != 0 {
 			return nil, errors.New("response contains both result and error")
 		}
+		var rpcError struct {
+			Code    *int64  `json:"code"`
+			Message *string `json:"message"`
+		}
+		if err := json.Unmarshal(envelope.Error, &rpcError); err != nil || rpcError.Code == nil || rpcError.Message == nil {
+			return nil, errors.New("invalid stateless JSON-RPC error")
+		}
+		missingErrorID := (len(envelope.ID) == 0 || bytes.Equal(bytes.TrimSpace(envelope.ID), []byte("null"))) &&
+			(status < http.StatusOK || status >= http.StatusMultipleChoices)
+		if !bytes.Equal(envelope.ID, wantID) && !missingErrorID {
+			return nil, errors.New("invalid stateless response version or request id")
+		}
 		raw := json.RawMessage(data)
 		return &raw, nil
+	}
+	if !bytes.Equal(envelope.ID, wantID) {
+		return nil, errors.New("invalid stateless response version or request id")
 	}
 	var result struct {
 		ResultType string `json:"resultType"`

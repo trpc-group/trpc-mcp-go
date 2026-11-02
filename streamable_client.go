@@ -289,7 +289,7 @@ func (t *streamableHTTPClientTransport) send(
 
 	if params, ok := req.Params.(map[string]interface{}); ok {
 		if id, ok := params["taskId"].(string); ok && (req.Method == "tasks/get" || req.Method == "tasks/update" || req.Method == "tasks/cancel") {
-			httpReq.Header.Set("Mcp-Name", id)
+			httpReq.Header.Set("Mcp-Name", encodeMCPHeader(id))
 			httpReq.Header.Set("Mcp-Method", req.Method)
 		}
 	}
@@ -342,7 +342,7 @@ func (t *streamableHTTPClientTransport) send(
 		if err != nil {
 			return nil, err
 		}
-		raw, parseErr := statelessResponse(body, req.ID)
+		raw, parseErr := statelessHTTPResponse(body, req.ID, httpResp.StatusCode)
 		if parseErr != nil {
 			return nil, fmt.Errorf("stateless HTTP status %d: %w", httpResp.StatusCode, parseErr)
 		}

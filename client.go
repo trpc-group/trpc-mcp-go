@@ -140,6 +140,11 @@ type Client struct {
 	// Whether to include "arguments": {} for tool calls with no arguments.
 	sendEmptyToolArguments bool
 	tasksEnabled           bool
+
+	// A nil registry rejects task calls before initialization and after Close.
+	taskCallsMu  sync.Mutex
+	taskCalls    map[uint64]context.CancelFunc
+	nextTaskCall uint64
 }
 
 // ClientOption client option function
@@ -433,6 +438,7 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 	// Update state and initialized flag
 	c.initialized = true
 	c.setState(StateInitialized)
+	c.openTaskCalls()
 
 	// Try to establish GET SSE connection if transport supports it
 	if t, ok := c.transport.(*streamableHTTPClientTransport); ok {
@@ -456,7 +462,7 @@ func (c *Client) SendInitialized(ctx context.Context) error {
 // ListTools lists available tools.
 func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) (*ListToolsResult, error) {
 	// Check if initialized.
-	if !c.initialized {
+	if (c.tasksEnabled && !c.taskCallsOpen()) || (!c.tasksEnabled && !c.initialized) {
 		return nil, errors.ErrNotInitialized
 	}
 
@@ -498,8 +504,14 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 // current authorization context before submission to derive parameter headers.
 // WithTasks enables task polling.
 func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*CallToolResult, error) {
-	// Check if initialized.
-	if !c.initialized {
+	if c.tasksEnabled {
+		taskCtx, finish, err := c.beginTaskCall(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer finish()
+		ctx = taskCtx
+	} else if !c.initialized {
 		return nil, errors.ErrNotInitialized
 	}
 
@@ -509,6 +521,9 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 		}
 		fields, err := c.toolHeadersForCall(ctx, callToolReq.Params.Name)
 		if err != nil {
+			if c.tasksEnabled && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 		ctx = context.WithValue(ctx, toolHeaderContextKey{}, toolCallHeaders{
@@ -549,7 +564,10 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 }
 
 // Close closes the client connection and cleans up resources.
+// For calls using WithTasks, it stops local waiting without cancelling remote
+// execution. Received task handles remain available in the interrupted call's TaskError.
 func (c *Client) Close() error {
+	c.closeTaskCalls()
 	if c.transport != nil {
 		err := c.transport.close()
 		c.setState(StateDisconnected)

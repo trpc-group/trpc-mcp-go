@@ -79,6 +79,21 @@ bounded live context to request remote cancellation. Its acknowledgement is not
 a terminal result; `ResumeToolTask` observes the final state. RPC failures retain
 their code/data in `TaskRPCError`; completed tool errors remain `IsError` results.
 
+`Close` also interrupts active Tasks-enabled calls, including schema discovery,
+submission, polling and explicit task actions. An interrupted call retains its
+known task ID in `TaskError`; submission interrupted before a handle arrives
+remains an unknown outcome. Closing does not send `tasks/cancel`. Resume or
+cancel through an initialized client with the original endpoint and identity.
+After a successful sequential reinitialization, new calls have a separate local
+lifetime; cleanup from an older call cannot cancel them. Concurrent Initialize
+and Close are not supported.
+
+On non-2xx HTTP rejections, valid JSON-RPC errors may omit the ID or use a null
+ID, and their code/message/data remain inspectable. Success and SSE responses
+must match the request ID; an explicitly different ID is rejected. Task routing
+headers encode opaque IDs in the legacy HTTP path as well as stateless HTTP,
+while the request body's task ID remains unchanged.
+
 ## Validation and integration
 
 `go test -race . -run 'TestTasks|TestStateless' -count=1` runs local HTTP fixtures and needs no

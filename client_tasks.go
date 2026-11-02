@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	mcperrors "trpc.group/trpc-go/trpc-mcp-go/internal/errors"
 )
 
 const tasksExtension = "io.modelcontextprotocol/tasks"
@@ -22,7 +24,7 @@ type taskRequestKey struct{}
 // the Connector interface and is disabled by default. The endpoint must support
 // the selected protocol and the Tasks extension. For stateless Streamable HTTP,
 // also select WithProtocolVersion(ProtocolVersion_2026_07_28). Calls should have a
-// context deadline. Cancellation stops waiting, not remote execution.
+// context deadline. Cancellation or Close stops waiting, not remote execution.
 func WithTasks(enabled bool) ClientOption {
 	return func(c *Client) { c.tasksEnabled = enabled }
 }
@@ -31,6 +33,54 @@ func WithTasks(enabled bool) ClientOption {
 // this capability to apply an overall task deadline across connection recovery
 // without changing the timeout policy for ordinary clients.
 func (c *Client) TasksEnabled() bool { return c.tasksEnabled }
+
+func (c *Client) openTaskCalls() {
+	if !c.tasksEnabled {
+		return
+	}
+	c.taskCallsMu.Lock()
+	defer c.taskCallsMu.Unlock()
+	c.taskCalls = make(map[uint64]context.CancelFunc)
+}
+
+func (c *Client) taskCallsOpen() bool {
+	c.taskCallsMu.Lock()
+	defer c.taskCallsMu.Unlock()
+	return c.taskCalls != nil
+}
+
+func (c *Client) beginTaskCall(ctx context.Context) (context.Context, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	c.taskCallsMu.Lock()
+	defer c.taskCallsMu.Unlock()
+	if !c.tasksEnabled || c.taskCalls == nil {
+		return nil, nil, mcperrors.ErrNotInitialized
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	c.nextTaskCall++
+	id := c.nextTaskCall
+	c.taskCalls[id] = cancel
+	return ctx, func() {
+		cancel()
+		c.taskCallsMu.Lock()
+		delete(c.taskCalls, id)
+		c.taskCallsMu.Unlock()
+	}, nil
+}
+
+func (c *Client) closeTaskCalls() {
+	if !c.tasksEnabled {
+		return
+	}
+	c.taskCallsMu.Lock()
+	defer c.taskCallsMu.Unlock()
+	for _, cancel := range c.taskCalls {
+		cancel()
+	}
+	c.taskCalls = nil
+}
 
 // TaskError preserves the handle of an interrupted tool task. TaskID is empty
 // when submission may have succeeded but no handle was received. Neither case
@@ -134,18 +184,20 @@ func (c *Client) callToolTask(ctx context.Context, req *CallToolRequest) (*CallT
 // Input requests are returned in TaskError for explicit application handling;
 // the SDK never fabricates approval or executes sampling requests automatically.
 func (c *Client) ResumeToolTask(ctx context.Context, taskID string) (*CallToolResult, error) {
-	if !c.tasksEnabled || !c.initialized {
-		return nil, &TaskError{ID: taskID, Cause: errors.New("tasks require an initialized, tasks-enabled client")}
-	}
 	if taskID == "" {
 		return nil, errors.New("empty task id")
 	}
+	ctx, finish, err := c.beginTaskCall(ctx)
+	if err != nil {
+		return nil, &TaskError{ID: taskID, Cause: err}
+	}
+	defer finish()
 	return c.pollToolTask(ctx, taskID, nil)
 }
 
 func (c *Client) pollToolTask(ctx context.Context, id string, interval *int64) (*CallToolResult, error) {
 	// Resume polls immediately. Subsequent polls honor server pacing; zero is
-	// clamped to prevent busy loops. Context remains the lifetime authority.
+	// clamped to prevent busy loops. The context also observes client closure.
 	delay := time.Duration(0)
 	if interval != nil {
 		delay = taskPollDelay(interval)
@@ -237,9 +289,14 @@ func (c *Client) CancelTask(ctx context.Context, taskID string) error {
 	return c.taskAction(ctx, "tasks/cancel", taskID, map[string]interface{}{})
 }
 func (c *Client) taskAction(ctx context.Context, method, id string, params map[string]interface{}) error {
-	if !c.tasksEnabled || !c.initialized || id == "" {
+	if id == "" {
 		return errors.New("task action requires an initialized, tasks-enabled client and task id")
 	}
+	ctx, finish, err := c.beginTaskCall(ctx)
+	if err != nil {
+		return &TaskError{ID: id, Cause: err}
+	}
+	defer finish()
 	params["taskId"], params["_meta"] = id, taskMeta()
 	raw, err := c.taskRequest(context.WithValue(ctx, taskRequestKey{}, true), method, params)
 	if err != nil {
