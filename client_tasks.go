@@ -145,7 +145,7 @@ func (c *Client) callToolTask(ctx context.Context, req *CallToolRequest) (*CallT
 		params["arguments"] = map[string]interface{}{}
 	}
 	meta := taskMeta()
-	if req.Params.Meta != nil {
+	if req.Params.Meta != nil && req.Params.Meta.ProgressToken != nil {
 		meta["progressToken"] = req.Params.Meta.ProgressToken
 	}
 	params["_meta"] = meta
@@ -171,7 +171,11 @@ func (c *Client) callToolTask(ctx context.Context, req *CallToolRequest) (*CallT
 			return nil, &TaskError{Cause: errors.New("task response has no taskId")}
 		}
 		// Creation returns Task, not DetailedTask: always retrieve terminal payloads.
-		return c.pollToolTask(ctx, state.ID, state.PollInterval)
+		interval := state.PollInterval
+		if state.Status != "working" {
+			interval = nil
+		}
+		return c.pollToolTask(ctx, state.ID, interval)
 	default:
 		return nil, &TaskError{Cause: fmt.Errorf("unsupported tool resultType %q", state.ResultType)}
 	}

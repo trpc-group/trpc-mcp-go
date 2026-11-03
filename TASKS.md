@@ -44,7 +44,9 @@ including its schema discovery and task continuation requests.
 `Connector.CallTool` keeps its signature. Tasks are disabled by default. When
 enabled, a tool request advertises the extension in per-request metadata. An
 ordinary result returns immediately; a task handle is polled with `tasks/get`.
-Polling honors the server interval, uses a one-second fallback, clamps zero to
+An initial `working` handle honors the server interval; terminal and
+`input_required` handles retrieve their detailed state immediately. Subsequent
+polling honors the server interval, uses a one-second fallback, clamps zero to
 10 milliseconds and can be interrupted by context cancellation. The completed
 result retains content, structured content, metadata and `isError`.
 
