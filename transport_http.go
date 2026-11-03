@@ -16,6 +16,9 @@ import (
 )
 
 // HTTPReqHandler is a custom HTTP request handler interface.
+// Implementations must honor context cancellation and must not reconstruct or
+// retry a body-bearing request whose GetBody is nil. The SDK clears GetBody for
+// non-replayable task submissions and mutations, including after request hooks.
 type HTTPReqHandler interface {
 	Handle(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error)
 }

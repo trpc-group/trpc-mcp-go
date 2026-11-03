@@ -205,6 +205,9 @@ const (
 const (
 	ProtocolVersion_2024_11_05 = "2024-11-05"
 	ProtocolVersion_2025_03_26 = "2025-03-26"
+	// ProtocolVersion_2026_07_28 enables stateless Streamable HTTP client requests.
+	// Server support is not implied by this client-side constant.
+	ProtocolVersion_2026_07_28 = "2026-07-28"
 )
 
 // List of supported protocol versions, ordered by priority

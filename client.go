@@ -139,6 +139,12 @@ type Client struct {
 
 	// Whether to include "arguments": {} for tool calls with no arguments.
 	sendEmptyToolArguments bool
+	tasksEnabled           bool
+
+	// A nil registry rejects task calls before initialization and after Close.
+	taskCallsMu  sync.Mutex
+	taskCalls    map[uint64]context.CancelFunc
+	nextTaskCall uint64
 }
 
 // ClientOption client option function
@@ -239,7 +245,10 @@ func extractTransportConfig(options []ClientOption) *transportConfig {
 	return tempClient.transportConfig
 }
 
-// WithProtocolVersion sets the protocol version.
+// WithProtocolVersion sets the protocol version. Version 2026-07-28 selects
+// stateless Streamable HTTP: Initialize performs server/discover without an
+// initialization handshake or automatic fallback. Other transports and nonempty
+// InitializeRequest parameters are rejected. This does not enable server support.
 func WithProtocolVersion(version string) ClientOption {
 	return func(c *Client) {
 		c.protocolVersion = version
@@ -375,6 +384,10 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 		return nil, errors.ErrAlreadyInitialized
 	}
 
+	if c.usesStatelessProtocol() {
+		return c.discover(ctx, initReq)
+	}
+
 	// Create request.
 	requestID := c.requestID.Add(1)
 	req := newJSONRPCRequest(requestID, MethodInitialize, map[string]interface{}{
@@ -425,6 +438,7 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 	// Update state and initialized flag
 	c.initialized = true
 	c.setState(StateInitialized)
+	c.openTaskCalls()
 
 	// Try to establish GET SSE connection if transport supports it
 	if t, ok := c.transport.(*streamableHTTPClientTransport); ok {
@@ -438,6 +452,9 @@ func (c *Client) Initialize(ctx context.Context, initReq *InitializeRequest) (*I
 
 // SendInitialized sends an initialized notification.
 func (c *Client) SendInitialized(ctx context.Context) error {
+	if c.usesStatelessProtocol() {
+		return fmt.Errorf("stateless protocol has no initialized notification")
+	}
 	notification := NewInitializedNotification()
 	return c.transport.sendNotification(ctx, notification)
 }
@@ -445,7 +462,7 @@ func (c *Client) SendInitialized(ctx context.Context) error {
 // ListTools lists available tools.
 func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) (*ListToolsResult, error) {
 	// Check if initialized.
-	if !c.initialized {
+	if (c.tasksEnabled && !c.taskCallsOpen()) || (!c.tasksEnabled && !c.initialized) {
 		return nil, errors.ErrNotInitialized
 	}
 
@@ -476,14 +493,45 @@ func (c *Client) ListTools(ctx context.Context, listToolsReq *ListToolsRequest) 
 	}
 
 	// Parse response using specialized parser
-	return parseListToolsResultFromJSON(rawResp)
+	result, err := parseListToolsResultFromJSON(rawResp)
+	if err == nil && c.usesStatelessProtocol() {
+		filterToolHeaders(result)
+	}
+	return result, err
 }
 
-// CallTool calls a tool.
+// CallTool calls a tool. In stateless mode it discovers the tool schema in the
+// current authorization context before submission to derive parameter headers.
+// WithTasks enables task polling.
 func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*CallToolResult, error) {
-	// Check if initialized.
-	if !c.initialized {
+	if c.tasksEnabled {
+		taskCtx, finish, err := c.beginTaskCall(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer finish()
+		ctx = taskCtx
+	} else if !c.initialized {
 		return nil, errors.ErrNotInitialized
+	}
+
+	if c.usesStatelessProtocol() {
+		if callToolReq == nil {
+			return nil, fmt.Errorf("nil tool request")
+		}
+		fields, err := c.toolHeadersForCall(ctx, callToolReq.Params.Name)
+		if err != nil {
+			if c.tasksEnabled && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, toolHeaderContextKey{}, toolCallHeaders{
+			name: callToolReq.Params.Name, fields: fields,
+		})
+	}
+	if c.tasksEnabled {
+		return c.callToolTask(ctx, callToolReq)
 	}
 
 	// Create request
@@ -516,7 +564,10 @@ func (c *Client) CallTool(ctx context.Context, callToolReq *CallToolRequest) (*C
 }
 
 // Close closes the client connection and cleans up resources.
+// For calls using WithTasks, it stops local waiting without cancelling remote
+// execution. Received task handles remain available in the interrupted call's TaskError.
 func (c *Client) Close() error {
+	c.closeTaskCalls()
 	if c.transport != nil {
 		err := c.transport.close()
 		c.setState(StateDisconnected)
@@ -533,6 +584,9 @@ func (c *Client) GetSessionID() string {
 
 // TerminateSession terminates the session.
 func (c *Client) TerminateSession(ctx context.Context) error {
+	if c.usesStatelessProtocol() {
+		return fmt.Errorf("stateless protocol has no session to terminate")
+	}
 	return c.transport.terminateSession(ctx)
 }
 

@@ -527,7 +527,7 @@ func (t *sseClientTransport) setRetryConfig(config *retry.Config) {
 // sendRequest sends a request and waits for a response with retry support.
 func (t *sseClientTransport) sendRequest(ctx context.Context, req *JSONRPCRequest) (*json.RawMessage, error) {
 	// If no retry config, use original implementation
-	if t.retryConfig == nil {
+	if t.retryConfig == nil || ctx.Value(taskRequestKey{}) == true {
 		return t.sendRequestInternal(ctx, req)
 	}
 
@@ -612,6 +612,10 @@ func (t *sseClientTransport) sendRequestInternal(ctx context.Context, req *JSONR
 	}
 
 	// Send the request.
+	if ctx.Value(taskRequestKey{}) == true {
+		// Disable net/http body replay as well as the SDK retry loop.
+		httpReq.GetBody = nil
+	}
 	resp, err := t.httpReqHandler.Handle(ctx, t.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrHTTPRequestFailed, err)
