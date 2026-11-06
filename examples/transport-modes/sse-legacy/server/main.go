@@ -218,8 +218,8 @@ func handleLargeResponse(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	// Extract size parameter (default 10KB).
 	size := 10
 	if sizeArg, ok := req.Params.Arguments["size"]; ok {
-		if sizeFloat, ok := sizeArg.(float64); ok {
-			size = int(sizeFloat)
+		if sizeInt, ok := sizeArg.(int); ok {
+			size = sizeInt
 		}
 	}
 
