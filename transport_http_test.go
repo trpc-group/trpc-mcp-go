@@ -8,11 +8,17 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"trpc.group/trpc-go/trpc-mcp-go/internal/httputil"
 )
 
 // MockHTTPTransport is a mock implementation of the httpTransport interface
@@ -229,4 +235,52 @@ func TestServerTransportMultipleHTTPContextFuncs(t *testing.T) {
 	// Verify all context functions are set
 	assert.NotNil(t, handler.httpContextFuncs)
 	assert.Len(t, handler.httpContextFuncs, 3)
+}
+
+// The background GET SSE stream reads the session ID and last event ID while
+// request goroutines update them from response headers and SSE event IDs.
+// Run with -race: unsynchronized access to either field is reported here.
+func TestStreamableClientTransport_ConcurrentSessionStateAccess(t *testing.T) {
+	var mu sync.Mutex
+	var gotSessionIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotSessionIDs = append(gotSessionIDs, r.Header.Get(httputil.SessionIDHeader))
+		mu.Unlock()
+		w.Header().Set(httputil.ContentTypeHeader, httputil.ContentTypeSSE)
+		_, _ = fmt.Fprint(w, "id: server-event\ndata:\n\n")
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	config := newDefaultTransportConfig()
+	config.serverURL = serverURL
+	transport := newStreamableHTTPClientTransport(config, withClientTransportGetSSEEnabled(true))
+	transport.setSessionID("session-0")
+
+	const iterations = 50
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 1; i <= iterations; i++ {
+			transport.setSessionID(fmt.Sprintf("session-%d", i))
+			transport.processSSEEvent(fmt.Sprintf("event-%d", i), "")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			assert.NoError(t, transport.connectGetSSE(context.Background()))
+		}
+	}()
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, gotSessionIDs, iterations)
+	for _, id := range gotSessionIDs {
+		assert.Regexp(t, `^session-\d+$`, id)
+	}
 }
